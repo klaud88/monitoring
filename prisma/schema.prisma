@@ -1,0 +1,220 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model associated_devices {
+  id                String  @id @db.VarChar(64)
+  device_id         String  @db.VarChar(64)
+  name              String  @db.VarChar(180)
+  biostar_device_id String? @db.VarChar(120)
+  devices           devices @relation(fields: [device_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_associated_devices_device")
+
+  @@index([device_id], map: "fk_associated_devices_device")
+}
+
+model audit_logs {
+  id          String   @id @db.VarChar(96)
+  user_id     String   @db.VarChar(64)
+  action      String   @db.VarChar(120)
+  entity_type String   @db.VarChar(80)
+  entity_id   String?  @db.VarChar(96)
+  metadata    Json?
+  ip_address  String?  @db.VarChar(80)
+  user_agent  String?  @db.VarChar(255)
+  created_at  DateTime @default(now()) @db.Timestamp(0)
+  users       users    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_audit_logs_user")
+
+  @@index([entity_type, entity_id], map: "idx_audit_logs_entity")
+  @@index([user_id, created_at], map: "idx_audit_logs_user_time")
+}
+
+model device_issues {
+  id            String               @id @db.VarChar(64)
+  device_id     String               @db.VarChar(64)
+  title         String               @db.VarChar(220)
+  description   String               @db.Text
+  status        device_issues_status @default(open)
+  reported_at   DateTime             @db.DateTime(0)
+  planned_at    DateTime?            @db.DateTime(0)
+  resolved_at   DateTime?            @db.DateTime(0)
+  owner_user_id String?              @db.VarChar(64)
+  created_at    DateTime             @default(now()) @db.Timestamp(0)
+  updated_at    DateTime             @default(now()) @db.Timestamp(0)
+  devices       devices              @relation(fields: [device_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_device_issues_device")
+  users         users?               @relation(fields: [owner_user_id], references: [id], onUpdate: NoAction, map: "fk_device_issues_owner")
+
+  @@index([device_id], map: "fk_device_issues_device")
+  @@index([owner_user_id], map: "fk_device_issues_owner")
+}
+
+model device_tags {
+  device_id String  @db.VarChar(64)
+  tag_id    String  @db.VarChar(64)
+  devices   devices @relation(fields: [device_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_device_tags_device")
+  tags      tags    @relation(fields: [tag_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_device_tags_tag")
+
+  @@id([device_id, tag_id])
+  @@index([tag_id], map: "fk_device_tags_tag")
+}
+
+model devices {
+  id                 String               @id @db.VarChar(64)
+  code               String               @unique(map: "code") @db.VarChar(80)
+  name               String               @db.VarChar(180)
+  status             devices_status       @default(online)
+  region_id          String?              @db.VarChar(64)
+  position_x         Decimal              @default(50.00) @db.Decimal(5, 2)
+  position_y         Decimal              @default(50.00) @db.Decimal(5, 2)
+  last_seen_at       DateTime             @db.DateTime(0)
+  biostar_payload    Json?
+  created_at         DateTime             @default(now()) @db.Timestamp(0)
+  updated_at         DateTime             @default(now()) @db.Timestamp(0)
+  associated_devices associated_devices[]
+  device_issues      device_issues[]
+  device_tags        device_tags[]
+  regions            regions?             @relation(fields: [region_id], references: [id], onUpdate: NoAction, map: "fk_devices_region")
+  status_events      status_events[]
+  tasks              tasks[]
+
+  @@index([region_id], map: "fk_devices_region")
+}
+
+model permissions {
+  id               String             @id @db.VarChar(64)
+  code             String             @unique(map: "code") @db.VarChar(120)
+  label            String             @db.VarChar(160)
+  page_key         String             @db.VarChar(80)
+  action_key       String             @db.VarChar(80)
+  role_permissions role_permissions[]
+}
+
+model regions {
+  id      String    @id @db.VarChar(64)
+  name    String    @unique(map: "name") @db.VarChar(160)
+  color   String    @db.VarChar(24)
+  devices devices[]
+}
+
+model role_permissions {
+  role_id       String      @db.VarChar(64)
+  permission_id String      @db.VarChar(64)
+  permissions   permissions @relation(fields: [permission_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_role_permissions_permission")
+  roles         roles       @relation(fields: [role_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_role_permissions_role")
+
+  @@id([role_id, permission_id])
+  @@index([permission_id], map: "fk_role_permissions_permission")
+}
+
+model roles {
+  id               String             @id @db.VarChar(64)
+  name             String             @unique(map: "name") @db.VarChar(80)
+  label            String             @db.VarChar(120)
+  role_permissions role_permissions[]
+  users            users[]
+}
+
+model status_events {
+  id               String               @id @db.VarChar(64)
+  device_id        String               @db.VarChar(64)
+  status           status_events_status
+  happened_at      DateTime             @db.DateTime(0)
+  duration_minutes Int?
+  raw_payload      Json?
+  devices          devices              @relation(fields: [device_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_status_events_device")
+
+  @@index([device_id, happened_at], map: "idx_status_events_device_time")
+  @@index([happened_at, status], map: "idx_status_events_time_status")
+}
+
+model tags {
+  id          String        @id @db.VarChar(64)
+  name        String        @unique(map: "name") @db.VarChar(120)
+  color       String        @db.VarChar(24)
+  device_tags device_tags[]
+}
+
+model task_assignees {
+  task_id String @db.VarChar(64)
+  user_id String @db.VarChar(64)
+  tasks   tasks  @relation(fields: [task_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_task_assignees_task")
+  users   users  @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_task_assignees_user")
+
+  @@id([task_id, user_id])
+  @@index([user_id], map: "fk_task_assignees_user")
+}
+
+model tasks {
+  id             String           @id @db.VarChar(64)
+  title          String           @db.VarChar(220)
+  issue          String           @db.Text
+  device_id      String           @db.VarChar(64)
+  status         tasks_status     @default(planned)
+  priority       tasks_priority   @default(normal)
+  starts_at      DateTime?        @db.DateTime(0)
+  due_date       DateTime         @db.Date
+  created_by     String?          @db.VarChar(64)
+  created_at     DateTime         @default(now()) @db.Timestamp(0)
+  updated_at     DateTime         @default(now()) @db.Timestamp(0)
+  task_assignees task_assignees[]
+  users          users?           @relation(fields: [created_by], references: [id], onUpdate: NoAction, map: "fk_tasks_created_by")
+  devices        devices          @relation(fields: [device_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_tasks_device")
+
+  @@index([created_by], map: "fk_tasks_created_by")
+  @@index([device_id, status], map: "idx_tasks_device_status")
+}
+
+model users {
+  id             String           @id @db.VarChar(64)
+  role_id        String           @db.VarChar(64)
+  name           String           @db.VarChar(160)
+  email          String           @unique(map: "email") @db.VarChar(180)
+  password_hash  String           @db.VarChar(255)
+  initials       String           @db.VarChar(12)
+  color          String           @db.VarChar(24)
+  is_active      Boolean          @default(true)
+  created_at     DateTime         @default(now()) @db.Timestamp(0)
+  updated_at     DateTime         @default(now()) @db.Timestamp(0)
+  audit_logs     audit_logs[]
+  device_issues  device_issues[]
+  task_assignees task_assignees[]
+  tasks          tasks[]
+  roles          roles            @relation(fields: [role_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_users_role")
+
+  @@index([role_id], map: "fk_users_role")
+}
+
+enum status_events_status {
+  online
+  offline
+}
+
+enum devices_status {
+  online
+  offline
+}
+
+enum tasks_status {
+  planned
+  in_progress
+  blocked
+  done
+}
+
+enum device_issues_status {
+  open
+  planned
+  resolved
+}
+
+enum tasks_priority {
+  low
+  normal
+  high
+  urgent
+}
