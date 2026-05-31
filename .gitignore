@@ -3,6 +3,7 @@ node_modules
 out
 dist
 .env
+.env.example
 .env.local
 .env*.local
 npm-debug.log*
@@ -10,5 +11,5 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 .DS_Store
-
+database
 /src/generated/prisma
