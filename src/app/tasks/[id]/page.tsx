@@ -6,7 +6,7 @@ import {
   ClipboardList,
   MapPin,
   ShieldAlert,
-  UserRoundCheck
+  UserRoundCheck,
 } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
 import { getDevices, getTasks, getUsers } from "@/lib/repositories";
@@ -16,19 +16,27 @@ const statusLabels: Record<TaskStatus, string> = {
   planned: "დაგეგმილი",
   in_progress: "მიმდინარეობს",
   blocked: "შეჩერებული",
-  done: "დასრულებული"
+  done: "დასრულებული",
 };
 
 const priorityLabels: Record<TaskPriority, string> = {
   low: "დაბალი",
   normal: "ჩვეულებრივი",
   high: "მაღალი",
-  urgent: "სასწრაფო"
+  urgent: "სასწრაფო",
 };
 
-export default async function TaskDetailsPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function TaskDetailsPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
   const { id } = await params;
-  const [tasks, devices, users] = await Promise.all([getTasks(), getDevices(), getUsers()]);
+  const [tasks, devices, users] = await Promise.all([
+    getTasks(),
+    getDevices(),
+    getUsers(),
+  ]);
   const task = tasks.find((item) => item.id === id);
 
   if (!task) {
@@ -67,7 +75,7 @@ export default async function TaskDetailsPage({ params }: { params: Promise<{ id
       <section className="content-grid three">
         <div className="surface stat-surface">
           <MapPin size={20} />
-          <span>დავაისი</span>
+          <span>X-Station</span>
           <strong>{device?.code ?? task.deviceId}</strong>
           <small>{device?.name}</small>
         </div>
@@ -75,7 +83,11 @@ export default async function TaskDetailsPage({ params }: { params: Promise<{ id
           <CalendarDays size={20} />
           <span>ვადა</span>
           <strong>{task.dueDate}</strong>
-          <small>{task.startsAt ? `დაწყება ${formatDateTime(task.startsAt)}` : "დაწყების დრო არ არის მითითებული"}</small>
+          <small>
+            {task.startsAt
+              ? `დაწყება ${formatDateTime(task.startsAt)}`
+              : "დაწყების დრო არ არის მითითებული"}
+          </small>
         </div>
         <div className="surface stat-surface">
           <UserRoundCheck size={20} />
@@ -94,7 +106,10 @@ export default async function TaskDetailsPage({ params }: { params: Promise<{ id
           <div className="user-table compact-user-table">
             {assignees.map((user) => (
               <article key={user.id} className="user-row">
-                <span className="avatar" style={{ backgroundColor: user.color }}>
+                <span
+                  className="avatar"
+                  style={{ backgroundColor: user.color }}
+                >
                   {user.initials}
                 </span>
                 <div>
@@ -120,7 +135,7 @@ export default async function TaskDetailsPage({ params }: { params: Promise<{ id
               </div>
               <div>
                 <dt>სტატუსი</dt>
-                <dd>{device.status === "online" ? "Online" : "Offline"}</dd>
+                <dd>{formatDeviceStatus(device.status)}</dd>
               </div>
               <div>
                 <dt>ტეგები</dt>
@@ -144,9 +159,21 @@ export default async function TaskDetailsPage({ params }: { params: Promise<{ id
   );
 }
 
+function formatDeviceStatus(status: "online" | "offline" | "error") {
+  if (status === "online") {
+    return "Online";
+  }
+
+  if (status === "offline") {
+    return "Offline";
+  }
+
+  return "Error";
+}
+
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat("ka-GE", {
     dateStyle: "medium",
-    timeStyle: "short"
+    timeStyle: "short",
   }).format(new Date(value));
 }

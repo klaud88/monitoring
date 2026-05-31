@@ -20,6 +20,10 @@ insert into permissions (id, code, label, page_key, action_key) values
   ('perm-regions-create', 'regions.create', 'რეგიონის დამატება', 'regions', 'create'),
   ('perm-regions-edit', 'regions.edit', 'რეგიონის შეცვლა', 'regions', 'edit'),
   ('perm-regions-delete', 'regions.delete', 'რეგიონის წაშლა', 'regions', 'delete'),
+  ('perm-offline-records-view', 'offline_records.view', 'Offline აღრიცხვის ნახვა', 'offline_records', 'view'),
+  ('perm-offline-records-create', 'offline_records.create', 'Offline აღრიცხვის დამატება', 'offline_records', 'create'),
+  ('perm-offline-records-edit', 'offline_records.edit', 'Offline მონიტორინგის შეცვლა', 'offline_records', 'edit'),
+  ('perm-offline-records-delete', 'offline_records.delete', 'Offline აღრიცხვის წაშლა', 'offline_records', 'delete'),
   ('perm-users-view', 'users.view', 'მომხმარებლების ნახვა', 'users', 'view'),
   ('perm-users-create', 'users.create', 'მომხმარებლის დამატება', 'users', 'create'),
   ('perm-users-edit', 'users.edit', 'მომხმარებლის შეცვლა', 'users', 'edit'),
@@ -39,15 +43,15 @@ select 'role-admin', id from permissions;
 
 insert ignore into role_permissions (role_id, permission_id)
 select 'role-dispatcher', id from permissions
-where code in ('dashboard.view', 'tasks.view', 'tasks.create', 'tasks.edit', 'regions.view', 'analytics.view');
+where code in ('dashboard.view', 'tasks.view', 'tasks.create', 'tasks.edit', 'regions.view', 'offline_records.view', 'offline_records.create', 'offline_records.edit', 'analytics.view');
 
 insert ignore into role_permissions (role_id, permission_id)
 select 'role-technician', id from permissions
-where code in ('dashboard.view', 'tasks.view', 'tasks.edit', 'regions.view', 'analytics.view');
+where code in ('dashboard.view', 'tasks.view', 'tasks.edit', 'regions.view', 'offline_records.view', 'offline_records.edit', 'analytics.view');
 
 insert ignore into role_permissions (role_id, permission_id)
 select 'role-viewer', id from permissions
-where code in ('dashboard.view', 'tasks.view', 'analytics.view');
+where code in ('dashboard.view', 'tasks.view', 'offline_records.view', 'analytics.view');
 
 insert into users (id, role_id, name, email, password_hash, initials, color) values
   ('u-admin', 'role-admin', 'ნინო ბერიძე', 'admin@local.ge', 'dev:admin123', 'NB', '#2563eb'),

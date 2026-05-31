@@ -56,7 +56,7 @@ create table if not exists devices (
   id varchar(64) primary key,
   code varchar(80) not null unique,
   name varchar(180) not null,
-  status enum('online', 'offline') not null default 'online',
+  status enum('online', 'offline', 'error') not null default 'online',
   region_id varchar(64) null,
   position_x decimal(5,2) not null default 50.00,
   position_y decimal(5,2) not null default 50.00,
@@ -102,13 +102,45 @@ create table if not exists device_issues (
 create table if not exists status_events (
   id varchar(64) primary key,
   device_id varchar(64) not null,
-  status enum('online', 'offline') not null,
+  status enum('online', 'offline', 'error') not null,
   happened_at datetime not null,
   duration_minutes int null,
   raw_payload json null,
   constraint fk_status_events_device foreign key (device_id) references devices(id) on delete cascade,
   index idx_status_events_device_time (device_id, happened_at),
   index idx_status_events_time_status (happened_at, status)
+);
+
+create table if not exists offline_snapshots (
+  id varchar(64) primary key,
+  snapshot_date date not null unique,
+  captured_at datetime not null,
+  created_at timestamp not null default current_timestamp,
+  index idx_offline_snapshots_date (snapshot_date)
+);
+
+create table if not exists offline_snapshot_devices (
+  snapshot_id varchar(64) not null,
+  device_id varchar(64) not null,
+  device_code varchar(80) not null,
+  device_name varchar(180) not null,
+  status varchar(16) not null default 'offline',
+  raw_payload json null,
+  primary key (snapshot_id, device_id),
+  constraint fk_offline_snapshot_devices_snapshot foreign key (snapshot_id) references offline_snapshots(id) on delete cascade,
+  constraint fk_offline_snapshot_devices_device foreign key (device_id) references devices(id) on delete cascade,
+  index idx_offline_snapshot_devices_device (device_id)
+);
+
+create table if not exists monitored_devices (
+  device_id varchar(64) primary key,
+  enabled_at datetime not null,
+  enabled_date date not null,
+  is_active boolean not null default true,
+  created_at timestamp not null default current_timestamp,
+  updated_at timestamp not null default current_timestamp on update current_timestamp,
+  constraint fk_monitored_devices_device foreign key (device_id) references devices(id) on delete cascade,
+  index idx_monitored_devices_active_date (is_active, enabled_date)
 );
 
 create table if not exists tasks (

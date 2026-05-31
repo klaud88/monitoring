@@ -9,6 +9,7 @@ const pages: { key: PageKey; label: string }[] = [
   { key: "dashboard", label: "რუკა" },
   { key: "tasks", label: "ტასკები" },
   { key: "regions", label: "რეგიონები" },
+  { key: "offline_records", label: "Offline აღრიცხვა" },
   { key: "users", label: "მომხმარებლები" },
   { key: "analytics", label: "ანალიტიკა" },
   { key: "permissions", label: "უფლებები" }

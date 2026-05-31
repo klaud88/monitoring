@@ -11,10 +11,16 @@ import {
   Plus,
   Search,
   SlidersHorizontal,
-  UserRound
+  UserRound,
 } from "lucide-react";
 import { recordAudit } from "@/lib/client-audit";
-import type { AppUser, Device, Task, TaskPriority, TaskStatus } from "@/lib/types";
+import type {
+  AppUser,
+  Device,
+  Task,
+  TaskPriority,
+  TaskStatus,
+} from "@/lib/types";
 
 type Props = {
   initialTasks: Task[];
@@ -26,14 +32,14 @@ const statusLabels: Record<TaskStatus, string> = {
   planned: "დაგეგმილი",
   in_progress: "მიმდინარეობს",
   blocked: "შეჩერებული",
-  done: "დასრულებული"
+  done: "დასრულებული",
 };
 
 const priorityLabels: Record<TaskPriority, string> = {
   low: "დაბალი",
   normal: "ჩვეულებრივი",
   high: "მაღალი",
-  urgent: "სასწრაფო"
+  urgent: "სასწრაფო",
 };
 
 export function TasksManager({ initialTasks, devices, users }: Props) {
@@ -45,20 +51,29 @@ export function TasksManager({ initialTasks, devices, users }: Props) {
     title: "",
     issue: "",
     deviceId: devices[0]?.id || "",
-    assigneeId: users.find((user) => user.role !== "viewer")?.id || users[0]?.id || "",
+    assigneeId:
+      users.find((user) => user.role !== "viewer")?.id || users[0]?.id || "",
     priority: "normal" as TaskPriority,
-    dueDate: new Date().toISOString().slice(0, 10)
+    dueDate: new Date().toISOString().slice(0, 10),
   });
 
-  const deviceMap = useMemo(() => new Map(devices.map((device) => [device.id, device])), [devices]);
-  const userMap = useMemo(() => new Map(users.map((user) => [user.id, user])), [users]);
+  const deviceMap = useMemo(
+    () => new Map(devices.map((device) => [device.id, device])),
+    [devices],
+  );
+  const userMap = useMemo(
+    () => new Map(users.map((user) => [user.id, user])),
+    [users],
+  );
 
   const filteredTasks = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return tasks.filter((task) => {
       const device = deviceMap.get(task.deviceId);
-      const matchesStatus = statusFilter === "all" || task.status === statusFilter;
-      const matchesUser = userFilter === "all" || task.assigneeIds.includes(userFilter);
+      const matchesStatus =
+        statusFilter === "all" || task.status === statusFilter;
+      const matchesUser =
+        userFilter === "all" || task.assigneeIds.includes(userFilter);
       const matchesQuery =
         !normalized ||
         task.title.toLowerCase().includes(normalized) ||
@@ -83,7 +98,7 @@ export function TasksManager({ initialTasks, devices, users }: Props) {
       status: "planned",
       priority: draft.priority,
       dueDate: draft.dueDate,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
     };
 
     setTasks((current) => [optimisticTask, ...current]);
@@ -92,27 +107,29 @@ export function TasksManager({ initialTasks, devices, users }: Props) {
     const response = await fetch("/api/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(optimisticTask)
+      body: JSON.stringify(optimisticTask),
     }).catch(() => null);
 
     if (response?.ok) {
       const payload = await response.json();
       setTasks((current) =>
-        current.map((task) => (task.id === optimisticTask.id ? payload.task : task))
+        current.map((task) =>
+          task.id === optimisticTask.id ? payload.task : task,
+        ),
       );
     }
   }
 
   async function changeStatus(taskId: string, status: TaskStatus) {
     setTasks((current) =>
-      current.map((task) => (task.id === taskId ? { ...task, status } : task))
+      current.map((task) => (task.id === taskId ? { ...task, status } : task)),
     );
     recordAudit("task.status_local_change", "task", taskId, { status });
 
     await fetch(`/api/tasks/${taskId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status })
+      body: JSON.stringify({ status }),
     }).catch(() => null);
   }
 
@@ -148,7 +165,12 @@ export function TasksManager({ initialTasks, devices, users }: Props) {
             <span>დავაისი</span>
             <select
               value={draft.deviceId}
-              onChange={(event) => setDraft((current) => ({ ...current, deviceId: event.target.value }))}
+              onChange={(event) =>
+                setDraft((current) => ({
+                  ...current,
+                  deviceId: event.target.value,
+                }))
+              }
             >
               {devices.map((device) => (
                 <option key={device.id} value={device.id}>
@@ -161,7 +183,12 @@ export function TasksManager({ initialTasks, devices, users }: Props) {
             <span>სათაური</span>
             <input
               value={draft.title}
-              onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
+              onChange={(event) =>
+                setDraft((current) => ({
+                  ...current,
+                  title: event.target.value,
+                }))
+              }
               required
             />
           </label>
@@ -169,7 +196,12 @@ export function TasksManager({ initialTasks, devices, users }: Props) {
             <span>საკითხი</span>
             <textarea
               value={draft.issue}
-              onChange={(event) => setDraft((current) => ({ ...current, issue: event.target.value }))}
+              onChange={(event) =>
+                setDraft((current) => ({
+                  ...current,
+                  issue: event.target.value,
+                }))
+              }
               rows={4}
               required
             />
@@ -178,7 +210,12 @@ export function TasksManager({ initialTasks, devices, users }: Props) {
             <span>მომხმარებელი</span>
             <select
               value={draft.assigneeId}
-              onChange={(event) => setDraft((current) => ({ ...current, assigneeId: event.target.value }))}
+              onChange={(event) =>
+                setDraft((current) => ({
+                  ...current,
+                  assigneeId: event.target.value,
+                }))
+              }
             >
               {users.map((user) => (
                 <option key={user.id} value={user.id}>
@@ -193,7 +230,10 @@ export function TasksManager({ initialTasks, devices, users }: Props) {
               <select
                 value={draft.priority}
                 onChange={(event) =>
-                  setDraft((current) => ({ ...current, priority: event.target.value as TaskPriority }))
+                  setDraft((current) => ({
+                    ...current,
+                    priority: event.target.value as TaskPriority,
+                  }))
                 }
               >
                 {Object.entries(priorityLabels).map(([value, label]) => (
@@ -208,7 +248,12 @@ export function TasksManager({ initialTasks, devices, users }: Props) {
               <input
                 type="date"
                 value={draft.dueDate}
-                onChange={(event) => setDraft((current) => ({ ...current, dueDate: event.target.value }))}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    dueDate: event.target.value,
+                  }))
+                }
               />
             </label>
           </div>
@@ -232,7 +277,9 @@ export function TasksManager({ initialTasks, devices, users }: Props) {
               <Filter size={17} />
               <select
                 value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value as TaskStatus | "all")}
+                onChange={(event) =>
+                  setStatusFilter(event.target.value as TaskStatus | "all")
+                }
               >
                 <option value="all">ყველა სტატუსი</option>
                 {Object.entries(statusLabels).map(([value, label]) => (
@@ -244,7 +291,10 @@ export function TasksManager({ initialTasks, devices, users }: Props) {
             </label>
             <label className="select-control">
               <UserRound size={17} />
-              <select value={userFilter} onChange={(event) => setUserFilter(event.target.value)}>
+              <select
+                value={userFilter}
+                onChange={(event) => setUserFilter(event.target.value)}
+              >
                 <option value="all">ყველა მომხმარებელი</option>
                 {users.map((user) => (
                   <option key={user.id} value={user.id}>
@@ -267,17 +317,25 @@ export function TasksManager({ initialTasks, devices, users }: Props) {
               const device = deviceMap.get(task.deviceId);
               return (
                 <article key={task.id} className="task-table-row">
-                  <Link className="task-device-cell clickable-cell" href={`/devices/${device?.id ?? task.deviceId}`}>
+                  <Link
+                    className="task-device-cell clickable-cell"
+                    href={`/devices/${device?.id ?? task.deviceId}`}
+                  >
                     <span className="device-code-inline">
                       <MapPin size={15} />
                       {device?.code || task.deviceId}
                     </span>
                     <strong>{device?.name || "დავაისი ვერ მოიძებნა"}</strong>
                   </Link>
-                  <Link className="task-summary-cell clickable-cell" href={`/tasks/${task.id}`}>
+                  <Link
+                    className="task-summary-cell clickable-cell"
+                    href={`/tasks/${task.id}`}
+                  >
                     <strong className="table-title-link">{task.title}</strong>
                     <p>{task.issue}</p>
-                    <small className={`priority-label ${task.priority}`}>{priorityLabels[task.priority]}</small>
+                    <small className={`priority-label ${task.priority}`}>
+                      {priorityLabels[task.priority]}
+                    </small>
                   </Link>
                   <span className="avatar-stack">
                     {task.assigneeIds.map((userId) => {
@@ -298,7 +356,9 @@ export function TasksManager({ initialTasks, devices, users }: Props) {
                     <SlidersHorizontal size={15} />
                     <select
                       value={task.status}
-                      onChange={(event) => changeStatus(task.id, event.target.value as TaskStatus)}
+                      onChange={(event) =>
+                        changeStatus(task.id, event.target.value as TaskStatus)
+                      }
                     >
                       {Object.entries(statusLabels).map(([value, label]) => (
                         <option key={value} value={value}>

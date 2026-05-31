@@ -1,28 +1,37 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   CalendarDays,
-  Check,
-  ExternalLink,
   Filter,
   MapPin,
-  Move,
-  Pencil,
   Plus,
+  RefreshCw,
   RotateCcw,
   Search,
   Tag,
   Users,
-  Wifi,
   WifiOff,
-  X
+  X,
 } from "lucide-react";
+import {
+  GoogleTbilisiMap,
+  isLatLng,
+  positionToLatLng,
+  type LatLng,
+} from "@/components/dashboard/google-tbilisi-map";
 import { recordAudit } from "@/lib/client-audit";
 import { regions, tagCatalog } from "@/lib/mock-data";
 import { mergeTags, TAG_STORAGE_KEY } from "@/lib/tags";
-import type { AppUser, Device, Task, TaskPriority, TaskStatus } from "@/lib/types";
+import type {
+  AppUser,
+  Device,
+  Task,
+  TaskPriority,
+  TaskStatus,
+} from "@/lib/types";
 
 type DashboardProps = {
   initialDevices: Device[];
@@ -43,32 +52,46 @@ const statusLabels: Record<TaskStatus, string> = {
   planned: "დაგეგმილი",
   in_progress: "მიმდინარეობს",
   blocked: "შეჩერებული",
-  done: "დასრულებული"
+  done: "დასრულებული",
 };
 
 const priorityLabels: Record<TaskPriority, string> = {
   low: "დაბალი",
   normal: "ჩვეულებრივი",
   high: "მაღალი",
-  urgent: "სასწრაფო"
+  urgent: "სასწრაფო",
 };
 
 const today = new Date().toISOString().slice(0, 10);
-const DEVICE_POSITIONS_KEY = "biostar_device_positions";
+const DEVICE_LOCATIONS_KEY = "biostar_device_locations";
+const LEGACY_DEVICE_POSITIONS_KEY = "biostar_device_positions";
 
-export function Dashboard({ initialDevices, initialTasks, users }: DashboardProps) {
+export function Dashboard({
+  initialDevices,
+  initialTasks,
+  users,
+}: DashboardProps) {
   const [devices, setDevices] = useState(initialDevices);
   const [tasks, setTasks] = useState(initialTasks);
+  const [deviceLocations, setDeviceLocations] = useState<
+    Record<string, LatLng>
+  >(() => createDefaultDeviceLocations(initialDevices));
   const [regionFilter, setRegionFilter] = useState("all");
   const [userFilter, setUserFilter] = useState("all");
   const [availableTags, setAvailableTags] = useState<string[]>(() =>
-    mergeTags([...tagCatalog], initialDevices.flatMap((device) => device.tags))
+    mergeTags(
+      [...tagCatalog],
+      initialDevices.flatMap((device) => device.tags),
+    ),
   );
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [query, setQuery] = useState("");
   const [showCreateTask, setShowCreateTask] = useState(false);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [editingDeviceId, setEditingDeviceId] = useState<string | null>(null);
+  const [refreshingDevices, setRefreshingDevices] = useState(false);
+  const [refreshError, setRefreshError] = useState("");
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
   const [activeAssignment, setActiveAssignment] = useState<{
     deviceId: string;
     taskId: string;
@@ -80,41 +103,121 @@ export function Dashboard({ initialDevices, initialTasks, users }: DashboardProp
     deviceId: initialDevices[0]?.id || "",
     assigneeIds: users[1] ? [users[1].id] : [],
     priority: "normal",
-    dueDate: today
+    dueDate: today,
   });
 
-  const userMap = useMemo(() => new Map(users.map((user) => [user.id, user])), [users]);
-  const deviceMap = useMemo(() => new Map(devices.map((device) => [device.id, device])), [devices]);
+  const userMap = useMemo(
+    () => new Map(users.map((user) => [user.id, user])),
+    [users],
+  );
+  const deviceMap = useMemo(
+    () => new Map(devices.map((device) => [device.id, device])),
+    [devices],
+  );
+
+  const refreshDevices = useCallback(
+    async (source: "manual" | "interval" = "manual") => {
+      setRefreshingDevices(true);
+      setRefreshError("");
+
+      try {
+        const syncResponse = await fetch("/api/biostar/sync", {
+          method: "POST",
+        });
+
+        if (!syncResponse.ok) {
+          throw new Error("BioStar sync failed.");
+        }
+
+        const devicesResponse = await fetch("/api/devices", {
+          cache: "no-store",
+        });
+
+        if (!devicesResponse.ok) {
+          throw new Error("Devices refresh failed.");
+        }
+
+        const payload = (await devicesResponse.json()) as { devices?: Device[] };
+        if (!Array.isArray(payload.devices)) {
+          throw new Error("Devices response is invalid.");
+        }
+
+        setDevices(payload.devices);
+        setLastRefreshedAt(new Date().toISOString());
+
+        if (source === "manual") {
+          recordAudit("dashboard.devices_refresh", "dashboard");
+        }
+      } catch {
+        setRefreshError("განახლება ვერ მოხერხდა.");
+      } finally {
+        setRefreshingDevices(false);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
-    const storedTags = JSON.parse(window.localStorage.getItem(TAG_STORAGE_KEY) || "[]");
+    const storedTags = JSON.parse(
+      window.localStorage.getItem(TAG_STORAGE_KEY) || "[]",
+    );
     if (Array.isArray(storedTags)) {
       setAvailableTags((current) => mergeTags(current, storedTags.map(String)));
     }
   }, []);
 
   useEffect(() => {
-    const storedPositions = JSON.parse(window.localStorage.getItem(DEVICE_POSITIONS_KEY) || "{}");
-    if (storedPositions && typeof storedPositions === "object") {
-      setDevices((current) =>
-        current.map((device) => {
-          const position = storedPositions[device.id];
-          return isValidPosition(position) ? { ...device, position } : device;
-        })
-      );
-    }
+    const storedLocations = readDeviceLocations(
+      window.localStorage.getItem(DEVICE_LOCATIONS_KEY),
+    );
+    const legacyLocations = readLegacyDeviceLocations(
+      window.localStorage.getItem(LEGACY_DEVICE_POSITIONS_KEY),
+    );
+
+    setDeviceLocations((current) => ({
+      ...current,
+      ...legacyLocations,
+      ...storedLocations,
+    }));
   }, []);
+
+  useEffect(() => {
+    setDeviceLocations((current) => {
+      let changed = false;
+      const next = { ...current };
+
+      devices.forEach((device) => {
+        if (!next[device.id]) {
+          next[device.id] = positionToLatLng(device.position);
+          changed = true;
+        }
+      });
+
+      return changed ? next : current;
+    });
+  }, [devices]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      void refreshDevices("interval");
+    }, 60 * 60 * 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [refreshDevices]);
 
   const activeTasks = useMemo(
     () => tasks.filter((task) => task.status !== "done"),
-    [tasks]
+    [tasks],
   );
   const recentTasks = useMemo(
     () =>
       [...tasks]
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        )
         .slice(0, 7),
-    [tasks]
+    [tasks],
   );
 
   const tasksByDevice = useMemo(() => {
@@ -132,11 +235,14 @@ export function Dashboard({ initialDevices, initialTasks, users }: DashboardProp
 
     return devices.filter((device) => {
       const deviceTasks = tasksByDevice.get(device.id) ?? [];
-      const matchesRegion = regionFilter === "all" || device.region === regionFilter;
+      const matchesRegion =
+        regionFilter === "all" || device.region === regionFilter;
       const matchesUser =
-        userFilter === "all" || deviceTasks.some((task) => task.assigneeIds.includes(userFilter));
+        userFilter === "all" ||
+        deviceTasks.some((task) => task.assigneeIds.includes(userFilter));
       const matchesTags =
-        selectedTags.length === 0 || selectedTags.every((tagName) => device.tags.includes(tagName));
+        selectedTags.length === 0 ||
+        selectedTags.every((tagName) => device.tags.includes(tagName));
       const matchesQuery =
         !normalized ||
         device.code.toLowerCase().includes(normalized) ||
@@ -146,8 +252,13 @@ export function Dashboard({ initialDevices, initialTasks, users }: DashboardProp
     });
   }, [devices, query, regionFilter, selectedTags, tasksByDevice, userFilter]);
 
-  const offlineCount = devices.filter((device) => device.status === "offline").length;
-  const plannedVisitCount = activeTasks.filter((task) => task.assigneeIds.length > 0).length;
+  const offlineCount = devices.filter(
+    (device) => device.status === "offline",
+  ).length;
+  const errorCount = devices.filter((device) => device.status === "error").length;
+  const plannedVisitCount = activeTasks.filter(
+    (task) => task.assigneeIds.length > 0,
+  ).length;
 
   function toggleTag(tagName: string) {
     setSelectedTags((current) => {
@@ -182,14 +293,19 @@ export function Dashboard({ initialDevices, initialTasks, users }: DashboardProp
       ...current,
       assigneeIds: current.assigneeIds.includes(userId)
         ? current.assigneeIds.filter((id) => id !== userId)
-        : [...current.assigneeIds, userId]
+        : [...current.assigneeIds, userId],
     }));
   }
 
   async function createTask(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!form.title.trim() || !form.issue.trim() || !form.deviceId || !form.assigneeIds.length) {
+    if (
+      !form.title.trim() ||
+      !form.issue.trim() ||
+      !form.deviceId ||
+      !form.assigneeIds.length
+    ) {
       return;
     }
 
@@ -202,7 +318,7 @@ export function Dashboard({ initialDevices, initialTasks, users }: DashboardProp
       status: "planned",
       priority: form.priority,
       dueDate: form.dueDate,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
     };
 
     setTasks((current) => [optimisticTask, ...current]);
@@ -212,27 +328,32 @@ export function Dashboard({ initialDevices, initialTasks, users }: DashboardProp
       deviceId: form.deviceId,
       assigneeIds: form.assigneeIds,
       priority: "normal",
-      dueDate: today
+      dueDate: today,
     });
     setShowCreateTask(false);
 
     const response = await fetch("/api/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(optimisticTask)
+      body: JSON.stringify(optimisticTask),
     }).catch(() => null);
 
     if (response?.ok) {
       const payload = await response.json();
       setTasks((current) =>
-        current.map((task) => (task.id === optimisticTask.id ? payload.task : task))
+        current.map((task) =>
+          task.id === optimisticTask.id ? payload.task : task,
+        ),
       );
     }
   }
 
   function showAssignment(deviceId: string, taskId: string, userId: string) {
     setActiveAssignment({ deviceId, taskId, userId });
-    recordAudit("dashboard.assignment_open", "task", taskId, { deviceId, userId });
+    recordAudit("dashboard.assignment_open", "task", taskId, {
+      deviceId,
+      userId,
+    });
   }
 
   function selectDevice(deviceId: string) {
@@ -252,24 +373,14 @@ export function Dashboard({ initialDevices, initialTasks, users }: DashboardProp
     recordAudit("dashboard.device_location_edit_save", "device", deviceId);
   }
 
-  function updateDevicePosition(deviceId: string, position: Device["position"]) {
-    setDevices((current) => {
-      const nextDevices = current.map((device) =>
-        device.id === deviceId
-          ? {
-              ...device,
-              position: {
-                x: Math.round(position.x * 10) / 10,
-                y: Math.round(position.y * 10) / 10
-              }
-            }
-          : device
-      );
-      const storedPositions = Object.fromEntries(
-        nextDevices.map((device) => [device.id, device.position])
-      );
-      window.localStorage.setItem(DEVICE_POSITIONS_KEY, JSON.stringify(storedPositions));
-      return nextDevices;
+  function updateDeviceLocation(deviceId: string, location: LatLng) {
+    setDeviceLocations((current) => {
+      const next = {
+        ...current,
+        [deviceId]: location,
+      };
+      window.localStorage.setItem(DEVICE_LOCATIONS_KEY, JSON.stringify(next));
+      return next;
     });
   }
 
@@ -278,14 +389,19 @@ export function Dashboard({ initialDevices, initialTasks, users }: DashboardProp
       <section className="page-header compact">
         <div>
           <p className="eyebrow">თბილისის რუკა</p>
-          <h1>BioStar2 დავაისების სტატუსები</h1>
-          <p>დავაისები, დაგეგმილი ვიზიტები და მიმდინარე ტასკები ერთ ხედში.</p>
+          <h1>X-Station სტატუსები</h1>
+          <p>დაგეგმილი ვიზიტები და მიმდინარე ტასკები ერთ ხედში.</p>
         </div>
         <div className="metric-strip">
           <div className="metric">
             <WifiOff size={18} />
             <span>{offlineCount}</span>
             <small>offline</small>
+          </div>
+          <div className="metric">
+            <AlertTriangle size={18} />
+            <span>{errorCount}</span>
+            <small>error</small>
           </div>
           <div className="metric">
             <Users size={18} />
@@ -312,7 +428,10 @@ export function Dashboard({ initialDevices, initialTasks, users }: DashboardProp
 
         <label className="select-control">
           <Filter size={17} />
-          <select value={regionFilter} onChange={(event) => updateRegionFilter(event.target.value)}>
+          <select
+            value={regionFilter}
+            onChange={(event) => updateRegionFilter(event.target.value)}
+          >
             <option value="all">ყველა რეგიონი</option>
             {regions.map((region) => (
               <option key={region} value={region}>
@@ -324,7 +443,10 @@ export function Dashboard({ initialDevices, initialTasks, users }: DashboardProp
 
         <label className="select-control">
           <Users size={17} />
-          <select value={userFilter} onChange={(event) => updateUserFilter(event.target.value)}>
+          <select
+            value={userFilter}
+            onChange={(event) => updateUserFilter(event.target.value)}
+          >
             <option value="all">ყველა მომხმარებელი</option>
             {users.map((user) => (
               <option key={user.id} value={user.id}>
@@ -338,6 +460,22 @@ export function Dashboard({ initialDevices, initialTasks, users }: DashboardProp
           <RotateCcw size={16} />
           <span>გასუფთავება</span>
         </button>
+        <button
+          className="primary-button"
+          type="button"
+          disabled={refreshingDevices}
+          onClick={() => void refreshDevices()}
+        >
+          <RefreshCw size={16} />
+          <span>{refreshingDevices ? "ახლდება" : "განახლება"}</span>
+        </button>
+        {refreshError ? (
+          <span className="sync-message error">{refreshError}</span>
+        ) : lastRefreshedAt ? (
+          <span className="sync-message">
+            ბოლო: {formatSyncTime(lastRefreshedAt)}
+          </span>
+        ) : null}
       </section>
 
       <section className="tag-filter" aria-label="ტეგები">
@@ -356,40 +494,25 @@ export function Dashboard({ initialDevices, initialTasks, users }: DashboardProp
 
       <div className="dashboard-grid">
         <section className="map-surface" aria-label="თბილისის რუკა">
-          <div className="map-canvas">
-            <StaticTbilisiMap />
-            <div className="map-mode-badge">
-              {editingDeviceId ? (
-                <>
-                  <Move size={15} />
-                  <span>ლოკაციის ედიტი ჩართულია</span>
-                </>
-              ) : (
-                <span>თბილისის სტატიკური რუკა</span>
-              )}
-            </div>
-            {visibleDevices.map((device) => (
-              <DeviceMarker
-                key={device.id}
-                device={device}
-                tasks={tasksByDevice.get(device.id) ?? []}
-                userMap={userMap}
-                activeAssignment={activeAssignment}
-                isSelected={selectedDeviceId === device.id}
-                isEditing={editingDeviceId === device.id}
-                onSelect={selectDevice}
-                onCloseDevice={() => {
-                  setSelectedDeviceId(null);
-                  setEditingDeviceId(null);
-                }}
-                onStartEdit={startDeviceEdit}
-                onStopEdit={stopDeviceEdit}
-                onMove={updateDevicePosition}
-                onShowAssignment={showAssignment}
-                onCloseAssignment={() => setActiveAssignment(null)}
-              />
-            ))}
-          </div>
+          <GoogleTbilisiMap
+            devices={visibleDevices}
+            deviceLocations={deviceLocations}
+            tasksByDevice={tasksByDevice}
+            userMap={userMap}
+            activeAssignment={activeAssignment}
+            selectedDeviceId={selectedDeviceId}
+            editingDeviceId={editingDeviceId}
+            onSelect={selectDevice}
+            onCloseDevice={() => {
+              setSelectedDeviceId(null);
+              setEditingDeviceId(null);
+            }}
+            onStartEdit={startDeviceEdit}
+            onStopEdit={stopDeviceEdit}
+            onMove={updateDeviceLocation}
+            onShowAssignment={showAssignment}
+            onCloseAssignment={() => setActiveAssignment(null)}
+          />
         </section>
 
         <aside className="task-rail" aria-label="ტასკები">
@@ -412,7 +535,12 @@ export function Dashboard({ initialDevices, initialTasks, users }: DashboardProp
             <form className="quick-task-form" onSubmit={createTask}>
               <select
                 value={form.deviceId}
-                onChange={(event) => setForm((current) => ({ ...current, deviceId: event.target.value }))}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    deviceId: event.target.value,
+                  }))
+                }
                 required
               >
                 {devices.map((device) => (
@@ -423,13 +551,23 @@ export function Dashboard({ initialDevices, initialTasks, users }: DashboardProp
               </select>
               <input
                 value={form.title}
-                onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    title: event.target.value,
+                  }))
+                }
                 placeholder="ტასკის სათაური"
                 required
               />
               <textarea
                 value={form.issue}
-                onChange={(event) => setForm((current) => ({ ...current, issue: event.target.value }))}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    issue: event.target.value,
+                  }))
+                }
                 placeholder="რა საკითხის მოსაგვარებლად მიდიან"
                 rows={3}
                 required
@@ -438,7 +576,10 @@ export function Dashboard({ initialDevices, initialTasks, users }: DashboardProp
                 <select
                   value={form.priority}
                   onChange={(event) =>
-                    setForm((current) => ({ ...current, priority: event.target.value as TaskPriority }))
+                    setForm((current) => ({
+                      ...current,
+                      priority: event.target.value as TaskPriority,
+                    }))
                   }
                 >
                   {Object.entries(priorityLabels).map(([value, label]) => (
@@ -451,7 +592,12 @@ export function Dashboard({ initialDevices, initialTasks, users }: DashboardProp
               <input
                 type="date"
                 value={form.dueDate}
-                onChange={(event) => setForm((current) => ({ ...current, dueDate: event.target.value }))}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    dueDate: event.target.value,
+                  }))
+                }
               />
               <div className="assignee-picker">
                 {users
@@ -464,7 +610,9 @@ export function Dashboard({ initialDevices, initialTasks, users }: DashboardProp
                       onClick={() => toggleAssignee(user.id)}
                       title={user.name}
                     >
-                      <span style={{ backgroundColor: user.color }}>{user.initials}</span>
+                      <span style={{ backgroundColor: user.color }}>
+                        {user.initials}
+                      </span>
                       <small>{user.name.split(" ")[0]}</small>
                     </button>
                   ))}
@@ -501,7 +649,9 @@ export function Dashboard({ initialDevices, initialTasks, users }: DashboardProp
                         ) : null;
                       })}
                     </div>
-                    <span className={`status-pill ${task.status}`}>{statusLabels[task.status]}</span>
+                    <span className={`status-pill ${task.status}`}>
+                      {statusLabels[task.status]}
+                    </span>
                   </div>
                   <h3>{task.title}</h3>
                   <p>{task.issue}</p>
@@ -531,209 +681,67 @@ export function Dashboard({ initialDevices, initialTasks, users }: DashboardProp
   );
 }
 
-function DeviceMarker({
-  device,
-  tasks,
-  userMap,
-  activeAssignment,
-  isSelected,
-  isEditing,
-  onSelect,
-  onCloseDevice,
-  onStartEdit,
-  onStopEdit,
-  onMove,
-  onShowAssignment,
-  onCloseAssignment
-}: {
-  device: Device;
-  tasks: Task[];
-  userMap: Map<string, AppUser>;
-  activeAssignment: { deviceId: string; taskId: string; userId: string } | null;
-  isSelected: boolean;
-  isEditing: boolean;
-  onSelect: (deviceId: string) => void;
-  onCloseDevice: () => void;
-  onStartEdit: (deviceId: string) => void;
-  onStopEdit: (deviceId: string) => void;
-  onMove: (deviceId: string, position: Device["position"]) => void;
-  onShowAssignment: (deviceId: string, taskId: string, userId: string) => void;
-  onCloseAssignment: () => void;
-}) {
-  const [dragging, setDragging] = useState(false);
-  const assignments = tasks.flatMap((task) =>
-    task.assigneeIds.map((userId) => ({
-      task,
-      user: userMap.get(userId)
-    }))
-  );
-  const activeTask = activeAssignment
-    ? assignments.find(
-        (assignment) =>
-          assignment.task.id === activeAssignment.taskId &&
-          assignment.user?.id === activeAssignment.userId
-      )
-    : null;
-
-  function moveDevice(event: React.PointerEvent<HTMLDivElement>) {
-    const map = event.currentTarget.parentElement;
-    if (!map) {
-      return;
-    }
-
-    const rect = map.getBoundingClientRect();
-    onMove(device.id, {
-      x: clamp(((event.clientX - rect.left) / rect.width) * 100),
-      y: clamp(((event.clientY - rect.top) / rect.height) * 100)
-    });
-  }
-
-  return (
-    <div
-      className={`device-marker ${device.status} ${isSelected ? "selected" : ""} ${isEditing ? "editing" : ""}`}
-      style={{ left: `${device.position.x}%`, top: `${device.position.y}%` }}
-      onPointerDown={(event) => {
-        if (!isEditing) {
-          return;
-        }
-
-        event.preventDefault();
-        event.stopPropagation();
-        setDragging(true);
-        event.currentTarget.setPointerCapture(event.pointerId);
-        moveDevice(event);
-      }}
-      onPointerMove={(event) => {
-        if (isEditing && dragging) {
-          event.preventDefault();
-          moveDevice(event);
-        }
-      }}
-      onPointerUp={(event) => {
-        if (!isEditing) {
-          return;
-        }
-
-        setDragging(false);
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      }}
-    >
-      {assignments.length ? (
-        <div className="assignment-ring" aria-label="დაგეგმილი მომხმარებლები">
-          {assignments.map(({ task, user }) =>
-            user ? (
-              <button
-                key={`${task.id}-${user.id}`}
-                type="button"
-                className="avatar"
-                style={{ backgroundColor: user.color }}
-                onClick={(event) => {
-                  event.preventDefault();
-                  onShowAssignment(device.id, task.id, user.id);
-                }}
-                title={`${user.name} · ${task.title}`}
-              >
-                {user.initials}
-              </button>
-            ) : null
-          )}
-        </div>
-      ) : null}
-
-      <button
-        className="pin-shell"
-        type="button"
-        onClick={(event) => {
-          event.stopPropagation();
-          onSelect(device.id);
-        }}
-      >
-        {device.status === "online" ? <Wifi size={16} /> : <WifiOff size={16} />}
-        <span className="device-code">{device.code}</span>
-      </button>
-      <span className="device-name">{device.name}</span>
-
-      {isSelected ? (
-        <div className="device-popover">
-          <button type="button" onClick={onCloseDevice} aria-label="დახურვა">
-            ×
-          </button>
-          <strong>{device.code}</strong>
-          <span>{device.name}</span>
-          <span className="device-region">რეგიონი: {device.region}</span>
-          <small>
-            X {device.position.x.toFixed(1)}% · Y {device.position.y.toFixed(1)}%
-          </small>
-          <div className="popover-actions">
-            <Link href={`/devices/${device.id}`}>
-              <ExternalLink size={15} />
-              <span>დეტალურად</span>
-            </Link>
-            {isEditing ? (
-              <button type="button" onClick={() => onStopEdit(device.id)}>
-                <Check size={15} />
-                <span>დასრულება</span>
-              </button>
-            ) : (
-              <button type="button" onClick={() => onStartEdit(device.id)}>
-                <Pencil size={15} />
-                <span>ედიტი</span>
-              </button>
-            )}
-          </div>
-          {isEditing ? <p>გადაათრიეთ პინი ახალ ადგილზე.</p> : null}
-        </div>
-      ) : null}
-
-      {activeTask ? (
-        <div className="assignment-popover">
-          <button type="button" onClick={onCloseAssignment} aria-label="დახურვა">
-            ×
-          </button>
-          <strong>{activeTask.user?.name}</strong>
-          <span>{activeTask.task.title}</span>
-          <p>{activeTask.task.issue}</p>
-        </div>
-      ) : null}
-    </div>
+function createDefaultDeviceLocations(devices: Device[]) {
+  return Object.fromEntries(
+    devices.map((device) => [device.id, positionToLatLng(device.position)]),
   );
 }
 
-function isValidPosition(value: unknown): value is Device["position"] {
+function formatSyncTime(value: string) {
+  return new Intl.DateTimeFormat("ka-GE", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function readDeviceLocations(rawValue: string | null) {
+  const parsed = parseStoredObject(rawValue);
+  const locations: Record<string, LatLng> = {};
+
+  Object.entries(parsed).forEach(([deviceId, value]) => {
+    if (isLatLng(value)) {
+      locations[deviceId] = value;
+    }
+  });
+
+  return locations;
+}
+
+function readLegacyDeviceLocations(rawValue: string | null) {
+  const parsed = parseStoredObject(rawValue);
+  const locations: Record<string, LatLng> = {};
+
+  Object.entries(parsed).forEach(([deviceId, value]) => {
+    if (isValidLegacyPosition(value)) {
+      locations[deviceId] = positionToLatLng(value);
+    }
+  });
+
+  return locations;
+}
+
+function parseStoredObject(rawValue: string | null): Record<string, unknown> {
+  if (!rawValue) {
+    return {};
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(rawValue);
+    return parsed && typeof parsed === "object"
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function isValidLegacyPosition(value: unknown): value is Device["position"] {
   return (
     typeof value === "object" &&
     value !== null &&
     typeof (value as Device["position"]).x === "number" &&
-    typeof (value as Device["position"]).y === "number"
-  );
-}
-
-function clamp(value: number) {
-  return Math.max(3, Math.min(97, value));
-}
-
-function StaticTbilisiMap() {
-  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-  const mapImageUrl = apiKey
-    ? `https://maps.googleapis.com/maps/api/staticmap?center=${encodeURIComponent(
-        "Tbilisi, Georgia"
-      )}&zoom=11&size=640x460&scale=2&maptype=roadmap&format=png&key=${apiKey}`
-    : "";
-
-  if (!mapImageUrl) {
-    return (
-      <div className="static-map-fallback" aria-hidden="true">
-        <span>TBILISI</span>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      className="static-map-image"
-      role="img"
-      aria-label="თბილისის სტატიკური რუკა"
-      style={{ backgroundImage: `url("${mapImageUrl}")` }}
-    />
+    typeof (value as Device["position"]).y === "number" &&
+    Number.isFinite((value as Device["position"]).x) &&
+    Number.isFinite((value as Device["position"]).y)
   );
 }

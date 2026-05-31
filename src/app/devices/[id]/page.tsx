@@ -11,7 +11,7 @@ import {
   MapPin,
   Users,
   Wifi,
-  WifiOff
+  WifiOff,
 } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
 import { getDeviceById, getTasks, getUsers } from "@/lib/repositories";
@@ -20,23 +20,27 @@ import type { ProblemRecord, TaskStatus } from "@/lib/types";
 const problemLabels: Record<ProblemRecord["status"], string> = {
   open: "ღია",
   planned: "დაგეგმილი",
-  resolved: "მოგვარებული"
+  resolved: "მოგვარებული",
 };
 
 const taskLabels: Record<TaskStatus, string> = {
   planned: "დაგეგმილი",
   in_progress: "მიმდინარეობს",
   blocked: "შეჩერებული",
-  done: "დასრულებული"
+  done: "დასრულებული",
 };
 
 export default async function DeviceDetailsPage({
-  params
+  params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const [device, tasks, users] = await Promise.all([getDeviceById(id), getTasks(), getUsers()]);
+  const [device, tasks, users] = await Promise.all([
+    getDeviceById(id),
+    getTasks(),
+    getUsers(),
+  ]);
 
   if (!device) {
     notFound();
@@ -44,7 +48,9 @@ export default async function DeviceDetailsPage({
 
   const deviceTasks = tasks.filter((task) => task.deviceId === device.id);
   const userMap = new Map(users.map((user) => [user.id, user]));
-  const offlineEvents = device.statusEvents.filter((event) => event.status === "offline");
+  const offlineEvents = device.statusEvents.filter(
+    (event) => event.status === "offline",
+  );
 
   return (
     <AppShell>
@@ -54,13 +60,23 @@ export default async function DeviceDetailsPage({
             <ChevronLeft size={16} />
             რუკაზე დაბრუნება
           </Link>
-          <p className="eyebrow">დავაისი</p>
-          <h1>{device.code} · {device.name}</h1>
-          <p>{device.region} · ბოლო კონტაქტი {formatDateTime(device.lastSeenAt)}</p>
+          <p className="eyebrow">X-Station</p>
+          <h1>
+            {device.code} · {device.name}
+          </h1>
+          <p>
+            {device.region} · ბოლო კონტაქტი {formatDateTime(device.lastSeenAt)}
+          </p>
         </div>
         <div className={`device-status-card ${device.status}`}>
-          {device.status === "online" ? <Wifi size={24} /> : <WifiOff size={24} />}
-          <strong>{device.status === "online" ? "Online" : "Offline"}</strong>
+          {device.status === "online" ? (
+            <Wifi size={24} />
+          ) : device.status === "error" ? (
+            <AlertTriangle size={24} />
+          ) : (
+            <WifiOff size={24} />
+          )}
+          <strong>{formatDeviceStatus(device.status)}</strong>
           <small>{offlineEvents.length} offline შემთხვევა</small>
         </div>
       </section>
@@ -101,7 +117,9 @@ export default async function DeviceDetailsPage({
                 </div>
               ))
             ) : (
-              <p className="muted">ასოცირებული მოწყობილობა ჯერ არ არის მითითებული.</p>
+              <p className="muted">
+                ასოცირებული მოწყობილობა ჯერ არ არის მითითებული.
+              </p>
             )}
           </div>
         </div>
@@ -114,7 +132,10 @@ export default async function DeviceDetailsPage({
           <div className="task-list compact-list">
             {deviceTasks.length ? (
               deviceTasks.map((task) => (
-                <article key={task.id} className={`task-card priority-${task.priority}`}>
+                <article
+                  key={task.id}
+                  className={`task-card priority-${task.priority}`}
+                >
                   <div className="task-card-top">
                     <div className="avatar-stack">
                       {task.assigneeIds.map((userId) => {
@@ -130,14 +151,16 @@ export default async function DeviceDetailsPage({
                         ) : null;
                       })}
                     </div>
-                    <span className={`status-pill ${task.status}`}>{taskLabels[task.status]}</span>
+                    <span className={`status-pill ${task.status}`}>
+                      {taskLabels[task.status]}
+                    </span>
                   </div>
                   <h3>{task.title}</h3>
                   <p>{task.issue}</p>
                 </article>
               ))
             ) : (
-              <p className="muted">ამ დავაისზე აქტიური ტასკი არ არის.</p>
+              <p className="muted">ამ X-Station-ზე აქტიური ტასკი არ არის.</p>
             )}
           </div>
         </div>
@@ -152,12 +175,17 @@ export default async function DeviceDetailsPage({
           <div className="timeline">
             {device.problems.length ? (
               device.problems.map((problem) => (
-                <article key={problem.id} className={`timeline-item ${problem.status}`}>
+                <article
+                  key={problem.id}
+                  className={`timeline-item ${problem.status}`}
+                >
                   <span className="timeline-dot" />
                   <div>
                     <div className="timeline-head">
                       <h3>{problem.title}</h3>
-                      <span className={`status-pill ${problem.status}`}>{problemLabels[problem.status]}</span>
+                      <span className={`status-pill ${problem.status}`}>
+                        {problemLabels[problem.status]}
+                      </span>
                     </div>
                     <p>{problem.description}</p>
                     <dl className="inline-meta">
@@ -221,6 +249,18 @@ export default async function DeviceDetailsPage({
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat("ka-GE", {
     dateStyle: "medium",
-    timeStyle: "short"
+    timeStyle: "short",
   }).format(new Date(value));
+}
+
+function formatDeviceStatus(status: "online" | "offline" | "error") {
+  if (status === "online") {
+    return "Online";
+  }
+
+  if (status === "offline") {
+    return "Offline";
+  }
+
+  return "Error";
 }

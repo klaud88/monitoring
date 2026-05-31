@@ -14,10 +14,10 @@
     "jose": "^5.9.6",
     "lucide-react": "^0.468.0",
     "mysql2": "^3.11.5",
-    "next": "^9.3.3",
+    "next": "^13.5.11",
     "prisma": "^6.19.3",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",

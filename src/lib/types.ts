@@ -1,4 +1,4 @@
-export type DeviceStatus = "online" | "offline";
+export type DeviceStatus = "online" | "offline" | "error";
 export type TaskStatus = "planned" | "in_progress" | "blocked" | "done";
 export type TaskPriority = "low" | "normal" | "high" | "urgent";
 
@@ -6,6 +6,7 @@ export type PageKey =
   | "dashboard"
   | "tasks"
   | "regions"
+  | "offline_records"
   | "users"
   | "permissions"
   | "analytics";
@@ -89,4 +90,23 @@ export type OfflineSummary = {
   id: string;
   label: string;
   count: number;
+};
+
+export type OfflineSnapshotDevice = {
+  deviceId: string;
+  deviceCode: string;
+  deviceName: string;
+};
+
+export type OfflineSnapshot = {
+  id: string;
+  date: string;
+  capturedAt: string;
+  devices: OfflineSnapshotDevice[];
+};
+
+export type MonitoredDevice = {
+  deviceId: string;
+  enabledAt: string;
+  enabledDate: string;
 };

@@ -1,8 +1,9 @@
 import bcrypt from "bcryptjs";
 import { jwtVerify, SignJWT } from "jose";
+import { SESSION_COOKIE } from "./session";
 import type { AppUser, PermissionKey, SessionUser } from "./types";
 
-export const SESSION_COOKIE = "biostar_session";
+export { SESSION_COOKIE };
 
 const fallbackSecret = "development-only-secret-change-before-production";
 

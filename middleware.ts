@@ -1,8 +1,8 @@
 import { jwtVerify } from "jose";
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE } from "@/lib/auth";
+import { SESSION_COOKIE } from "@/lib/session";
 
-const publicRoutes = ["/login", "/api/auth/login"];
+const publicRoutes = ["/login", "/api/auth/login", "/api/cron/offline-capture"];
 const fallbackSecret = "development-only-secret-change-before-production";
 
 function getSecret() {

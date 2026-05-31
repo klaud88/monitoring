@@ -10,7 +10,8 @@ import {
   MonitorCog,
   ShieldCheck,
   UserCircle,
-  Users
+  Users,
+  WifiOff,
 } from "lucide-react";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
 import type { PermissionKey } from "@/lib/types";
@@ -24,14 +25,47 @@ type NavItem = {
 
 const navItems: NavItem[] = [
   { href: "/", label: "რუკა", permission: "dashboard.view", icon: MapPinned },
-  { href: "/tasks", label: "ტასკები", permission: "tasks.view", icon: ClipboardList },
-  { href: "/devices/regions", label: "დავაისები/რეგიონები", permission: "regions.view", icon: MonitorCog },
-  { href: "/admin/users", label: "მომხმარებლები", permission: "users.view", icon: Users },
-  { href: "/admin/permissions", label: "უფლებების დამატება", permission: "permissions.view", icon: ShieldCheck },
-  { href: "/analytics", label: "ანალიტიკა", permission: "analytics.view", icon: BarChart3 },
+  {
+    href: "/tasks",
+    label: "დავალებები",
+    permission: "tasks.view",
+    icon: ClipboardList,
+  },
+  {
+    href: "/devices/regions",
+    label: "X-Stations/რეგიონები",
+    permission: "regions.view",
+    icon: MonitorCog,
+  },
+  {
+    href: "/offline-records",
+    label: "Offline აღრიცხვა",
+    permission: "offline_records.view",
+    icon: WifiOff,
+  },
+  {
+    href: "/admin/users",
+    label: "მომხმარებლები",
+    permission: "users.view",
+    icon: Users,
+  },
+  {
+    href: "/admin/permissions",
+    label: "წვდომის უფლებები",
+    permission: "permissions.view",
+    icon: ShieldCheck,
+  },
+  {
+    href: "/analytics",
+    label: "ანალიტიკა",
+    permission: "analytics.view",
+    icon: BarChart3,
+  },
 ];
 
-export async function AppShell({ children }: Readonly<{ children: React.ReactNode }>) {
+export async function AppShell({
+  children,
+}: Readonly<{ children: React.ReactNode }>) {
   const cookieStore = await cookies();
   const user = await verifySessionToken(cookieStore.get(SESSION_COOKIE)?.value);
   const visibleItems = navItems;
@@ -46,12 +80,16 @@ export async function AppShell({ children }: Readonly<{ children: React.ReactNod
             </span>
             <span>
               <strong>BioStar2 Ops</strong>
-              <small>სტატუსები და დავალებები</small>
+              <small>სტატუსები და X-Stations</small>
             </span>
           </Link>
 
           <div className="account-actions">
-            <Link className="profile-button" href="/profile" aria-label="პროფილში შესვლა">
+            <Link
+              className="profile-button"
+              href="/profile"
+              aria-label="პროფილში შესვლა"
+            >
               <span className="avatar" style={{ backgroundColor: user?.color }}>
                 {user?.initials || "?"}
               </span>
@@ -62,7 +100,12 @@ export async function AppShell({ children }: Readonly<{ children: React.ReactNod
               <UserCircle size={18} />
             </Link>
             <form action="/api/auth/logout" method="post">
-              <button className="icon-button danger" type="submit" aria-label="გასვლა" title="გასვლა">
+              <button
+                className="icon-button danger"
+                type="submit"
+                aria-label="გასვლა"
+                title="გასვლა"
+              >
                 <DoorOpen size={18} />
                 <LogOut size={16} />
               </button>

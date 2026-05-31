@@ -17,11 +17,18 @@ type DeviceDraft = {
   tags: string[];
 };
 
-export function RegionManager({ initialDevices }: { initialDevices: Device[] }) {
+export function RegionManager({
+  initialDevices,
+}: {
+  initialDevices: Device[];
+}) {
   const [devices, setDevices] = useState(initialDevices);
   const [query, setQuery] = useState("");
   const [availableTags, setAvailableTags] = useState<string[]>(() =>
-    mergeTags([...tagCatalog], initialDevices.flatMap((device) => device.tags))
+    mergeTags(
+      [...tagCatalog],
+      initialDevices.flatMap((device) => device.tags),
+    ),
   );
   const [newTagName, setNewTagName] = useState("");
   const [draft, setDraft] = useState<DeviceDraft>({
@@ -31,7 +38,7 @@ export function RegionManager({ initialDevices }: { initialDevices: Device[] }) 
     status: "online" as DeviceStatus,
     x: 50,
     y: 50,
-    tags: [] as string[]
+    tags: [] as string[],
   });
 
   const filteredDevices = useMemo(() => {
@@ -39,14 +46,17 @@ export function RegionManager({ initialDevices }: { initialDevices: Device[] }) 
     return devices.filter(
       (device) =>
         !normalized ||
+        device.id.toLowerCase().includes(normalized) ||
         device.code.toLowerCase().includes(normalized) ||
         device.name.toLowerCase().includes(normalized) ||
-        device.region.toLowerCase().includes(normalized)
+        device.region.toLowerCase().includes(normalized),
     );
   }, [devices, query]);
 
   useEffect(() => {
-    const storedTags = JSON.parse(window.localStorage.getItem(TAG_STORAGE_KEY) || "[]");
+    const storedTags = JSON.parse(
+      window.localStorage.getItem(TAG_STORAGE_KEY) || "[]",
+    );
     if (Array.isArray(storedTags)) {
       setAvailableTags((current) => mergeTags(current, storedTags.map(String)));
     }
@@ -58,7 +68,9 @@ export function RegionManager({ initialDevices }: { initialDevices: Device[] }) 
 
   function updateRegion(deviceId: string, region: string) {
     setDevices((current) =>
-      current.map((device) => (device.id === deviceId ? { ...device, region } : device))
+      current.map((device) =>
+        device.id === deviceId ? { ...device, region } : device,
+      ),
     );
     recordAudit("device.region_update", "device", deviceId, { region });
   }
@@ -76,7 +88,7 @@ export function RegionManager({ initialDevices }: { initialDevices: Device[] }) 
 
         recordAudit("device.tag_update", "device", deviceId, { tags });
         return { ...device, tags };
-      })
+      }),
     );
   }
 
@@ -85,7 +97,7 @@ export function RegionManager({ initialDevices }: { initialDevices: Device[] }) 
       ...current,
       tags: current.tags.includes(tagName)
         ? current.tags.filter((tag) => tag !== tagName)
-        : [...current.tags, tagName]
+        : [...current.tags, tagName],
     }));
   }
 
@@ -117,12 +129,12 @@ export function RegionManager({ initialDevices }: { initialDevices: Device[] }) 
       tags: draft.tags,
       position: {
         x: Math.max(5, Math.min(95, Number(draft.x))),
-        y: Math.max(5, Math.min(95, Number(draft.y)))
+        y: Math.max(5, Math.min(95, Number(draft.y))),
       },
       lastSeenAt: new Date().toISOString(),
       associatedDevices: [],
       problems: [],
-      statusEvents: []
+      statusEvents: [],
     };
 
     if (!device.code || !device.name) {
@@ -137,27 +149,29 @@ export function RegionManager({ initialDevices }: { initialDevices: Device[] }) 
       status: "online",
       x: 50,
       y: 50,
-      tags: []
+      tags: [],
     });
     recordAudit("device.create", "device", device.id, {
       code: device.code,
       region: device.region,
-      tags: device.tags
+      tags: device.tags,
     });
   }
 
   const regionSummary = regions.map((region) => ({
     region,
-    count: devices.filter((device) => device.region === region).length
+    count: devices.filter((device) => device.region === region).length,
   }));
 
   return (
     <div className="regions-page">
       <section className="page-header">
         <div>
-          <p className="eyebrow">დავაისები</p>
+          <p className="eyebrow">X-Stations</p>
           <h1>რეგიონებისა და ტეგების მინიჭება</h1>
-          <p>დავაისის რეგიონის შეცვლა და ფილტრაციისთვის საჭირო ტეგების მართვა.</p>
+          <p>
+            დავაისის რეგიონის შეცვლა და ფილტრაციისთვის საჭირო ტეგების მართვა.
+          </p>
         </div>
         <div className="metric-strip">
           <div className="metric">
@@ -192,9 +206,12 @@ export function RegionManager({ initialDevices }: { initialDevices: Device[] }) 
           </div>
         </aside>
 
-        <form className="surface admin-form device-create-form" onSubmit={createDevice}>
+        <form
+          className="surface admin-form device-create-form"
+          onSubmit={createDevice}
+        >
           <div className="section-title">
-            <h2>ახალი დავაისი</h2>
+            <h2>ახალი X-Station</h2>
             <Plus size={20} />
           </div>
           <div className="form-row">
@@ -202,7 +219,12 @@ export function RegionManager({ initialDevices }: { initialDevices: Device[] }) 
               <span>ნომერი</span>
               <input
                 value={draft.code}
-                onChange={(event) => setDraft((current) => ({ ...current, code: event.target.value }))}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    code: event.target.value,
+                  }))
+                }
                 placeholder="TB-601"
                 required
               />
@@ -211,7 +233,12 @@ export function RegionManager({ initialDevices }: { initialDevices: Device[] }) 
               <span>სახელი</span>
               <input
                 value={draft.name}
-                onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    name: event.target.value,
+                  }))
+                }
                 placeholder="ლოკაციის დასახელება"
                 required
               />
@@ -222,7 +249,12 @@ export function RegionManager({ initialDevices }: { initialDevices: Device[] }) 
               <span>რეგიონი</span>
               <select
                 value={draft.region}
-                onChange={(event) => setDraft((current) => ({ ...current, region: event.target.value }))}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    region: event.target.value,
+                  }))
+                }
               >
                 {regions.map((region) => (
                   <option key={region} value={region}>
@@ -236,11 +268,15 @@ export function RegionManager({ initialDevices }: { initialDevices: Device[] }) 
               <select
                 value={draft.status}
                 onChange={(event) =>
-                  setDraft((current) => ({ ...current, status: event.target.value as DeviceStatus }))
+                  setDraft((current) => ({
+                    ...current,
+                    status: event.target.value as DeviceStatus,
+                  }))
                 }
               >
                 <option value="online">Online</option>
                 <option value="offline">Offline</option>
+                <option value="error">Error</option>
               </select>
             </label>
           </div>
@@ -252,7 +288,12 @@ export function RegionManager({ initialDevices }: { initialDevices: Device[] }) 
                 min={5}
                 max={95}
                 value={draft.x}
-                onChange={(event) => setDraft((current) => ({ ...current, x: Number(event.target.value) }))}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    x: Number(event.target.value),
+                  }))
+                }
               />
             </label>
             <label>
@@ -262,7 +303,12 @@ export function RegionManager({ initialDevices }: { initialDevices: Device[] }) 
                 min={5}
                 max={95}
                 value={draft.y}
-                onChange={(event) => setDraft((current) => ({ ...current, y: Number(event.target.value) }))}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    y: Number(event.target.value),
+                  }))
+                }
               />
             </label>
           </div>
@@ -319,12 +365,17 @@ export function RegionManager({ initialDevices }: { initialDevices: Device[] }) 
             {filteredDevices.map((device) => (
               <article key={device.id} className="region-device-row">
                 <div>
-                  <strong>{device.code}</strong>
-                  <span>{device.name}</span>
+                  <strong>{device.name}</strong>
+                  <span>{device.id}</span>
                 </div>
                 <label>
                   <span>რეგიონი</span>
-                  <select value={device.region} onChange={(event) => updateRegion(device.id, event.target.value)}>
+                  <select
+                    value={device.region}
+                    onChange={(event) =>
+                      updateRegion(device.id, event.target.value)
+                    }
+                  >
                     {regions.map((region) => (
                       <option key={region} value={region}>
                         {region}

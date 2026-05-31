@@ -78,6 +78,8 @@ model devices {
   associated_devices associated_devices[]
   device_issues      device_issues[]
   device_tags        device_tags[]
+  monitored_devices  monitored_devices?
+  offline_snapshot_devices offline_snapshot_devices[]
   regions            regions?             @relation(fields: [region_id], references: [id], onUpdate: NoAction, map: "fk_devices_region")
   status_events      status_events[]
   tasks              tasks[]
@@ -130,6 +132,42 @@ model status_events {
 
   @@index([device_id, happened_at], map: "idx_status_events_device_time")
   @@index([happened_at, status], map: "idx_status_events_time_status")
+}
+
+model offline_snapshots {
+  id                       String                     @id @db.VarChar(64)
+  snapshot_date            DateTime                   @unique(map: "snapshot_date") @db.Date
+  captured_at              DateTime                   @db.DateTime(0)
+  created_at               DateTime                   @default(now()) @db.Timestamp(0)
+  offline_snapshot_devices offline_snapshot_devices[]
+
+  @@index([snapshot_date], map: "idx_offline_snapshots_date")
+}
+
+model offline_snapshot_devices {
+  snapshot_id       String            @db.VarChar(64)
+  device_id         String            @db.VarChar(64)
+  device_code       String            @db.VarChar(80)
+  device_name       String            @db.VarChar(180)
+  status            String            @default("offline") @db.VarChar(16)
+  raw_payload       Json?
+  offline_snapshots offline_snapshots @relation(fields: [snapshot_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_offline_snapshot_devices_snapshot")
+  devices           devices           @relation(fields: [device_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_offline_snapshot_devices_device")
+
+  @@id([snapshot_id, device_id])
+  @@index([device_id], map: "idx_offline_snapshot_devices_device")
+}
+
+model monitored_devices {
+  device_id    String   @id @db.VarChar(64)
+  enabled_at   DateTime @db.DateTime(0)
+  enabled_date DateTime @db.Date
+  is_active    Boolean  @default(true)
+  created_at   DateTime @default(now()) @db.Timestamp(0)
+  updated_at   DateTime @default(now()) @db.Timestamp(0)
+  devices      devices  @relation(fields: [device_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_monitored_devices_device")
+
+  @@index([is_active, enabled_date], map: "idx_monitored_devices_active_date")
 }
 
 model tags {
@@ -192,11 +230,13 @@ model users {
 enum status_events_status {
   online
   offline
+  error
 }
 
 enum devices_status {
   online
   offline
+  error
 }
 
 enum tasks_status {
