@@ -26,6 +26,10 @@ type BiostarSession = {
 
 const DEFAULT_BASE_URL = "https://devices.tbilisikids.com";
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
+const insecureHttpsAgent = new https.Agent({
+  rejectUnauthorized: false,
+  checkServerIdentity: () => undefined,
+});
 let cachedSession: BiostarSession | null = null;
 
 export function hasBiostarConfig() {
@@ -237,11 +241,14 @@ function requestBiostar(
 function getHttpsRequestOptions() {
   const rejectUnauthorized = shouldRejectUnauthorized();
 
+  if (rejectUnauthorized) {
+    return {};
+  }
+
   return {
-    rejectUnauthorized,
-    ...(rejectUnauthorized
-      ? {}
-      : { checkServerIdentity: () => undefined }),
+    agent: insecureHttpsAgent,
+    rejectUnauthorized: false,
+    checkServerIdentity: () => undefined,
   };
 }
 
@@ -253,10 +260,13 @@ function getRequestTimeoutMs() {
 }
 
 function shouldRejectUnauthorized() {
+  const configured =
+    process.env.BIOSTAR2_TLS_REJECT_UNAUTHORIZED ??
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED ??
+    "true";
+
   return !["0", "false", "no"].includes(
-    String(process.env.BIOSTAR2_TLS_REJECT_UNAUTHORIZED || "true")
-      .trim()
-      .toLowerCase(),
+    String(configured).trim().toLowerCase(),
   );
 }
 
