@@ -13,6 +13,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   }
 
-  const result = await syncBiostarDevices({ force: true });
-  return NextResponse.json(result);
+  try {
+    const result = await syncBiostarDevices({ force: true });
+    return NextResponse.json(result);
+  } catch (error) {
+    console.warn(
+      `[biostar] ${error instanceof Error ? error.message : "Sync failed"}`,
+    );
+    return NextResponse.json(
+      {
+        message: "BioStar sync failed.",
+        error: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 502 },
+    );
+  }
 }

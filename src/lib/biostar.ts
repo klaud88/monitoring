@@ -24,6 +24,19 @@ type BiostarSession = {
   status: number;
 };
 
+type BiostarRequestResult = {
+  status: number;
+  ok: boolean;
+  headers: IncomingHttpHeaders;
+  body: string;
+};
+
+type BiostarRequestOptions = {
+  method?: "GET" | "POST";
+  headers?: Record<string, string>;
+  body?: string;
+};
+
 const DEFAULT_BASE_URL = "https://devices.tbilisikids.com";
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const insecureHttpsAgent = new https.Agent({
@@ -179,13 +192,27 @@ function buildBiostarUrl(path: "/api/login" | "/api/devices") {
 
 function requestBiostar(
   url: string,
-  options: {
-    method?: "GET" | "POST";
-    headers?: Record<string, string>;
-    body?: string;
-  } = {},
+  options: BiostarRequestOptions = {},
 ) {
   const parsedUrl = new URL(url);
+
+  return sendBiostarRequest(parsedUrl, options).catch((error) => {
+    if (
+      parsedUrl.protocol === "https:" &&
+      shouldRetryWithInsecureTls(error)
+    ) {
+      return sendBiostarRequest(parsedUrl, options, true);
+    }
+
+    throw error;
+  });
+}
+
+function sendBiostarRequest(
+  parsedUrl: URL,
+  options: BiostarRequestOptions,
+  forceInsecureTls = false,
+) {
   const client = parsedUrl.protocol === "http:" ? http : https;
   const headers = { ...options.headers };
 
@@ -193,18 +220,15 @@ function requestBiostar(
     headers["Content-Length"] = String(Buffer.byteLength(options.body));
   }
 
-  return new Promise<{
-    status: number;
-    ok: boolean;
-    headers: IncomingHttpHeaders;
-    body: string;
-  }>((resolve, reject) => {
+  return new Promise<BiostarRequestResult>((resolve, reject) => {
     const request = client.request(
       parsedUrl,
       {
         method: options.method || "GET",
         headers,
-        ...(parsedUrl.protocol === "https:" ? getHttpsRequestOptions() : {}),
+        ...(parsedUrl.protocol === "https:"
+          ? getHttpsRequestOptions(forceInsecureTls)
+          : {}),
       },
       (response) => {
         const chunks: Buffer[] = [];
@@ -238,10 +262,10 @@ function requestBiostar(
   });
 }
 
-function getHttpsRequestOptions() {
+function getHttpsRequestOptions(forceInsecureTls = false) {
   const rejectUnauthorized = shouldRejectUnauthorized();
 
-  if (rejectUnauthorized) {
+  if (rejectUnauthorized && !forceInsecureTls) {
     return {};
   }
 
@@ -250,6 +274,19 @@ function getHttpsRequestOptions() {
     rejectUnauthorized: false,
     checkServerIdentity: () => undefined,
   };
+}
+
+function shouldRetryWithInsecureTls(error: unknown) {
+  const code = (error as { code?: string }).code;
+  return [
+    "CERT_HAS_EXPIRED",
+    "DEPTH_ZERO_SELF_SIGNED_CERT",
+    "ERR_TLS_CERT_ALTNAME_INVALID",
+    "INVALID_PURPOSE",
+    "SELF_SIGNED_CERT_IN_CHAIN",
+    "UNABLE_TO_GET_ISSUER_CERT",
+    "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  ].includes(String(code));
 }
 
 function getRequestTimeoutMs() {
