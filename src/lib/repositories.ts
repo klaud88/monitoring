@@ -284,6 +284,10 @@ async function runBiostarDeviceSync() {
 }
 
 async function ensureOperationalSchema() {
+  if (isBuildTime()) {
+    return;
+  }
+
   if (!operationalSchemaPromise) {
     operationalSchemaPromise = withConnection(async (connection) => {
       await connection.query(
@@ -746,6 +750,10 @@ export async function updateRolePermissions(
 }
 
 export async function getDevices(): Promise<Device[]> {
+  if (isBuildTime()) {
+    return mockDevices;
+  }
+
   await ensureBiostarDeviceSync();
   await ensureOperationalSchema();
 
@@ -959,6 +967,8 @@ export async function createDevice(input: {
   position: { x: number; y: number };
   tags: string[];
 }): Promise<Device> {
+  await ensureOperationalSchema();
+
   const id = makeId("dev");
   const now = new Date().toISOString();
   const inserted = await withConnection(async (connection) => {
@@ -1022,6 +1032,8 @@ export async function updateDevice(
     tags: string[];
   },
 ): Promise<Device | null> {
+  await ensureOperationalSchema();
+
   const updated = await withConnection(async (connection) => {
     await connection.beginTransaction();
     try {

@@ -200,9 +200,7 @@ function requestBiostar(
       {
         method: options.method || "GET",
         headers,
-        ...(parsedUrl.protocol === "https:"
-          ? { rejectUnauthorized: shouldRejectUnauthorized() }
-          : {}),
+        ...(parsedUrl.protocol === "https:" ? getHttpsRequestOptions() : {}),
       },
       (response) => {
         const chunks: Buffer[] = [];
@@ -234,6 +232,17 @@ function requestBiostar(
 
     request.end();
   });
+}
+
+function getHttpsRequestOptions() {
+  const rejectUnauthorized = shouldRejectUnauthorized();
+
+  return {
+    rejectUnauthorized,
+    ...(rejectUnauthorized
+      ? {}
+      : { checkServerIdentity: () => undefined }),
+  };
 }
 
 function getRequestTimeoutMs() {
