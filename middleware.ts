@@ -28,10 +28,6 @@ export async function middleware(request: NextRequest) {
   const token = request.cookies.get(SESSION_COOKIE)?.value;
   const valid = await isValidSession(token);
 
-  if (pathname === "/login" && valid) {
-    return NextResponse.redirect(new URL("/", request.url));
-  }
-
   if (isPublic) {
     return NextResponse.next();
   }
@@ -41,7 +37,11 @@ export async function middleware(request: NextRequest) {
   }
 
   if (!valid) {
-    return NextResponse.redirect(new URL("/login", request.url));
+    const loginUrl = new URL("/login", request.url);
+    if (pathname !== "/") {
+      loginUrl.searchParams.set("next", `${pathname}${request.nextUrl.search}`);
+    }
+    return NextResponse.redirect(loginUrl);
   }
 
   return NextResponse.next();

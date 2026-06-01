@@ -4,12 +4,31 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { KeyRound, LogIn, Mail } from "lucide-react";
 
-export function LoginForm() {
+type LoginFormProps = {
+  nextPath?: string;
+};
+
+function getSafeNextPath(nextPath?: string) {
+  if (
+    !nextPath ||
+    !nextPath.startsWith("/") ||
+    nextPath.startsWith("//") ||
+    nextPath.startsWith("/login") ||
+    nextPath === "/"
+  ) {
+    return "/dashboard";
+  }
+
+  return nextPath;
+}
+
+export function LoginForm({ nextPath }: LoginFormProps) {
   const router = useRouter();
   const [email, setEmail] = useState("admin@local.ge");
   const [password, setPassword] = useState("admin123");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const redirectTo = getSafeNextPath(nextPath);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -30,7 +49,7 @@ export function LoginForm() {
       return;
     }
 
-    router.push("/");
+    router.replace(redirectTo);
     router.refresh();
   }
 

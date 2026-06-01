@@ -1,7 +1,13 @@
 import { Activity, ShieldCheck, Wifi } from "lucide-react";
 import { LoginForm } from "@/components/auth/login-form";
 
-export default function LoginPage() {
+type LoginPageProps = {
+  searchParams?: {
+    next?: string;
+  };
+};
+
+export default function LoginPage({ searchParams }: LoginPageProps) {
   return (
     <main className="login-page">
       <section className="login-panel" aria-label="ავტორიზაცია">
@@ -22,7 +28,7 @@ export default function LoginPage() {
             </span>
           </div>
         </div>
-        <LoginForm />
+        <LoginForm nextPath={searchParams?.next} />
       </section>
     </main>
   );

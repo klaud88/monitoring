@@ -1,26 +1,23 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
-import { createDevice, getDevices } from "@/lib/repositories";
+import { deleteDevice, updateDevice } from "@/lib/repositories";
 import type { DeviceStatus } from "@/lib/types";
 
 const deviceStatuses: DeviceStatus[] = ["online", "offline", "error"];
 
-export async function GET(request: NextRequest) {
-  const user = await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
-  if (!hasPermission(user, "dashboard.view") && !hasPermission(user, "devices.view")) {
+export async function PATCH(
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> },
+) {
+  const user = await verifySessionToken(
+    request.cookies.get(SESSION_COOKIE)?.value,
+  );
+  if (!hasPermission(user, "devices.edit")) {
     return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   }
 
-  return NextResponse.json({ devices: await getDevices() });
-}
-
-export async function POST(request: NextRequest) {
-  const user = await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
-  if (!hasPermission(user, "devices.create")) {
-    return NextResponse.json({ message: "Forbidden" }, { status: 403 });
-  }
-
+  const { id } = await context.params;
   const body = await request.json().catch(() => null);
   const code = String(body?.code || "").trim().toUpperCase();
   const name = String(body?.name || "").trim();
@@ -37,7 +34,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ message: "Device code and name are required" }, { status: 400 });
   }
 
-  const device = await createDevice({
+  const device = await updateDevice(id, {
     code,
     name,
     status,
@@ -46,18 +43,50 @@ export async function POST(request: NextRequest) {
     tags,
     position,
   });
+  if (!device) {
+    return NextResponse.json({ message: "Device not found" }, { status: 404 });
+  }
 
   await logAudit({
     userId: user!.id,
-    action: "device.create",
+    action: "device.update",
     entityType: "device",
-    entityId: device.id,
+    entityId: id,
     metadata: { code, region, tags, isExcluded },
     ipAddress: request.headers.get("x-forwarded-for") ?? undefined,
     userAgent: request.headers.get("user-agent") ?? undefined,
   });
 
-  return NextResponse.json({ device }, { status: 201 });
+  return NextResponse.json({ device });
+}
+
+export async function DELETE(
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> },
+) {
+  const user = await verifySessionToken(
+    request.cookies.get(SESSION_COOKIE)?.value,
+  );
+  if (!hasPermission(user, "devices.delete")) {
+    return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+  }
+
+  const { id } = await context.params;
+  const deleted = await deleteDevice(id);
+  if (!deleted) {
+    return NextResponse.json({ message: "Device not found" }, { status: 404 });
+  }
+
+  await logAudit({
+    userId: user!.id,
+    action: "device.delete",
+    entityType: "device",
+    entityId: id,
+    ipAddress: request.headers.get("x-forwarded-for") ?? undefined,
+    userAgent: request.headers.get("user-agent") ?? undefined,
+  });
+
+  return NextResponse.json({ ok: true });
 }
 
 function clampPosition(value: number) {

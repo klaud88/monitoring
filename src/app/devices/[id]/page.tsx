@@ -56,7 +56,7 @@ export default async function DeviceDetailsPage({
     <AppShell>
       <section className="page-header">
         <div>
-          <Link className="back-link" href="/">
+          <Link className="back-link" href="/dashboard">
             <ChevronLeft size={16} />
             რუკაზე დაბრუნება
           </Link>

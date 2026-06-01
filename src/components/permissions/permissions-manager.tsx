@@ -1,53 +1,101 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Eye, EyeOff, LockKeyhole, Save, ShieldCheck, ToggleLeft, ToggleRight } from "lucide-react";
-import { recordAudit } from "@/lib/client-audit";
-import type { AppUser, PageKey, PermissionAction, PermissionKey } from "@/lib/types";
+import {
+  Eye,
+  EyeOff,
+  LockKeyhole,
+  Save,
+  ShieldCheck,
+  ToggleLeft,
+  ToggleRight,
+} from "lucide-react";
+import type {
+  AppRole,
+  PageKey,
+  PermissionAction,
+  PermissionKey,
+} from "@/lib/types";
 
 const pages: { key: PageKey; label: string }[] = [
   { key: "dashboard", label: "რუკა" },
-  { key: "tasks", label: "ტასკები" },
+  { key: "devices", label: "X-Stations" },
   { key: "regions", label: "რეგიონები" },
+  { key: "tasks", label: "ტასკები" },
   { key: "offline_records", label: "Offline აღრიცხვა" },
   { key: "users", label: "მომხმარებლები" },
   { key: "analytics", label: "ანალიტიკა" },
-  { key: "permissions", label: "უფლებები" }
+  { key: "permissions", label: "უფლებები" },
 ];
 
 const actions: { key: PermissionAction; label: string }[] = [
   { key: "view", label: "ნახვა" },
   { key: "create", label: "დამატება" },
   { key: "edit", label: "შეცვლა" },
-  { key: "delete", label: "წაშლა" }
+  { key: "delete", label: "წაშლა" },
 ];
 
-export function PermissionsManager({ users }: { users: AppUser[] }) {
-  const [selectedUserId, setSelectedUserId] = useState(users[0]?.id || "");
-  const [permissionsByUser, setPermissionsByUser] = useState(
-    Object.fromEntries(users.map((user) => [user.id, user.permissions])) as Record<string, PermissionKey[]>
-  );
+export function PermissionsManager({
+  roles,
+  canEdit,
+}: {
+  roles: AppRole[];
+  canEdit: boolean;
+}) {
+  const [roleList, setRoleList] = useState(roles);
+  const [selectedRoleId, setSelectedRoleId] = useState(roles[0]?.id || "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
-  const selectedUser = useMemo(
-    () => users.find((user) => user.id === selectedUserId) || users[0],
-    [selectedUserId, users]
+  const selectedRole = useMemo(
+    () => roleList.find((role) => role.id === selectedRoleId) || roleList[0],
+    [selectedRoleId, roleList],
   );
-  const selectedPermissions = selectedUser ? permissionsByUser[selectedUser.id] ?? [] : [];
+  const selectedPermissions = selectedRole?.permissions ?? [];
 
-  function togglePermission(permission: PermissionKey) {
-    if (!selectedUser) {
+  async function togglePermission(permission: PermissionKey) {
+    if (!selectedRole || !canEdit || saving) {
       return;
     }
 
-    setPermissionsByUser((current) => {
-      const existing = current[selectedUser.id] ?? [];
-      const next = existing.includes(permission)
-        ? existing.filter((item) => item !== permission)
-        : [...existing, permission];
+    const existing = selectedRole.permissions;
+    const nextPermissions = existing.includes(permission)
+      ? existing.filter((item) => item !== permission)
+      : [...existing, permission];
 
-      recordAudit("permission.toggle", "user", selectedUser.id, { permission, enabled: next.includes(permission) });
-      return { ...current, [selectedUser.id]: next };
+    setRoleList((current) =>
+      current.map((role) =>
+        role.id === selectedRole.id
+          ? { ...role, permissions: nextPermissions }
+          : role,
+      ),
+    );
+    setSaving(true);
+    setError("");
+
+    const response = await fetch(`/api/roles/${selectedRole.id}/permissions`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ permissions: nextPermissions }),
     });
+
+    setSaving(false);
+    if (!response.ok) {
+      setError("უფლებების შენახვა ვერ მოხერხდა.");
+      setRoleList((current) =>
+        current.map((role) =>
+          role.id === selectedRole.id
+            ? { ...role, permissions: existing }
+            : role,
+        ),
+      );
+      return;
+    }
+
+    const data = (await response.json()) as { role: AppRole };
+    setRoleList((current) =>
+      current.map((role) => (role.id === data.role.id ? data.role : role)),
+    );
   }
 
   return (
@@ -55,14 +103,14 @@ export function PermissionsManager({ users }: { users: AppUser[] }) {
       <section className="page-header">
         <div>
           <p className="eyebrow">ადმინისტრირება</p>
-          <h1>მომხმარებლების უფლებები</h1>
-          <p>ტაბების დამალვა ხდება მაშინ, როცა მომხმარებელს შესაბამისი ნახვის უფლება არ აქვს.</p>
+          <h1>როლების უფლებები</h1>
+          <p>უფლებები ენიჭება როლს და ავტომატურად ვრცელდება ამ როლის ყველა მომხმარებელზე.</p>
         </div>
         <div className="metric-strip">
           <div className="metric">
             <ShieldCheck size={18} />
-            <span>{users.length}</span>
-            <small>მომხმარებელი</small>
+            <span>{roleList.length}</span>
+            <small>როლი</small>
           </div>
           <div className="metric">
             <LockKeyhole size={18} />
@@ -72,26 +120,28 @@ export function PermissionsManager({ users }: { users: AppUser[] }) {
         </div>
       </section>
 
+      {error ? <p className="form-error page-error">{error}</p> : null}
+
       <section className="content-grid permissions-grid">
         <aside className="surface user-list-panel">
           <div className="section-title">
-            <h2>მომხმარებლები</h2>
+            <h2>როლები</h2>
             <ShieldCheck size={20} />
           </div>
           <div className="permission-user-list">
-            {users.map((user) => (
+            {roleList.map((role) => (
               <button
-                key={user.id}
+                key={role.id}
                 type="button"
-                className={`permission-user ${user.id === selectedUserId ? "active" : ""}`}
-                onClick={() => setSelectedUserId(user.id)}
+                className={`permission-user ${role.id === selectedRoleId ? "active" : ""}`}
+                onClick={() => setSelectedRoleId(role.id)}
               >
-                <span className="avatar" style={{ backgroundColor: user.color }}>
-                  {user.initials}
+                <span className="role-icon">
+                  <ShieldCheck size={17} />
                 </span>
                 <span>
-                  <strong>{user.name}</strong>
-                  <small>{user.role}</small>
+                  <strong>{role.label}</strong>
+                  <small>{role.permissions.length} უფლება</small>
                 </span>
               </button>
             ))}
@@ -100,23 +150,25 @@ export function PermissionsManager({ users }: { users: AppUser[] }) {
 
         <section className="surface permission-matrix-panel">
           <div className="section-title">
-            <h2>{selectedUser?.name}</h2>
-            <button className="ghost-button" type="button" onClick={() => recordAudit("permission.save", "user", selectedUser?.id)}>
+            <h2>{selectedRole?.label}</h2>
+            <button className="ghost-button" type="button" disabled>
               <Save size={16} />
-              <span>შენახულია</span>
+              <span>{saving ? "ინახება..." : canEdit ? "ავტოშენახვა" : "მხოლოდ ნახვა"}</span>
             </button>
           </div>
 
           <div className="permission-matrix">
             <div className="permission-row head">
-              <span>ტაბი</span>
+              <span>სექცია</span>
               {actions.map((action) => (
                 <span key={action.key}>{action.label}</span>
               ))}
               <span>მენიუში</span>
             </div>
             {pages.map((page) => {
-              const canView = selectedPermissions.includes(`${page.key}.view` as PermissionKey);
+              const canView = selectedPermissions.includes(
+                `${page.key}.view` as PermissionKey,
+              );
               return (
                 <div key={page.key} className="permission-row">
                   <strong>{page.label}</strong>
@@ -130,8 +182,13 @@ export function PermissionsManager({ users }: { users: AppUser[] }) {
                         className={`permission-toggle ${enabled ? "enabled" : ""}`}
                         onClick={() => togglePermission(permission)}
                         aria-label={`${page.label} ${action.label}`}
+                        disabled={!canEdit || saving}
                       >
-                        {enabled ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
+                        {enabled ? (
+                          <ToggleRight size={28} />
+                        ) : (
+                          <ToggleLeft size={28} />
+                        )}
                       </button>
                     );
                   })}

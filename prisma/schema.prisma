@@ -73,6 +73,7 @@ model devices {
   position_y         Decimal              @default(50.00) @db.Decimal(5, 2)
   last_seen_at       DateTime             @db.DateTime(0)
   biostar_payload    Json?
+  is_excluded        Boolean              @default(false)
   created_at         DateTime             @default(now()) @db.Timestamp(0)
   updated_at         DateTime             @default(now()) @db.Timestamp(0)
   associated_devices associated_devices[]

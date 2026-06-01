@@ -1,26 +1,14 @@
 import type { AppUser, AuditLog, Device, PermissionKey, Task } from "./types";
 
-export const regions = [
-  "ვაკე-საბურთალო",
-  "მთაწმინდა-კრწანისი",
-  "ისანი-სამგორი",
-  "დიდუბე-ჩუღურეთი",
-  "გლდანი-ნაძალადევი",
-  "დიდგორი"
-] as const;
-
-export const tagCatalog = [
-  "ელ.პრობლემა",
-  "კამერები",
-  "UPS",
-  "offline"
-] as const;
-
 const allPermissions: PermissionKey[] = [
   "dashboard.view",
   "dashboard.create",
   "dashboard.edit",
   "dashboard.delete",
+  "devices.view",
+  "devices.create",
+  "devices.edit",
+  "devices.delete",
   "tasks.view",
   "tasks.create",
   "tasks.edit",
@@ -56,7 +44,7 @@ export const mockUsers: AppUser[] = [
     initials: "NB",
     color: "#2563eb",
     permissions: allPermissions,
-    passwordHash: "dev:admin123"
+    passwordHash: "$2a$10$NHMqWUDYrKFNoAa4z39nqeIlN9IAdd9VVQtmFyF2laDF15TVIHrwC"
   },
   {
     id: "u-giorgi",
@@ -65,7 +53,7 @@ export const mockUsers: AppUser[] = [
     role: "technician",
     initials: "GK",
     color: "#16a34a",
-    permissions: ["dashboard.view", "tasks.view", "tasks.edit", "regions.view"]
+    permissions: ["dashboard.view", "devices.view", "devices.edit", "tasks.view", "tasks.edit", "regions.view"]
   },
   {
     id: "u-maka",
@@ -76,6 +64,9 @@ export const mockUsers: AppUser[] = [
     color: "#f97316",
     permissions: [
       "dashboard.view",
+      "devices.view",
+      "devices.create",
+      "devices.edit",
       "tasks.view",
       "tasks.create",
       "tasks.edit",
@@ -90,7 +81,7 @@ export const mockUsers: AppUser[] = [
     role: "technician",
     initials: "LM",
     color: "#7c3aed",
-    permissions: ["dashboard.view", "tasks.view", "tasks.edit", "analytics.view"]
+    permissions: ["dashboard.view", "devices.view", "devices.edit", "tasks.view", "tasks.edit", "analytics.view"]
   },
   {
     id: "u-ana",
@@ -99,7 +90,7 @@ export const mockUsers: AppUser[] = [
     role: "viewer",
     initials: "AG",
     color: "#0f766e",
-    permissions: ["dashboard.view", "tasks.view", "analytics.view"]
+    permissions: ["dashboard.view", "devices.view", "tasks.view", "analytics.view"]
   }
 ];
 
@@ -109,6 +100,7 @@ export const mockDevices: Device[] = [
     code: "TB-101",
     name: "ვაკე - ჭავჭავაძე",
     status: "offline",
+    isExcluded: false,
     region: "ვაკე-საბურთალო",
     tags: ["offline", "ელ.პრობლემა"],
     position: { x: 31, y: 48 },
@@ -146,6 +138,7 @@ export const mockDevices: Device[] = [
     code: "TB-118",
     name: "საბურთალო - უნივერსიტეტი",
     status: "online",
+    isExcluded: false,
     region: "ვაკე-საბურთალო",
     tags: ["offline"],
     position: { x: 42, y: 37 },
@@ -172,6 +165,7 @@ export const mockDevices: Device[] = [
     code: "TB-203",
     name: "რუსთაველი - ოპერა",
     status: "online",
+    isExcluded: false,
     region: "მთაწმინდა-კრწანისი",
     tags: ["კამერები"],
     position: { x: 51, y: 49 },
@@ -187,6 +181,7 @@ export const mockDevices: Device[] = [
     code: "TB-244",
     name: "ავლაბარი - მეტრო",
     status: "offline",
+    isExcluded: false,
     region: "ისანი-სამგორი",
     tags: ["offline", "UPS", "ელ.პრობლემა"],
     position: { x: 62, y: 56 },
@@ -215,6 +210,7 @@ export const mockDevices: Device[] = [
     code: "TB-305",
     name: "დიდუბე - სადგური",
     status: "online",
+    isExcluded: false,
     region: "დიდუბე-ჩუღურეთი",
     tags: ["offline"],
     position: { x: 45, y: 29 },
@@ -231,6 +227,7 @@ export const mockDevices: Device[] = [
     code: "TB-330",
     name: "ჩუღურეთი - აღმაშენებელი",
     status: "online",
+    isExcluded: false,
     region: "დიდუბე-ჩუღურეთი",
     tags: ["კამერები"],
     position: { x: 55, y: 38 },
@@ -256,6 +253,7 @@ export const mockDevices: Device[] = [
     code: "TB-401",
     name: "გლდანი - სავაჭრო ცენტრი",
     status: "offline",
+    isExcluded: false,
     region: "გლდანი-ნაძალადევი",
     tags: ["offline", "UPS", "ელ.პრობლემა"],
     position: { x: 61, y: 22 },
@@ -286,6 +284,7 @@ export const mockDevices: Device[] = [
     code: "TB-520",
     name: "ტაბახმელა - საწყობი",
     status: "online",
+    isExcluded: false,
     region: "დიდგორი",
     tags: ["offline"],
     position: { x: 35, y: 68 },

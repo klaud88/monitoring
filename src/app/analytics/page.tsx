@@ -1,13 +1,16 @@
 import { AppShell } from "@/components/layout/app-shell";
 import { AnalyticsDashboard } from "@/components/analytics/analytics-dashboard";
-import { getDevices } from "@/lib/repositories";
+import { getDevices, getOfflineSnapshots } from "@/lib/repositories";
 
 export default async function AnalyticsPage() {
-  const devices = await getDevices();
+  const [devices, snapshots] = await Promise.all([
+    getDevices(),
+    getOfflineSnapshots(),
+  ]);
 
   return (
     <AppShell>
-      <AnalyticsDashboard devices={devices} />
+      <AnalyticsDashboard devices={devices} snapshots={snapshots} />
     </AppShell>
   );
 }

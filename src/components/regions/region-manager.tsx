@@ -1,29 +1,65 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { MapPinned, Plus, Save, Search, Tags } from "lucide-react";
-import { recordAudit } from "@/lib/client-audit";
-import { regions, tagCatalog } from "@/lib/mock-data";
+import {
+  Edit3,
+  MapPinned,
+  Plus,
+  Save,
+  Search,
+  Tags,
+  Trash2,
+  ToggleLeft,
+  ToggleRight,
+  X,
+} from "lucide-react";
+import { tagCatalog } from "@/lib/catalog";
 import { mergeTags, TAG_STORAGE_KEY } from "@/lib/tags";
-import type { Device, DeviceStatus } from "@/lib/types";
+import type { Device, DeviceStatus, Region } from "@/lib/types";
 
 type DeviceDraft = {
   code: string;
   name: string;
   region: string;
   status: DeviceStatus;
+  isExcluded: boolean;
   x: number;
   y: number;
   tags: string[];
 };
 
+type RegionPermissions = {
+  createDevice: boolean;
+  editDevice: boolean;
+  deleteDevice: boolean;
+  createRegion: boolean;
+  editRegion: boolean;
+  deleteRegion: boolean;
+};
+
+type RegionDraft = {
+  name: string;
+  color: string;
+};
+
+type DeviceSortMode = "az" | "za" | "region";
+
+const unassignedRegion = "დაუნაწილებელი";
+
 export function RegionManager({
   initialDevices,
+  initialRegions,
+  permissions,
 }: {
   initialDevices: Device[];
+  initialRegions: Region[];
+  permissions: RegionPermissions;
 }) {
   const [devices, setDevices] = useState(initialDevices);
+  const [regions, setRegions] = useState(initialRegions);
   const [query, setQuery] = useState("");
+  const [deviceSort, setDeviceSort] = useState<DeviceSortMode>("az");
+  const [regionFilter, setRegionFilter] = useState("all");
   const [availableTags, setAvailableTags] = useState<string[]>(() =>
     mergeTags(
       [...tagCatalog],
@@ -34,24 +70,43 @@ export function RegionManager({
   const [draft, setDraft] = useState<DeviceDraft>({
     code: "",
     name: "",
-    region: regions[0],
-    status: "online" as DeviceStatus,
+    region: initialRegions[0]?.name || "",
+    status: "online",
+    isExcluded: false,
     x: 50,
     y: 50,
-    tags: [] as string[],
+    tags: [],
   });
+  const [newRegion, setNewRegion] = useState<RegionDraft>({
+    name: "",
+    color: "#2563eb",
+  });
+  const [editingRegionId, setEditingRegionId] = useState<string | null>(null);
+  const [regionEdit, setRegionEdit] = useState<RegionDraft>({
+    name: "",
+    color: "#2563eb",
+  });
+  const [editingDeviceId, setEditingDeviceId] = useState<string | null>(null);
+  const [deviceEdit, setDeviceEdit] = useState<DeviceDraft | null>(null);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const regionNames = regions.map((region) => region.name);
 
   const filteredDevices = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    return devices.filter(
-      (device) =>
-        !normalized ||
-        device.id.toLowerCase().includes(normalized) ||
-        device.code.toLowerCase().includes(normalized) ||
-        device.name.toLowerCase().includes(normalized) ||
-        device.region.toLowerCase().includes(normalized),
-    );
-  }, [devices, query]);
+    return devices
+      .filter(
+        (device) =>
+          (regionFilter === "all" || device.region === regionFilter) &&
+          (!normalized ||
+            device.id.toLowerCase().includes(normalized) ||
+            device.code.toLowerCase().includes(normalized) ||
+            device.name.toLowerCase().includes(normalized) ||
+            device.region.toLowerCase().includes(normalized)),
+      )
+      .sort((a, b) => compareDevices(a, b, deviceSort));
+  }, [devices, deviceSort, query, regionFilter]);
 
   useEffect(() => {
     const storedTags = JSON.parse(
@@ -66,39 +121,22 @@ export function RegionManager({
     window.localStorage.setItem(TAG_STORAGE_KEY, JSON.stringify(tags));
   }
 
-  function updateRegion(deviceId: string, region: string) {
-    setDevices((current) =>
-      current.map((device) =>
-        device.id === deviceId ? { ...device, region } : device,
-      ),
-    );
-    recordAudit("device.region_update", "device", deviceId, { region });
-  }
-
-  function toggleTag(deviceId: string, tagName: string) {
-    setDevices((current) =>
-      current.map((device) => {
-        if (device.id !== deviceId) {
-          return device;
-        }
-
-        const tags = device.tags.includes(tagName)
-          ? device.tags.filter((tag) => tag !== tagName)
-          : [...device.tags, tagName];
-
-        recordAudit("device.tag_update", "device", deviceId, { tags });
-        return { ...device, tags };
-      }),
-    );
-  }
-
   function toggleDraftTag(tagName: string) {
     setDraft((current) => ({
       ...current,
-      tags: current.tags.includes(tagName)
-        ? current.tags.filter((tag) => tag !== tagName)
-        : [...current.tags, tagName],
+      tags: toggleListValue(current.tags, tagName),
     }));
+  }
+
+  function toggleEditTag(tagName: string) {
+    setDeviceEdit((current) =>
+      current
+        ? {
+            ...current,
+            tags: toggleListValue(current.tags, tagName),
+          }
+        : current,
+    );
   }
 
   function createTag(event: React.FormEvent<HTMLFormElement>) {
@@ -114,53 +152,290 @@ export function RegionManager({
     setAvailableTags(nextTags);
     persistTags(nextTags);
     setNewTagName("");
-    recordAudit("tag.create", "tag", tagName, { tagName });
   }
 
-  function createDevice(event: React.FormEvent<HTMLFormElement>) {
+  async function createRegion(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
-    const device: Device = {
-      id: `dev-local-${Date.now()}`,
-      code: draft.code.trim().toUpperCase(),
-      name: draft.name.trim(),
-      status: draft.status,
-      region: draft.region,
-      tags: draft.tags,
-      position: {
-        x: Math.max(5, Math.min(95, Number(draft.x))),
-        y: Math.max(5, Math.min(95, Number(draft.y))),
-      },
-      lastSeenAt: new Date().toISOString(),
-      associatedDevices: [],
-      problems: [],
-      statusEvents: [],
-    };
-
-    if (!device.code || !device.name) {
+    if (!permissions.createRegion) {
       return;
     }
 
-    setDevices((current) => [device, ...current]);
+    const payload = {
+      name: newRegion.name.trim(),
+      color: newRegion.color,
+    };
+    if (!payload.name) {
+      setError("რეგიონის სახელი აუცილებელია.");
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    const response = await fetch("/api/regions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    setSaving(false);
+
+    if (!response.ok) {
+      setError("რეგიონის დამატება ვერ მოხერხდა.");
+      return;
+    }
+
+    const data = (await response.json()) as { region: Region };
+    setRegions((current) => [...current, data.region]);
+    setDraft((current) =>
+      current.region ? current : { ...current, region: data.region.name },
+    );
+    setNewRegion({ name: "", color: "#2563eb" });
+  }
+
+  function startEditRegion(region: Region) {
+    setEditingRegionId(region.id);
+    setRegionEdit({ name: region.name, color: region.color });
+    setError("");
+  }
+
+  async function saveRegion(region: Region) {
+    if (!permissions.editRegion) {
+      return;
+    }
+
+    const payload = {
+      name: regionEdit.name.trim(),
+      color: regionEdit.color,
+    };
+    if (!payload.name) {
+      setError("რეგიონის სახელი აუცილებელია.");
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    const response = await fetch(`/api/regions/${region.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    setSaving(false);
+
+    if (!response.ok) {
+      setError("რეგიონის რედაქტირება ვერ მოხერხდა.");
+      return;
+    }
+
+    const data = (await response.json()) as { region: Region };
+    setRegions((current) =>
+      current.map((item) => (item.id === region.id ? data.region : item)),
+    );
+    setDevices((current) =>
+      current.map((device) =>
+        device.region === region.name
+          ? { ...device, region: data.region.name }
+          : device,
+      ),
+    );
+    setDraft((current) =>
+      current.region === region.name
+        ? { ...current, region: data.region.name }
+        : current,
+    );
+    setEditingRegionId(null);
+  }
+
+  async function removeRegion(region: Region) {
+    if (!permissions.deleteRegion) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "წავშალო რეგიონი? ამ რეგიონზე მიბმული X-Station-ები დარჩებიან რეგიონის გარეშე.",
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    const response = await fetch(`/api/regions/${region.id}`, {
+      method: "DELETE",
+    });
+    setSaving(false);
+
+    if (!response.ok) {
+      setError("რეგიონის წაშლა ვერ მოხერხდა.");
+      return;
+    }
+
+    setRegions((current) => current.filter((item) => item.id !== region.id));
+    setDevices((current) =>
+      current.map((device) =>
+        device.region === region.name
+          ? { ...device, region: unassignedRegion }
+          : device,
+      ),
+    );
+    setDraft((current) =>
+      current.region === region.name ? { ...current, region: "" } : current,
+    );
+  }
+
+  async function createDevice(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!permissions.createDevice) {
+      return;
+    }
+
+    const payload = devicePayload(draft);
+    if (!payload.code || !payload.name) {
+      setError("X-Station-ის ნომერი და სახელი აუცილებელია.");
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    const response = await fetch("/api/devices", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    setSaving(false);
+
+    if (!response.ok) {
+      setError("X-Station-ის დამატება ვერ მოხერხდა.");
+      return;
+    }
+
+    const data = (await response.json()) as { device: Device };
+    setDevices((current) => [data.device, ...current]);
     setDraft({
       code: "",
       name: "",
       region: draft.region,
       status: "online",
+      isExcluded: false,
       x: 50,
       y: 50,
       tags: [],
     });
-    recordAudit("device.create", "device", device.id, {
+  }
+
+  function startEditDevice(device: Device) {
+    setEditingDeviceId(device.id);
+    setDeviceEdit({
       code: device.code,
-      region: device.region,
+      name: device.name,
+      region: device.region === unassignedRegion ? "" : device.region,
+      status: device.status,
+      isExcluded: device.isExcluded,
+      x: device.position.x,
+      y: device.position.y,
       tags: device.tags,
     });
+    setError("");
+  }
+
+  async function saveDevice(deviceId: string) {
+    if (!permissions.editDevice || !deviceEdit) {
+      return;
+    }
+
+    const payload = devicePayload(deviceEdit);
+    if (!payload.code || !payload.name) {
+      setError("X-Station-ის ნომერი და სახელი აუცილებელია.");
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    const response = await fetch(`/api/devices/${deviceId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    setSaving(false);
+
+    if (!response.ok) {
+      setError("X-Station-ის რედაქტირება ვერ მოხერხდა.");
+      return;
+    }
+
+    const data = (await response.json()) as { device: Device };
+    setDevices((current) =>
+      current.map((device) => (device.id === deviceId ? data.device : device)),
+    );
+    setEditingDeviceId(null);
+    setDeviceEdit(null);
+  }
+
+  async function toggleDeviceExclusion(device: Device) {
+    if (!permissions.editDevice) {
+      return;
+    }
+
+    const isExcluded = !device.isExcluded;
+    setDevices((current) =>
+      current.map((item) =>
+        item.id === device.id ? { ...item, isExcluded } : item,
+      ),
+    );
+    setSaving(true);
+    setError("");
+
+    const response = await fetch(`/api/devices/${device.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(devicePayloadFromDevice(device, isExcluded)),
+    });
+    setSaving(false);
+
+    if (!response.ok) {
+      setDevices((current) =>
+        current.map((item) =>
+          item.id === device.id
+            ? { ...item, isExcluded: device.isExcluded }
+            : item,
+        ),
+      );
+      setError("X-Station-ის ჩართვა/გამორთვა ვერ მოხერხდა.");
+      return;
+    }
+
+    const data = (await response.json()) as { device: Device };
+    setDevices((current) =>
+      current.map((item) => (item.id === device.id ? data.device : item)),
+    );
+  }
+
+  async function removeDevice(deviceId: string) {
+    if (!permissions.deleteDevice) {
+      return;
+    }
+
+    const confirmed = window.confirm("წავშალო ეს X-Station?");
+    if (!confirmed) {
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    const response = await fetch(`/api/devices/${deviceId}`, {
+      method: "DELETE",
+    });
+    setSaving(false);
+
+    if (!response.ok) {
+      setError("X-Station-ის წაშლა ვერ მოხერხდა.");
+      return;
+    }
+
+    setDevices((current) => current.filter((device) => device.id !== deviceId));
   }
 
   const regionSummary = regions.map((region) => ({
     region,
-    count: devices.filter((device) => device.region === region).length,
+    count: devices.filter((device) => device.region === region.name).length,
   }));
 
   return (
@@ -168,167 +443,176 @@ export function RegionManager({
       <section className="page-header">
         <div>
           <p className="eyebrow">X-Stations</p>
-          <h1>რეგიონებისა და ტეგების მინიჭება</h1>
-          <p>
-            დავაისის რეგიონის შეცვლა და ფილტრაციისთვის საჭირო ტეგების მართვა.
-          </p>
+          <h1>რეგიონებისა და X-Station-ების მართვა</h1>
+          <p>რეგიონების, ტეგების და X-Station ჩანაწერების CRUD მართვა.</p>
         </div>
         <div className="metric-strip">
           <div className="metric">
             <MapPinned size={18} />
             <span>{devices.length}</span>
-            <small>დავაისი</small>
+            <small>X-Station</small>
           </div>
           <div className="metric">
             <Tags size={18} />
-            <span>{availableTags.length}</span>
-            <small>ტეგი</small>
+            <span>{regions.length}</span>
+            <small>რეგიონი</small>
           </div>
         </div>
       </section>
 
+      {error ? <p className="form-error page-error">{error}</p> : null}
+
       <section className="content-grid region-grid">
-        <aside className="surface">
+        <aside className="region-left-column">
+          <section className="surface">
           <div className="section-title">
             <h2>რეგიონები</h2>
             <MapPinned size={20} />
           </div>
-          <div className="summary-bars">
-            {regionSummary.map((item) => (
-              <div key={item.region} className="summary-bar">
-                <div>
-                  <strong>{item.region}</strong>
-                  <span>{item.count}</span>
-                </div>
-                <progress value={item.count} max={devices.length || 1} />
-              </div>
-            ))}
-          </div>
-        </aside>
 
-        <form
-          className="surface admin-form device-create-form"
-          onSubmit={createDevice}
-        >
-          <div className="section-title">
-            <h2>ახალი X-Station</h2>
-            <Plus size={20} />
-          </div>
-          <div className="form-row">
-            <label>
-              <span>ნომერი</span>
+          {permissions.createRegion ? (
+            <form className="region-admin-form" onSubmit={createRegion}>
               <input
-                value={draft.code}
+                value={newRegion.name}
                 onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    code: event.target.value,
-                  }))
-                }
-                placeholder="TB-601"
-                required
-              />
-            </label>
-            <label>
-              <span>სახელი</span>
-              <input
-                value={draft.name}
-                onChange={(event) =>
-                  setDraft((current) => ({
+                  setNewRegion((current) => ({
                     ...current,
                     name: event.target.value,
                   }))
                 }
-                placeholder="ლოკაციის დასახელება"
-                required
+                placeholder="ახალი რეგიონი"
               />
-            </label>
-          </div>
-          <div className="form-row">
-            <label>
-              <span>რეგიონი</span>
-              <select
-                value={draft.region}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    region: event.target.value,
-                  }))
-                }
-              >
-                {regions.map((region) => (
-                  <option key={region} value={region}>
-                    {region}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>სტატუსი</span>
-              <select
-                value={draft.status}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    status: event.target.value as DeviceStatus,
-                  }))
-                }
-              >
-                <option value="online">Online</option>
-                <option value="offline">Offline</option>
-                <option value="error">Error</option>
-              </select>
-            </label>
-          </div>
-          <div className="form-row">
-            <label>
-              <span>რუკაზე X %</span>
               <input
-                type="number"
-                min={5}
-                max={95}
-                value={draft.x}
+                type="color"
+                value={newRegion.color}
                 onChange={(event) =>
-                  setDraft((current) => ({
+                  setNewRegion((current) => ({
                     ...current,
-                    x: Number(event.target.value),
+                    color: event.target.value,
                   }))
                 }
+                aria-label="რეგიონის ფერი"
               />
-            </label>
-            <label>
-              <span>რუკაზე Y %</span>
-              <input
-                type="number"
-                min={5}
-                max={95}
-                value={draft.y}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    y: Number(event.target.value),
-                  }))
-                }
-              />
-            </label>
-          </div>
-          <div className="row-tags">
-            {availableTags.map((tagName) => (
-              <button
-                key={tagName}
-                type="button"
-                className={`tag-toggle compact ${draft.tags.includes(tagName) ? "active" : ""}`}
-                onClick={() => toggleDraftTag(tagName)}
-              >
-                {tagName}
+              <button className="primary-button" type="submit" disabled={saving}>
+                <Plus size={16} />
+                <span>დამატება</span>
               </button>
+            </form>
+          ) : null}
+
+          <div className="region-admin-list">
+            {regionSummary.map((item) => (
+              <div key={item.region.id} className="region-admin-row">
+                {editingRegionId === item.region.id ? (
+                  <>
+                    <input
+                      value={regionEdit.name}
+                      onChange={(event) =>
+                        setRegionEdit((current) => ({
+                          ...current,
+                          name: event.target.value,
+                        }))
+                      }
+                    />
+                    <input
+                      type="color"
+                      value={regionEdit.color}
+                      onChange={(event) =>
+                        setRegionEdit((current) => ({
+                          ...current,
+                          color: event.target.value,
+                        }))
+                      }
+                      aria-label="რეგიონის ფერი"
+                    />
+                    <div className="row-actions">
+                      <button
+                        className="icon-button"
+                        type="button"
+                        onClick={() => saveRegion(item.region)}
+                        disabled={saving}
+                        aria-label="შენახვა"
+                        title="შენახვა"
+                      >
+                        <Save size={16} />
+                      </button>
+                      <button
+                        className="icon-button"
+                        type="button"
+                        onClick={() => setEditingRegionId(null)}
+                        aria-label="გაუქმება"
+                        title="გაუქმება"
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <span
+                      className="region-swatch"
+                      style={{ backgroundColor: item.region.color }}
+                    />
+                    <div>
+                      <strong>{item.region.name}</strong>
+                      <small>{item.count} X-Station</small>
+                    </div>
+                    <div className="row-actions">
+                      {permissions.editRegion ? (
+                        <button
+                          className="icon-button"
+                          type="button"
+                          onClick={() => startEditRegion(item.region)}
+                          aria-label="რეგიონის რედაქტირება"
+                          title="რეგიონის რედაქტირება"
+                        >
+                          <Edit3 size={16} />
+                        </button>
+                      ) : null}
+                      {permissions.deleteRegion ? (
+                        <button
+                          className="icon-button danger"
+                          type="button"
+                          onClick={() => removeRegion(item.region)}
+                          aria-label="რეგიონის წაშლა"
+                          title="რეგიონის წაშლა"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      ) : null}
+                    </div>
+                  </>
+                )}
+              </div>
             ))}
           </div>
-          <button className="primary-button" type="submit">
-            <Plus size={18} />
-            <span>დავაისის დამატება</span>
-          </button>
-        </form>
+          </section>
+
+          {permissions.createDevice ? (
+            <form
+              className="surface admin-form device-create-form"
+              onSubmit={createDevice}
+            >
+              <div className="section-title">
+                <h2>ახალი X-Station</h2>
+                <Plus size={20} />
+              </div>
+              <DeviceDraftFields
+                draft={draft}
+                onChange={(partial) =>
+                  setDraft((current) => ({ ...current, ...partial }))
+                }
+                regionNames={regionNames}
+                availableTags={availableTags}
+                toggleTag={toggleDraftTag}
+              />
+              <button className="primary-button" type="submit" disabled={saving}>
+                <Plus size={18} />
+                <span>X-Station-ის დამატება</span>
+              </button>
+            </form>
+          ) : null}
+        </aside>
 
         <section className="surface">
           <div className="table-toolbar">
@@ -337,13 +621,37 @@ export function RegionManager({
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="ძებნა დავაისით ან რეგიონით"
+                placeholder="ძებნა X-Station-ით ან რეგიონით"
               />
             </div>
-            <button className="ghost-button" type="button">
-              <Save size={16} />
-              <span>ავტოშენახვა</span>
-            </button>
+            <label className="select-control compact-filter-control">
+              <select
+                value={deviceSort}
+                onChange={(event) =>
+                  setDeviceSort(event.target.value as DeviceSortMode)
+                }
+                aria-label="დალაგება"
+              >
+                <option value="az">A-Z</option>
+                <option value="za">Z-A</option>
+                <option value="region">რეგიონების მიხედვით</option>
+              </select>
+            </label>
+            <label className="select-control compact-filter-control">
+              <select
+                value={regionFilter}
+                onChange={(event) => setRegionFilter(event.target.value)}
+                aria-label="რეგიონის ფილტრი"
+              >
+                <option value="all">ყველა რეგიონი</option>
+                <option value={unassignedRegion}>რეგიონის გარეშე</option>
+                {regionNames.map((region) => (
+                  <option key={region} value={region}>
+                    {region}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
 
           <form className="tag-create-form" onSubmit={createTag}>
@@ -362,44 +670,272 @@ export function RegionManager({
           </form>
 
           <div className="region-device-list">
-            {filteredDevices.map((device) => (
-              <article key={device.id} className="region-device-row">
-                <div>
-                  <strong>{device.name}</strong>
-                  <span>{device.id}</span>
-                </div>
-                <label>
-                  <span>რეგიონი</span>
-                  <select
-                    value={device.region}
-                    onChange={(event) =>
-                      updateRegion(device.id, event.target.value)
+            {filteredDevices.map((device) =>
+              editingDeviceId === device.id && deviceEdit ? (
+                <article key={device.id} className="region-device-row editing">
+                  <DeviceDraftFields
+                    draft={deviceEdit}
+                    onChange={(partial) =>
+                      setDeviceEdit((current) =>
+                        current ? { ...current, ...partial } : current,
+                      )
                     }
-                  >
-                    {regions.map((region) => (
-                      <option key={region} value={region}>
-                        {region}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="row-tags">
-                  {availableTags.map((tagName) => (
+                    regionNames={regionNames}
+                    availableTags={availableTags}
+                    toggleTag={toggleEditTag}
+                  />
+                  <div className="row-actions">
                     <button
-                      key={tagName}
+                      className="ghost-button"
                       type="button"
-                      className={`tag-toggle compact ${device.tags.includes(tagName) ? "active" : ""}`}
-                      onClick={() => toggleTag(device.id, tagName)}
+                      onClick={() => saveDevice(device.id)}
+                      disabled={saving}
                     >
-                      {tagName}
+                      <Save size={16} />
+                      <span>შენახვა</span>
                     </button>
-                  ))}
-                </div>
-              </article>
-            ))}
+                    <button
+                      className="ghost-button"
+                      type="button"
+                      onClick={() => {
+                        setEditingDeviceId(null);
+                        setDeviceEdit(null);
+                      }}
+                    >
+                      <X size={16} />
+                      <span>გაუქმება</span>
+                    </button>
+                  </div>
+                </article>
+              ) : (
+                <article key={device.id} className="region-device-row">
+                  <div>
+                    <strong>{device.name}</strong>
+                    <span>{device.code}</span>
+                    <span>{device.status}</span>
+                  </div>
+                  <div>
+                    <strong>{device.region}</strong>
+                    <span>
+                      X {device.position.x}%, Y {device.position.y}%
+                    </span>
+                  </div>
+                  <div className="row-tags">
+                    {device.tags.length ? (
+                      device.tags.map((tagName) => (
+                        <span key={tagName} className="tag-toggle compact active">
+                          {tagName}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="muted">ტეგი არ აქვს</span>
+                    )}
+                  </div>
+                  <div className="device-exclusion-cell">
+                    <button
+                      className={`device-exclusion-toggle ${device.isExcluded ? "active" : ""}`}
+                      type="button"
+                      onClick={() => toggleDeviceExclusion(device)}
+                      disabled={!permissions.editDevice || saving}
+                      aria-pressed={device.isExcluded}
+                      title="ჩართვისას X-Station რუკაზე, ანალიტიკაში და Offline აღრიცხვაში აღარ გამოჩნდება"
+                    >
+                      {device.isExcluded ? (
+                        <ToggleRight size={24} />
+                      ) : (
+                        <ToggleLeft size={24} />
+                      )}
+                      <span>
+                        {device.isExcluded ? "გამორიცხულია" : "აქტიურია"}
+                      </span>
+                    </button>
+                    <small>რუკა/აღრიცხვა</small>
+                  </div>
+                  <div className="row-actions">
+                    {permissions.editDevice ? (
+                      <button
+                        className="icon-button"
+                        type="button"
+                        onClick={() => startEditDevice(device)}
+                        aria-label="X-Station-ის რედაქტირება"
+                        title="X-Station-ის რედაქტირება"
+                      >
+                        <Edit3 size={17} />
+                      </button>
+                    ) : null}
+                    {permissions.deleteDevice ? (
+                      <button
+                        className="icon-button danger"
+                        type="button"
+                        onClick={() => removeDevice(device.id)}
+                        aria-label="X-Station-ის წაშლა"
+                        title="X-Station-ის წაშლა"
+                      >
+                        <Trash2 size={17} />
+                      </button>
+                    ) : null}
+                  </div>
+                </article>
+              ),
+            )}
           </div>
         </section>
       </section>
     </div>
   );
+}
+
+function DeviceDraftFields({
+  draft,
+  onChange,
+  regionNames,
+  availableTags,
+  toggleTag,
+}: {
+  draft: DeviceDraft;
+  onChange: (partial: Partial<DeviceDraft>) => void;
+  regionNames: string[];
+  availableTags: string[];
+  toggleTag: (tagName: string) => void;
+}) {
+  return (
+    <>
+      <div className="form-row">
+        <label>
+          <span>ნომერი</span>
+          <input
+            value={draft.code}
+            onChange={(event) => onChange({ code: event.target.value })}
+            placeholder="TB-601"
+            required
+          />
+        </label>
+        <label>
+          <span>სახელი</span>
+          <input
+            value={draft.name}
+            onChange={(event) => onChange({ name: event.target.value })}
+            placeholder="ლოკაციის დასახელება"
+            required
+          />
+        </label>
+      </div>
+      <div className="form-row">
+        <label>
+          <span>რეგიონი</span>
+          <select
+            value={draft.region}
+            onChange={(event) => onChange({ region: event.target.value })}
+          >
+            <option value="">რეგიონის გარეშე</option>
+            {regionNames.map((region) => (
+              <option key={region} value={region}>
+                {region}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>სტატუსი</span>
+          <select
+            value={draft.status}
+            onChange={(event) =>
+              onChange({ status: event.target.value as DeviceStatus })
+            }
+          >
+            <option value="online">Online</option>
+            <option value="offline">Offline</option>
+            <option value="error">Error</option>
+          </select>
+        </label>
+      </div>
+      <div className="form-row">
+        <label>
+          <span>რუკაზე X %</span>
+          <input
+            type="number"
+            min={5}
+            max={95}
+            value={draft.x}
+            onChange={(event) => onChange({ x: Number(event.target.value) })}
+          />
+        </label>
+        <label>
+          <span>რუკაზე Y %</span>
+          <input
+            type="number"
+            min={5}
+            max={95}
+            value={draft.y}
+            onChange={(event) => onChange({ y: Number(event.target.value) })}
+          />
+        </label>
+      </div>
+      <div className="row-tags">
+        {availableTags.map((tagName) => (
+          <button
+            key={tagName}
+            type="button"
+            className={`tag-toggle compact ${draft.tags.includes(tagName) ? "active" : ""}`}
+            onClick={() => toggleTag(tagName)}
+          >
+            {tagName}
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function devicePayload(draft: DeviceDraft) {
+  return {
+    code: draft.code.trim().toUpperCase(),
+    name: draft.name.trim(),
+    status: draft.status,
+    isExcluded: draft.isExcluded,
+    region: draft.region || null,
+    position: {
+      x: clampPosition(Number(draft.x)),
+      y: clampPosition(Number(draft.y)),
+    },
+    tags: draft.tags,
+  };
+}
+
+function devicePayloadFromDevice(device: Device, isExcluded = device.isExcluded) {
+  return {
+    code: device.code.trim().toUpperCase(),
+    name: device.name.trim(),
+    status: device.status,
+    isExcluded,
+    region: device.region === unassignedRegion ? null : device.region,
+    position: device.position,
+    tags: device.tags,
+  };
+}
+
+function clampPosition(value: number) {
+  return Math.max(5, Math.min(95, Number.isFinite(value) ? value : 50));
+}
+
+function toggleListValue(values: string[], value: string) {
+  return values.includes(value)
+    ? values.filter((item) => item !== value)
+    : [...values, value];
+}
+
+function compareDevices(a: Device, b: Device, sortMode: DeviceSortMode) {
+  if (sortMode === "region") {
+    return (
+      a.region.localeCompare(b.region, "ka") ||
+      a.name.localeCompare(b.name, "ka") ||
+      a.code.localeCompare(b.code, "ka")
+    );
+  }
+
+  const result =
+    a.name.localeCompare(b.name, "ka") ||
+    a.code.localeCompare(b.code, "ka") ||
+    a.id.localeCompare(b.id, "ka");
+  return sortMode === "za" ? -result : result;
 }

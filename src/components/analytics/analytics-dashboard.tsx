@@ -2,36 +2,116 @@
 
 import { useMemo, useState } from "react";
 import { BarChart3, CalendarDays, MapPinned, Tags, WifiOff } from "lucide-react";
-import type { Device, OfflineSummary, StatusEvent } from "@/lib/types";
+import type { Device, OfflineSnapshot, OfflineSummary } from "@/lib/types";
 
 const now = new Date();
 const oneYearAgo = new Date(now);
 oneYearAgo.setFullYear(now.getFullYear() - 1);
 
-export function AnalyticsDashboard({ devices }: { devices: Device[] }) {
+type AnalyticsEvent = {
+  id: string;
+  deviceId: string;
+  deviceCode: string;
+  deviceName: string;
+  region: string;
+  tags: string[];
+  happenedAt: string;
+  durationMinutes?: number;
+};
+
+export function AnalyticsDashboard({
+  devices,
+  snapshots,
+}: {
+  devices: Device[];
+  snapshots: OfflineSnapshot[];
+}) {
   const [fromDate, setFromDate] = useState(oneYearAgo.toISOString().slice(0, 10));
   const [toDate, setToDate] = useState(now.toISOString().slice(0, 10));
+  const activeDevices = useMemo(
+    () => devices.filter((device) => !device.isExcluded),
+    [devices],
+  );
+  const deviceMap = useMemo(
+    () => new Map(devices.map((device) => [device.id, device])),
+    [devices],
+  );
 
   const events = useMemo(() => {
     const from = new Date(`${fromDate}T00:00:00`);
     const to = new Date(`${toDate}T23:59:59`);
-    return devices.flatMap((device) =>
+    const statusEvents: AnalyticsEvent[] = activeDevices.flatMap((device) =>
       device.statusEvents
         .filter((event) => event.status === "offline")
         .filter((event) => {
           const date = new Date(event.happenedAt);
           return date >= from && date <= to;
         })
-        .map((event) => ({ ...event, device }))
+        .map((event) => ({
+          id: event.id,
+          deviceId: device.id,
+          deviceCode: device.code,
+          deviceName: device.name,
+          region: device.region,
+          tags: device.tags,
+          happenedAt: event.happenedAt,
+          durationMinutes: event.durationMinutes,
+        }))
     );
-  }, [devices, fromDate, toDate]);
+
+    const currentOfflineEvents: AnalyticsEvent[] = activeDevices
+      .filter((device) => device.status === "offline")
+      .filter((device) => {
+        const date = new Date(device.lastSeenAt);
+        return date >= from && date <= to;
+      })
+      .map((device) => ({
+        id: `current-${device.id}`,
+        deviceId: device.id,
+        deviceCode: device.code,
+        deviceName: device.name,
+        region: device.region,
+        tags: device.tags,
+        happenedAt: device.lastSeenAt,
+      }));
+
+    const snapshotEvents: AnalyticsEvent[] = snapshots
+      .filter((snapshot) => snapshot.date >= fromDate && snapshot.date <= toDate)
+      .flatMap((snapshot) =>
+        snapshot.devices.map((snapshotDevice) => {
+          const device = deviceMap.get(snapshotDevice.deviceId);
+          if (device?.isExcluded) {
+            return null;
+          }
+          return {
+            id: `${snapshot.id}-${snapshotDevice.deviceId}`,
+            deviceId: snapshotDevice.deviceId,
+            deviceCode: device?.code ?? snapshotDevice.deviceCode,
+            deviceName: device?.name ?? snapshotDevice.deviceName,
+            region: device?.region ?? "დაუნაწილებელი",
+            tags: device?.tags ?? [],
+            happenedAt: snapshot.capturedAt,
+          };
+        }).filter((event): event is AnalyticsEvent => event !== null),
+      );
+
+    const seen = new Set<string>();
+    return [...statusEvents, ...currentOfflineEvents, ...snapshotEvents].filter((event) => {
+      const key = `${event.deviceId}-${event.happenedAt.slice(0, 10)}`;
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+  }, [activeDevices, deviceMap, fromDate, snapshots, toDate]);
 
   const deviceSummary = useMemo(
     () =>
       rank(
         events.map((event) => ({
-          id: event.device.id,
-          label: `${event.device.code} · ${event.device.name}`
+          id: event.deviceId,
+          label: `${event.deviceCode} · ${event.deviceName}`
         }))
       ),
     [events]
@@ -41,8 +121,8 @@ export function AnalyticsDashboard({ devices }: { devices: Device[] }) {
     () =>
       rank(
         events.map((event) => ({
-          id: event.device.region,
-          label: event.device.region
+          id: event.region,
+          label: event.region
         }))
       ),
     [events]
@@ -52,7 +132,7 @@ export function AnalyticsDashboard({ devices }: { devices: Device[] }) {
     () =>
       rank(
         events.flatMap((event) =>
-          event.device.tags.map((tag) => ({
+          event.tags.map((tag) => ({
             id: tag,
             label: tag
           }))
@@ -61,7 +141,7 @@ export function AnalyticsDashboard({ devices }: { devices: Device[] }) {
     [events]
   );
 
-  const longestEvent = events.reduce<({ device: Device } & StatusEvent) | null>(
+  const longestEvent = events.reduce<AnalyticsEvent | null>(
     (max, event) =>
       !max || (event.durationMinutes ?? 0) > (max.durationMinutes ?? 0) ? event : max,
     null

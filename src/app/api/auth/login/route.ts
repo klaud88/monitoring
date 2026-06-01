@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createSessionToken, sanitizeUser, SESSION_COOKIE, verifyPassword } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { getUserByEmail } from "@/lib/repositories";
+import { shouldUseSecureCookie } from "@/lib/session";
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
@@ -26,7 +27,7 @@ export async function POST(request: NextRequest) {
   response.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: shouldUseSecureCookie(request),
     path: "/",
     maxAge: 60 * 60 * 10
   });

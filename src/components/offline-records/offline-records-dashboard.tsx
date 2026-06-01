@@ -55,6 +55,10 @@ export function OfflineRecordsDashboard({
     () => new Map(devices.map((device) => [device.id, device])),
     [devices],
   );
+  const activeDeviceIds = useMemo(
+    () => new Set(devices.map((device) => device.id)),
+    [devices],
+  );
   const monitoredMap = useMemo(
     () => new Map(monitoredDevices.map((device) => [device.deviceId, device])),
     [monitoredDevices],
@@ -62,10 +66,17 @@ export function OfflineRecordsDashboard({
 
   const filteredSnapshots = useMemo(
     () =>
-      snapshots.filter(
-        (snapshot) => snapshot.date >= fromDate && snapshot.date <= toDate,
-      ),
-    [fromDate, snapshots, toDate],
+      snapshots
+        .filter(
+          (snapshot) => snapshot.date >= fromDate && snapshot.date <= toDate,
+        )
+        .map((snapshot) => ({
+          ...snapshot,
+          devices: snapshot.devices.filter((device) =>
+            activeDeviceIds.has(device.deviceId),
+          ),
+        })),
+    [activeDeviceIds, fromDate, snapshots, toDate],
   );
 
   const offlineCounts = useMemo(() => {
@@ -90,7 +101,7 @@ export function OfflineRecordsDashboard({
 
   const alertingDeviceIds = useMemo(() => {
     const ids = new Set<string>();
-    snapshots.forEach((snapshot) => {
+    filteredSnapshots.forEach((snapshot) => {
       snapshot.devices.forEach((device) => {
         const monitored = monitoredMap.get(device.deviceId);
         if (monitored && snapshot.date > monitored.enabledDate) {
@@ -99,7 +110,7 @@ export function OfflineRecordsDashboard({
       });
     });
     return ids;
-  }, [monitoredMap, snapshots]);
+  }, [filteredSnapshots, monitoredMap]);
 
   const filteredDevices = useMemo(() => {
     const normalized = query.trim().toLowerCase();

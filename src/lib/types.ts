@@ -4,6 +4,7 @@ export type TaskPriority = "low" | "normal" | "high" | "urgent";
 
 export type PageKey =
   | "dashboard"
+  | "devices"
   | "tasks"
   | "regions"
   | "offline_records"
@@ -49,6 +50,7 @@ export type Device = {
   code: string;
   name: string;
   status: DeviceStatus;
+  isExcluded: boolean;
   region: string;
   tags: string[];
   position: {
@@ -85,6 +87,19 @@ export type AuditLog = {
 };
 
 export type SessionUser = Omit<AppUser, "passwordHash">;
+
+export type AppRole = {
+  id: string;
+  name: string;
+  label: string;
+  permissions: PermissionKey[];
+};
+
+export type Region = {
+  id: string;
+  name: string;
+  color: string;
+};
 
 export type OfflineSummary = {
   id: string;

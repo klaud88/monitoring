@@ -303,6 +303,20 @@ export function GoogleTbilisiMap({
           <span>Google Maps · თბილისი</span>
         )}
       </div>
+      <div className="map-status-legend" aria-label="X-Station სტატუსები">
+        <span>
+          <i className="status-dot online" />
+          Online
+        </span>
+        <span>
+          <i className="status-dot offline" />
+          Offline
+        </span>
+        <span>
+          <i className="status-dot error" />
+          Error
+        </span>
+      </div>
       {mapError ? (
         <div className="map-load-state" role="status">
           {mapError}

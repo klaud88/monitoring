@@ -13,18 +13,18 @@ import {
   Users,
   WifiOff,
 } from "lucide-react";
-import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
+import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import type { PermissionKey } from "@/lib/types";
 
 type NavItem = {
   href: string;
   label: string;
-  permission?: PermissionKey;
+  permission?: PermissionKey | PermissionKey[];
   icon: React.ComponentType<{ size?: number; strokeWidth?: number }>;
 };
 
 const navItems: NavItem[] = [
-  { href: "/", label: "რუკა", permission: "dashboard.view", icon: MapPinned },
+  { href: "/dashboard", label: "რუკა", permission: "dashboard.view", icon: MapPinned },
   {
     href: "/tasks",
     label: "დავალებები",
@@ -34,7 +34,7 @@ const navItems: NavItem[] = [
   {
     href: "/devices/regions",
     label: "X-Stations/რეგიონები",
-    permission: "regions.view",
+    permission: ["devices.view", "regions.view"],
     icon: MonitorCog,
   },
   {
@@ -68,13 +68,22 @@ export async function AppShell({
 }: Readonly<{ children: React.ReactNode }>) {
   const cookieStore = await cookies();
   const user = await verifySessionToken(cookieStore.get(SESSION_COOKIE)?.value);
-  const visibleItems = navItems;
+  const visibleItems = navItems.filter((item) => {
+    if (!item.permission) {
+      return true;
+    }
+
+    const permissions = Array.isArray(item.permission)
+      ? item.permission
+      : [item.permission];
+    return permissions.some((permission) => hasPermission(user, permission));
+  });
 
   return (
     <div className="app-shell">
       <header className="topbar">
         <div className="topbar-main">
-          <Link href="/" className="brand" aria-label="BioStar2 Status Ops">
+          <Link href="/dashboard" className="brand" aria-label="BioStar2 Status Ops">
             <span className="brand-mark">
               <Activity size={20} strokeWidth={2.4} />
             </span>

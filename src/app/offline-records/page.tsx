@@ -14,11 +14,12 @@ export default async function OfflineRecordsPage() {
     getOfflineSnapshots(),
     getMonitoredDevices(),
   ]);
+  const activeDevices = devices.filter((device) => !device.isExcluded);
 
   return (
     <AppShell>
       <OfflineRecordsDashboard
-        initialDevices={devices}
+        initialDevices={activeDevices}
         initialSnapshots={snapshots}
         initialMonitoredDevices={monitoredDevices}
       />

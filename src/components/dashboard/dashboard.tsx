@@ -13,6 +13,7 @@ import {
   Search,
   Tag,
   Users,
+  Wifi,
   WifiOff,
   X,
 } from "lucide-react";
@@ -22,12 +23,13 @@ import {
   positionToLatLng,
   type LatLng,
 } from "@/components/dashboard/google-tbilisi-map";
+import { regions, tagCatalog } from "@/lib/catalog";
 import { recordAudit } from "@/lib/client-audit";
-import { regions, tagCatalog } from "@/lib/mock-data";
 import { mergeTags, TAG_STORAGE_KEY } from "@/lib/tags";
 import type {
   AppUser,
   Device,
+  DeviceStatus,
   Task,
   TaskPriority,
   TaskStatus,
@@ -71,12 +73,17 @@ export function Dashboard({
   initialTasks,
   users,
 }: DashboardProps) {
+  const initialActiveDeviceId =
+    initialDevices.find((device) => !device.isExcluded)?.id ||
+    initialDevices[0]?.id ||
+    "";
   const [devices, setDevices] = useState(initialDevices);
   const [tasks, setTasks] = useState(initialTasks);
   const [deviceLocations, setDeviceLocations] = useState<
     Record<string, LatLng>
   >(() => createDefaultDeviceLocations(initialDevices));
   const [regionFilter, setRegionFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<DeviceStatus | "all">("all");
   const [userFilter, setUserFilter] = useState("all");
   const [availableTags, setAvailableTags] = useState<string[]>(() =>
     mergeTags(
@@ -100,7 +107,7 @@ export function Dashboard({
   const [form, setForm] = useState<NewTaskForm>({
     title: "",
     issue: "",
-    deviceId: initialDevices[0]?.id || "",
+    deviceId: initialActiveDeviceId,
     assigneeIds: users[1] ? [users[1].id] : [],
     priority: "normal",
     dueDate: today,
@@ -113,6 +120,14 @@ export function Dashboard({
   const deviceMap = useMemo(
     () => new Map(devices.map((device) => [device.id, device])),
     [devices],
+  );
+  const activeDevices = useMemo(
+    () => devices.filter((device) => !device.isExcluded),
+    [devices],
+  );
+  const activeDeviceIds = useMemo(
+    () => new Set(activeDevices.map((device) => device.id)),
+    [activeDevices],
   );
 
   const refreshDevices = useCallback(
@@ -206,8 +221,11 @@ export function Dashboard({
   }, [refreshDevices]);
 
   const activeTasks = useMemo(
-    () => tasks.filter((task) => task.status !== "done"),
-    [tasks],
+    () =>
+      tasks.filter(
+        (task) => task.status !== "done" && activeDeviceIds.has(task.deviceId),
+      ),
+    [activeDeviceIds, tasks],
   );
   const recentTasks = useMemo(
     () =>
@@ -233,10 +251,12 @@ export function Dashboard({
   const visibleDevices = useMemo(() => {
     const normalized = query.trim().toLowerCase();
 
-    return devices.filter((device) => {
+    return activeDevices.filter((device) => {
       const deviceTasks = tasksByDevice.get(device.id) ?? [];
       const matchesRegion =
         regionFilter === "all" || device.region === regionFilter;
+      const matchesStatus =
+        statusFilter === "all" || device.status === statusFilter;
       const matchesUser =
         userFilter === "all" ||
         deviceTasks.some((task) => task.assigneeIds.includes(userFilter));
@@ -248,14 +268,30 @@ export function Dashboard({
         device.code.toLowerCase().includes(normalized) ||
         device.name.toLowerCase().includes(normalized);
 
-      return matchesRegion && matchesUser && matchesTags && matchesQuery;
+      return (
+        matchesRegion &&
+        matchesStatus &&
+        matchesUser &&
+        matchesTags &&
+        matchesQuery
+      );
     });
-  }, [devices, query, regionFilter, selectedTags, tasksByDevice, userFilter]);
+  }, [
+    activeDevices,
+    query,
+    regionFilter,
+    selectedTags,
+    statusFilter,
+    tasksByDevice,
+    userFilter,
+  ]);
 
-  const offlineCount = devices.filter(
+  const offlineCount = activeDevices.filter(
     (device) => device.status === "offline",
   ).length;
-  const errorCount = devices.filter((device) => device.status === "error").length;
+  const errorCount = activeDevices.filter(
+    (device) => device.status === "error",
+  ).length;
   const plannedVisitCount = activeTasks.filter(
     (task) => task.assigneeIds.length > 0,
   ).length;
@@ -282,6 +318,7 @@ export function Dashboard({
 
   function resetFilters() {
     setRegionFilter("all");
+    setStatusFilter("all");
     setUserFilter("all");
     setSelectedTags([]);
     setQuery("");
@@ -442,6 +479,21 @@ export function Dashboard({
         </label>
 
         <label className="select-control">
+          <Wifi size={17} />
+          <select
+            value={statusFilter}
+            onChange={(event) =>
+              setStatusFilter(event.target.value as DeviceStatus | "all")
+            }
+          >
+            <option value="all">ყველა სტატუსი</option>
+            <option value="online">Online</option>
+            <option value="offline">Offline</option>
+            <option value="error">Error</option>
+          </select>
+        </label>
+
+        <label className="select-control">
           <Users size={17} />
           <select
             value={userFilter}
@@ -543,7 +595,7 @@ export function Dashboard({
                 }
                 required
               >
-                {devices.map((device) => (
+                {activeDevices.map((device) => (
                   <option key={device.id} value={device.id}>
                     {device.code} · {device.name}
                   </option>
