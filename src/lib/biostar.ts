@@ -1,6 +1,11 @@
 import { constants as cryptoConstants } from "node:crypto";
-import http, { type IncomingHttpHeaders } from "node:http";
 import https from "node:https";
+import axios, {
+  type AxiosError,
+  type AxiosRequestConfig,
+  type AxiosResponseHeaders,
+  type RawAxiosResponseHeaders,
+} from "axios";
 import type { DeviceStatus } from "./types";
 
 export type BiostarDevice = {
@@ -28,14 +33,14 @@ type BiostarSession = {
 type BiostarRequestResult = {
   status: number;
   ok: boolean;
-  headers: IncomingHttpHeaders;
-  body: string;
+  headers: RawAxiosResponseHeaders | AxiosResponseHeaders;
+  data: unknown;
 };
 
 type BiostarRequestOptions = {
   method?: "GET" | "POST";
   headers?: Record<string, string>;
-  body?: string;
+  data?: unknown;
 };
 
 const DEFAULT_BASE_URL = "https://devices.tbilisikids.com";
@@ -105,7 +110,7 @@ export async function fetchBiostarDevicesResponse({
     loginStatus: loginResponse.status,
     devicesStatus: devicesResponse.status,
     sessionId: loginResponse.sessionId,
-    payload: parseJson(devicesResponse.body),
+    payload: devicesResponse.data,
   };
 }
 
@@ -139,12 +144,12 @@ async function loginToBiostar(username: string, password: string, url: string) {
       Accept: "application/json",
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
+    data: {
       User: {
         login_id: username,
         password,
       },
-    }),
+    },
   });
 
   if (!response.ok) {
@@ -201,70 +206,43 @@ function requestBiostar(
 ) {
   const parsedUrl = new URL(url);
 
-  return sendBiostarRequest(parsedUrl, options).catch((error) => {
+  return sendBiostarRequest(url, options).catch((error) => {
     if (
       parsedUrl.protocol === "https:" &&
       shouldRetryWithInsecureTls(error)
     ) {
-      return sendBiostarRequest(parsedUrl, options, true);
+      return sendBiostarRequest(url, options, true);
     }
 
     throw error;
   });
 }
 
-function sendBiostarRequest(
-  parsedUrl: URL,
+async function sendBiostarRequest(
+  url: string,
   options: BiostarRequestOptions,
   forceInsecureTls = false,
-) {
-  const client = parsedUrl.protocol === "http:" ? http : https;
-  const headers = { ...options.headers };
+): Promise<BiostarRequestResult> {
+  const config: AxiosRequestConfig = {
+    url,
+    method: options.method || "GET",
+    headers: options.headers,
+    data: options.data,
+    timeout: getRequestTimeoutMs(),
+    validateStatus: () => true,
+    ...(url.startsWith("https:")
+      ? getHttpsRequestOptions(forceInsecureTls)
+      : {}),
+  };
+  const response = await axios.request(config);
+  const status = response.status;
 
-  if (options.body && !headers["Content-Length"]) {
-    headers["Content-Length"] = String(Buffer.byteLength(options.body));
-  }
-
-  return new Promise<BiostarRequestResult>((resolve, reject) => {
-    const request = client.request(
-      parsedUrl,
-      {
-        method: options.method || "GET",
-        headers,
-        ...(parsedUrl.protocol === "https:"
-          ? getHttpsRequestOptions(forceInsecureTls)
-          : {}),
-      },
-      (response) => {
-        const chunks: Buffer[] = [];
-        response.on("data", (chunk: Buffer | string) => {
-          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-        });
-        response.on("end", () => {
-          const status = response.statusCode ?? 0;
-          resolve({
-            status,
-            ok: status >= 200 && status < 300,
-            headers: response.headers,
-            body: Buffer.concat(chunks).toString("utf8"),
-          });
-        });
-      },
-    );
-
-    request.setTimeout(getRequestTimeoutMs(), () => {
-      request.destroy(
-        new Error(`BioStar2 request timed out after ${getRequestTimeoutMs()}ms.`),
-      );
-    });
-    request.on("error", reject);
-
-    if (options.body) {
-      request.write(options.body);
-    }
-
-    request.end();
-  });
+  return {
+    status,
+    ok: status >= 200 && status < 300,
+    headers: response.headers,
+    data: response.data,
+  };
 }
 
 function getHttpsRequestOptions(forceInsecureTls = false) {
@@ -275,15 +253,16 @@ function getHttpsRequestOptions(forceInsecureTls = false) {
   }
 
   return {
-    agent: insecureHttpsAgent,
-    rejectUnauthorized: false,
-    checkServerIdentity: () => undefined,
-    secureOptions: cryptoConstants.SSL_OP_LEGACY_SERVER_CONNECT,
+    httpsAgent: insecureHttpsAgent,
   };
 }
 
 function shouldRetryWithInsecureTls(error: unknown) {
-  const code = (error as { code?: string }).code;
+  const axiosError = error as AxiosError | undefined;
+  const code =
+    axiosError?.code ||
+    (axiosError?.cause as { code?: string } | undefined)?.code ||
+    (error as { code?: string }).code;
   return [
     "CERT_HAS_EXPIRED",
     "DEPTH_ZERO_SELF_SIGNED_CERT",
@@ -321,21 +300,16 @@ function getBiostarPassword() {
   return process.env.BIOSTAR2_PASSWORD || process.env.BIOSTAR_PASS || "";
 }
 
-function readHeader(headers: IncomingHttpHeaders, name: string) {
+function readHeader(
+  headers: RawAxiosResponseHeaders | AxiosResponseHeaders,
+  name: string,
+) {
   const value = headers[name.toLowerCase()];
   if (Array.isArray(value)) {
     return value[0] ?? null;
   }
 
-  return value ?? null;
-}
-
-function parseJson(value: string): unknown {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
+  return value === undefined ? null : String(value);
 }
 
 function extractDeviceRows(payload: unknown): unknown[] {
