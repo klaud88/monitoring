@@ -1,3 +1,4 @@
+import { constants as cryptoConstants } from "node:crypto";
 import http, { type IncomingHttpHeaders } from "node:http";
 import https from "node:https";
 import type { DeviceStatus } from "./types";
@@ -42,13 +43,12 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const insecureHttpsAgent = new https.Agent({
   rejectUnauthorized: false,
   checkServerIdentity: () => undefined,
+  secureOptions: cryptoConstants.SSL_OP_LEGACY_SERVER_CONNECT,
 });
 let cachedSession: BiostarSession | null = null;
 
 export function hasBiostarConfig() {
-  return Boolean(
-    process.env.BIOSTAR2_USERNAME && process.env.BIOSTAR2_PASSWORD,
-  );
+  return Boolean(getBiostarUsername() && getBiostarPassword());
 }
 
 export async function fetchBiostarDevices(): Promise<BiostarDevice[]> {
@@ -62,8 +62,8 @@ export async function fetchBiostarDevices(): Promise<BiostarDevice[]> {
 export async function fetchBiostarDevicesResponse({
   forceLogin = false,
 }: { forceLogin?: boolean } = {}): Promise<BiostarDevicesResponse> {
-  const username = process.env.BIOSTAR2_USERNAME;
-  const password = process.env.BIOSTAR2_PASSWORD;
+  const username = getBiostarUsername();
+  const password = getBiostarPassword();
 
   if (!username || !password) {
     throw new Error("BioStar2 credentials are not configured.");
@@ -171,7 +171,12 @@ function getDevicesUrl() {
 }
 
 function buildBiostarUrl(path: "/api/login" | "/api/devices") {
-  const configuredUrl = (process.env.BIOSTAR2_BASE_URL || DEFAULT_BASE_URL)
+  const configuredUrl = (
+    process.env.BIOSTAR2_BASE_URL ||
+    process.env.BIOSTAR2_URL ||
+    process.env.BIOSTAR_URL ||
+    DEFAULT_BASE_URL
+  )
     .trim()
     .replace(/\/+$/, "");
 
@@ -273,6 +278,7 @@ function getHttpsRequestOptions(forceInsecureTls = false) {
     agent: insecureHttpsAgent,
     rejectUnauthorized: false,
     checkServerIdentity: () => undefined,
+    secureOptions: cryptoConstants.SSL_OP_LEGACY_SERVER_CONNECT,
   };
 }
 
@@ -305,6 +311,14 @@ function shouldRejectUnauthorized() {
   return !["0", "false", "no"].includes(
     String(configured).trim().toLowerCase(),
   );
+}
+
+function getBiostarUsername() {
+  return process.env.BIOSTAR2_USERNAME || process.env.BIOSTAR_USER || "";
+}
+
+function getBiostarPassword() {
+  return process.env.BIOSTAR2_PASSWORD || process.env.BIOSTAR_PASS || "";
 }
 
 function readHeader(headers: IncomingHttpHeaders, name: string) {
