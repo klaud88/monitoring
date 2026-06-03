@@ -76,6 +76,7 @@ type Props = {
   deviceLocations: Record<string, LatLng>;
   tasksByDevice: Map<string, Task[]>;
   userMap: Map<string, AppUser>;
+  canEditLocations: boolean;
   activeAssignment: { deviceId: string; taskId: string; userId: string } | null;
   selectedDeviceId: string | null;
   editingDeviceId: string | null;
@@ -84,6 +85,7 @@ type Props = {
   onStartEdit: (deviceId: string) => void;
   onStopEdit: (deviceId: string) => void;
   onMove: (deviceId: string, location: LatLng) => void;
+  onMoveEnd: (deviceId: string, location: LatLng) => void;
   onShowAssignment: (deviceId: string, taskId: string, userId: string) => void;
   onCloseAssignment: () => void;
 };
@@ -109,6 +111,7 @@ export function GoogleTbilisiMap({
   deviceLocations,
   tasksByDevice,
   userMap,
+  canEditLocations,
   activeAssignment,
   selectedDeviceId,
   editingDeviceId,
@@ -117,6 +120,7 @@ export function GoogleTbilisiMap({
   onStartEdit,
   onStopEdit,
   onMove,
+  onMoveEnd,
   onShowAssignment,
   onCloseAssignment
 }: Props) {
@@ -254,6 +258,7 @@ export function GoogleTbilisiMap({
           location={location}
           tasks={tasksByDevice.get(device.id) ?? []}
           userMap={userMap}
+          canEditLocations={canEditLocations}
           activeAssignment={activeAssignment}
           isSelected={selectedDeviceId === device.id}
           isEditing={editingDeviceId === device.id}
@@ -267,6 +272,12 @@ export function GoogleTbilisiMap({
               onMove(device.id, nextLocation);
             }
           }}
+          onMoveEnd={(clientX, clientY) => {
+            const nextLocation = clientPointToLatLng(clientX, clientY, mapElementRef.current, maps, projectionOverlayRef.current);
+            if (nextLocation) {
+              onMoveEnd(device.id, nextLocation);
+            }
+          }}
           onShowAssignment={onShowAssignment}
           onCloseAssignment={onCloseAssignment}
         />
@@ -274,6 +285,7 @@ export function GoogleTbilisiMap({
     });
   }, [
     activeAssignment,
+    canEditLocations,
     deviceLocations,
     devices,
     editingDeviceId,
@@ -281,6 +293,7 @@ export function GoogleTbilisiMap({
     onCloseAssignment,
     onCloseDevice,
     onMove,
+    onMoveEnd,
     onSelect,
     onShowAssignment,
     onStartEdit,
@@ -332,6 +345,16 @@ export function positionToLatLng(position: Device["position"]): LatLng {
   return roundLatLng({ lat, lng });
 }
 
+export function latLngToPosition(location: LatLng): Device["position"] {
+  const x = ((location.lng - TBILISI_BOUNDS.west) / (TBILISI_BOUNDS.east - TBILISI_BOUNDS.west)) * 100;
+  const y = ((TBILISI_BOUNDS.north - location.lat) / (TBILISI_BOUNDS.north - TBILISI_BOUNDS.south)) * 100;
+
+  return {
+    x: roundPosition(x),
+    y: roundPosition(y)
+  };
+}
+
 export function isLatLng(value: unknown): value is LatLng {
   return (
     typeof value === "object" &&
@@ -348,6 +371,7 @@ function MapDeviceMarker({
   location,
   tasks,
   userMap,
+  canEditLocations,
   activeAssignment,
   isSelected,
   isEditing,
@@ -356,6 +380,7 @@ function MapDeviceMarker({
   onStartEdit,
   onStopEdit,
   onMove,
+  onMoveEnd,
   onShowAssignment,
   onCloseAssignment
 }: {
@@ -363,6 +388,7 @@ function MapDeviceMarker({
   location: LatLng;
   tasks: Task[];
   userMap: Map<string, AppUser>;
+  canEditLocations: boolean;
   activeAssignment: { deviceId: string; taskId: string; userId: string } | null;
   isSelected: boolean;
   isEditing: boolean;
@@ -371,6 +397,7 @@ function MapDeviceMarker({
   onStartEdit: (deviceId: string) => void;
   onStopEdit: (deviceId: string) => void;
   onMove: (clientX: number, clientY: number) => void;
+  onMoveEnd: (clientX: number, clientY: number) => void;
   onShowAssignment: (deviceId: string, taskId: string, userId: string) => void;
   onCloseAssignment: () => void;
 }) {
@@ -418,6 +445,7 @@ function MapDeviceMarker({
         event.preventDefault();
         event.stopPropagation();
         setDragging(false);
+        onMoveEnd(event.clientX, event.clientY);
         event.currentTarget.releasePointerCapture(event.pointerId);
       }}
     >
@@ -482,12 +510,12 @@ function MapDeviceMarker({
                 <Check size={15} />
                 <span>დასრულება</span>
               </button>
-            ) : (
+            ) : canEditLocations ? (
               <button type="button" onClick={() => onStartEdit(device.id)}>
                 <Pencil size={15} />
                 <span>ედიტი</span>
               </button>
-            )}
+            ) : null}
           </div>
           {isEditing ? <p>გადაათრიეთ პინი ახალ ადგილზე.</p> : null}
         </div>
@@ -594,6 +622,11 @@ function roundLatLng(location: LatLng): LatLng {
     lat: Math.round(location.lat * 1_000_000) / 1_000_000,
     lng: Math.round(location.lng * 1_000_000) / 1_000_000
   };
+}
+
+function roundPosition(value: number) {
+  const safeValue = Number.isFinite(value) ? value : 50;
+  return Math.round(Math.max(5, Math.min(95, safeValue)) * 100) / 100;
 }
 
 function loadGoogleMaps(apiKey: string) {

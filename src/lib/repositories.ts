@@ -1099,6 +1099,32 @@ export async function updateDevice(
   return updated ?? null;
 }
 
+export async function updateDevicePosition(
+  id: string,
+  position: { x: number; y: number },
+): Promise<Device | null> {
+  await ensureOperationalSchema();
+
+  const updated = await withConnection(async (connection) => {
+    const [result] = await connection.query<ResultSetHeader>(
+      `
+        update devices
+        set position_x = ?, position_y = ?
+        where id = ?
+      `,
+      [position.x, position.y, id],
+    );
+
+    if (!result.affectedRows) {
+      return null;
+    }
+
+    return getDeviceById(id);
+  });
+
+  return updated ?? null;
+}
+
 export async function deleteDevice(id: string) {
   const deleted = await withConnection(async (connection) => {
     const [result] = await connection.query<ResultSetHeader>(

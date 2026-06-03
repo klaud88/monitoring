@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import {
   GoogleTbilisiMap,
-  isLatLng,
+  latLngToPosition,
   positionToLatLng,
   type LatLng,
 } from "@/components/dashboard/google-tbilisi-map";
@@ -39,6 +39,7 @@ type DashboardProps = {
   initialDevices: Device[];
   initialTasks: Task[];
   users: AppUser[];
+  canEditDeviceLocations: boolean;
 };
 
 type NewTaskForm = {
@@ -65,13 +66,12 @@ const priorityLabels: Record<TaskPriority, string> = {
 };
 
 const today = new Date().toISOString().slice(0, 10);
-const DEVICE_LOCATIONS_KEY = "biostar_device_locations";
-const LEGACY_DEVICE_POSITIONS_KEY = "biostar_device_positions";
 
 export function Dashboard({
   initialDevices,
   initialTasks,
   users,
+  canEditDeviceLocations,
 }: DashboardProps) {
   const initialActiveDeviceId =
     initialDevices.find((device) => !device.isExcluded)?.id ||
@@ -96,6 +96,7 @@ export function Dashboard({
   const [showCreateTask, setShowCreateTask] = useState(false);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [editingDeviceId, setEditingDeviceId] = useState<string | null>(null);
+  const [locationSaveError, setLocationSaveError] = useState("");
   const [refreshingDevices, setRefreshingDevices] = useState(false);
   const [refreshError, setRefreshError] = useState("");
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
@@ -182,35 +183,38 @@ export function Dashboard({
   }, []);
 
   useEffect(() => {
-    const storedLocations = readDeviceLocations(
-      window.localStorage.getItem(DEVICE_LOCATIONS_KEY),
-    );
-    const legacyLocations = readLegacyDeviceLocations(
-      window.localStorage.getItem(LEGACY_DEVICE_POSITIONS_KEY),
-    );
-
-    setDeviceLocations((current) => ({
-      ...current,
-      ...legacyLocations,
-      ...storedLocations,
-    }));
-  }, []);
-
-  useEffect(() => {
     setDeviceLocations((current) => {
       let changed = false;
-      const next = { ...current };
+      const next: Record<string, LatLng> = {};
 
       devices.forEach((device) => {
-        if (!next[device.id]) {
-          next[device.id] = positionToLatLng(device.position);
+        if (editingDeviceId === device.id && current[device.id]) {
+          next[device.id] = current[device.id];
+          return;
+        }
+
+        const location = positionToLatLng(device.position);
+        const currentLocation = current[device.id];
+        next[device.id] = location;
+
+        if (
+          !currentLocation ||
+          currentLocation.lat !== location.lat ||
+          currentLocation.lng !== location.lng
+        ) {
+          changed = true;
+        }
+      });
+
+      Object.keys(current).forEach((deviceId) => {
+        if (!next[deviceId]) {
           changed = true;
         }
       });
 
       return changed ? next : current;
     });
-  }, [devices]);
+  }, [devices, editingDeviceId]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -400,25 +404,72 @@ export function Dashboard({
   }
 
   function startDeviceEdit(deviceId: string) {
+    if (!canEditDeviceLocations) {
+      return;
+    }
+
     setSelectedDeviceId(deviceId);
     setEditingDeviceId(deviceId);
+    setLocationSaveError("");
     recordAudit("dashboard.device_location_edit_start", "device", deviceId);
   }
 
   function stopDeviceEdit(deviceId: string) {
     setEditingDeviceId(null);
     recordAudit("dashboard.device_location_edit_save", "device", deviceId);
+    void saveDeviceLocation(deviceId, deviceLocations[deviceId]);
   }
 
   function updateDeviceLocation(deviceId: string, location: LatLng) {
     setDeviceLocations((current) => {
-      const next = {
+      return {
         ...current,
         [deviceId]: location,
       };
-      window.localStorage.setItem(DEVICE_LOCATIONS_KEY, JSON.stringify(next));
-      return next;
     });
+  }
+
+  async function saveDeviceLocation(deviceId: string, location?: LatLng) {
+    if (!location) {
+      return;
+    }
+
+    setLocationSaveError("");
+    const position = latLngToPosition(location);
+    const response = await fetch(`/api/devices/${deviceId}/position`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ position }),
+    }).catch(() => null);
+
+    if (!response?.ok) {
+      const device = deviceMap.get(deviceId);
+      if (device) {
+        setDeviceLocations((current) => ({
+          ...current,
+          [deviceId]: positionToLatLng(device.position),
+        }));
+      }
+      setLocationSaveError("ლოკაციის შენახვა ვერ მოხერხდა.");
+      return;
+    }
+
+    const payload = (await response.json()) as { device?: Device };
+    const savedDevice = payload.device;
+    if (savedDevice) {
+      setDevices((current) =>
+        current.map((device) =>
+          device.id === savedDevice.id ? savedDevice : device,
+        ),
+      );
+      setDeviceLocations((current) => ({
+        ...current,
+        [savedDevice.id]: positionToLatLng(savedDevice.position),
+      }));
+      recordAudit("dashboard.device_location_update", "device", deviceId, {
+        position: savedDevice.position,
+      });
+    }
   }
 
   return (
@@ -523,6 +574,8 @@ export function Dashboard({
         </button>
         {refreshError ? (
           <span className="sync-message error">{refreshError}</span>
+        ) : locationSaveError ? (
+          <span className="sync-message error">{locationSaveError}</span>
         ) : lastRefreshedAt ? (
           <span className="sync-message">
             ბოლო: {formatSyncTime(lastRefreshedAt)}
@@ -551,6 +604,7 @@ export function Dashboard({
             deviceLocations={deviceLocations}
             tasksByDevice={tasksByDevice}
             userMap={userMap}
+            canEditLocations={canEditDeviceLocations}
             activeAssignment={activeAssignment}
             selectedDeviceId={selectedDeviceId}
             editingDeviceId={editingDeviceId}
@@ -562,6 +616,10 @@ export function Dashboard({
             onStartEdit={startDeviceEdit}
             onStopEdit={stopDeviceEdit}
             onMove={updateDeviceLocation}
+            onMoveEnd={(deviceId, location) => {
+              updateDeviceLocation(deviceId, location);
+              void saveDeviceLocation(deviceId, location);
+            }}
             onShowAssignment={showAssignment}
             onCloseAssignment={() => setActiveAssignment(null)}
           />
@@ -744,56 +802,4 @@ function formatSyncTime(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
-}
-
-function readDeviceLocations(rawValue: string | null) {
-  const parsed = parseStoredObject(rawValue);
-  const locations: Record<string, LatLng> = {};
-
-  Object.entries(parsed).forEach(([deviceId, value]) => {
-    if (isLatLng(value)) {
-      locations[deviceId] = value;
-    }
-  });
-
-  return locations;
-}
-
-function readLegacyDeviceLocations(rawValue: string | null) {
-  const parsed = parseStoredObject(rawValue);
-  const locations: Record<string, LatLng> = {};
-
-  Object.entries(parsed).forEach(([deviceId, value]) => {
-    if (isValidLegacyPosition(value)) {
-      locations[deviceId] = positionToLatLng(value);
-    }
-  });
-
-  return locations;
-}
-
-function parseStoredObject(rawValue: string | null): Record<string, unknown> {
-  if (!rawValue) {
-    return {};
-  }
-
-  try {
-    const parsed: unknown = JSON.parse(rawValue);
-    return parsed && typeof parsed === "object"
-      ? (parsed as Record<string, unknown>)
-      : {};
-  } catch {
-    return {};
-  }
-}
-
-function isValidLegacyPosition(value: unknown): value is Device["position"] {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as Device["position"]).x === "number" &&
-    typeof (value as Device["position"]).y === "number" &&
-    Number.isFinite((value as Device["position"]).x) &&
-    Number.isFinite((value as Device["position"]).y)
-  );
 }
