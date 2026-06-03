@@ -1,7 +1,12 @@
 import { cookies } from "next/headers";
 import { AppShell } from "@/components/layout/app-shell";
 import { PermissionsManager } from "@/components/permissions/permissions-manager";
-import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
+import {
+  SESSION_COOKIE,
+  hasPermission,
+  isAdmin,
+  verifySessionToken,
+} from "@/lib/auth";
 import { getRoles } from "@/lib/repositories";
 
 export default async function PermissionsPage() {
@@ -14,7 +19,7 @@ export default async function PermissionsPage() {
       {hasPermission(user, "permissions.view") ? (
         <PermissionsManager
           roles={roles}
-          canEdit={hasPermission(user, "permissions.edit")}
+          canEdit={isAdmin(user)}
         />
       ) : (
         <section className="surface empty-state">წვდომა შეზღუდულია.</section>

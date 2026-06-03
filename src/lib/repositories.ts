@@ -1,4 +1,4 @@
-import type { ResultSetHeader } from "mysql2";
+import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 import { fetchBiostarDevices, hasBiostarConfig } from "./biostar";
 import { mockDevices, mockTasks, mockUsers } from "./mock-data";
@@ -35,6 +35,10 @@ type RoleRow = {
   name: string;
   label: string;
   permissions: string | null;
+};
+
+type RoleIdRow = RowDataPacket & {
+  id: string;
 };
 
 type RegionRow = {
@@ -701,6 +705,15 @@ export async function updateRolePermissions(
   const updated = await withConnection(async (connection) => {
     await connection.beginTransaction();
     try {
+      const [roleRows] = await connection.query<RoleIdRow[]>(
+        "select id from roles where id = ? limit 1 for update",
+        [roleId],
+      );
+      if (!roleRows.length) {
+        await connection.rollback();
+        return null;
+      }
+
       for (const permission of uniquePermissions) {
         const [pageKey, actionKey] = permission.split(".");
         await connection.query<ResultSetHeader>(

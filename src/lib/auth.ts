@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import { jwtVerify, SignJWT } from "jose";
+import { getUserById } from "./repositories";
 import { SESSION_COOKIE } from "./session";
 import type { AppUser, PermissionKey, SessionUser } from "./types";
 
@@ -50,7 +51,7 @@ export async function verifySessionToken(token?: string): Promise<SessionUser | 
       return null;
     }
 
-    return {
+    const sessionUser = {
       id: payload.sub,
       name: String(payload.name),
       email: String(payload.email),
@@ -61,6 +62,8 @@ export async function verifySessionToken(token?: string): Promise<SessionUser | 
         ? (payload.permissions as PermissionKey[])
         : []
     };
+
+    return (await getUserById(sessionUser.id).catch(() => null)) ?? sessionUser;
   } catch {
     return null;
   }
@@ -84,4 +87,8 @@ export function hasPermission(user: SessionUser | null, permission: PermissionKe
   }
 
   return user.role === "admin" || user.permissions.includes(permission);
+}
+
+export function isAdmin(user: SessionUser | null) {
+  return user?.role === "admin";
 }

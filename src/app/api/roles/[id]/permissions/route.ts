@@ -1,8 +1,25 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
+import { SESSION_COOKIE, isAdmin, verifySessionToken } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { updateRolePermissions } from "@/lib/repositories";
-import type { PermissionKey } from "@/lib/types";
+import type { PageKey, PermissionAction, PermissionKey } from "@/lib/types";
+
+const pageKeys = new Set<PageKey>([
+  "dashboard",
+  "devices",
+  "tasks",
+  "regions",
+  "offline_records",
+  "users",
+  "permissions",
+  "analytics",
+]);
+const permissionActions = new Set<PermissionAction>([
+  "view",
+  "create",
+  "edit",
+  "delete",
+]);
 
 export async function PUT(
   request: NextRequest,
@@ -11,15 +28,26 @@ export async function PUT(
   const user = await verifySessionToken(
     request.cookies.get(SESSION_COOKIE)?.value,
   );
-  if (!hasPermission(user, "permissions.edit")) {
+  if (!isAdmin(user)) {
     return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   }
 
   const { id } = await context.params;
   const body = await request.json().catch(() => null);
-  const permissions = Array.isArray(body?.permissions)
-    ? body.permissions.map(String).filter(isPermissionKey)
-    : [];
+  if (!Array.isArray(body?.permissions)) {
+    return NextResponse.json(
+      { message: "Permissions must be an array." },
+      { status: 400 },
+    );
+  }
+
+  const permissions = body.permissions.map(String);
+  if (!permissions.every(isPermissionKey)) {
+    return NextResponse.json(
+      { message: "Invalid permission key." },
+      { status: 400 },
+    );
+  }
 
   const role = await updateRolePermissions(id, permissions);
   if (!role) {
@@ -40,5 +68,10 @@ export async function PUT(
 }
 
 function isPermissionKey(value: string): value is PermissionKey {
-  return /^[a-z_]+\\.(view|create|edit|delete)$/.test(value);
+  const [pageKey, actionKey, extra] = value.split(".");
+  return (
+    !extra &&
+    pageKeys.has(pageKey as PageKey) &&
+    permissionActions.has(actionKey as PermissionAction)
+  );
 }
