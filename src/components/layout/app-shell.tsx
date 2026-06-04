@@ -7,6 +7,7 @@ import {
   DoorOpen,
   LogOut,
   MapPinned,
+  Menu,
   MonitorCog,
   ShieldCheck,
   UserCircle,
@@ -92,6 +93,24 @@ export async function AppShell({
               <small>სტატუსები და X-Stations</small>
             </span>
           </Link>
+
+          <details className="mobile-menu">
+            <summary className="mobile-menu-button" aria-label="მენიუს გახსნა">
+              <Menu size={20} />
+              <span>მენიუ</span>
+            </summary>
+            <nav className="mobile-menu-panel" aria-label="მობილური მენიუ">
+              {visibleItems.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <Link key={item.href} href={item.href} className="menu-link">
+                    <Icon size={18} />
+                    <span>{item.label}</span>
+                  </Link>
+                );
+              })}
+            </nav>
+          </details>
 
           <div className="account-actions">
             <Link

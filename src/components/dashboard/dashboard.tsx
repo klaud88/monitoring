@@ -94,6 +94,7 @@ export function Dashboard({
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [query, setQuery] = useState("");
   const [showCreateTask, setShowCreateTask] = useState(false);
+  const [showOfflineDevices, setShowOfflineDevices] = useState(false);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [editingDeviceId, setEditingDeviceId] = useState<string | null>(null);
   const [locationSaveError, setLocationSaveError] = useState("");
@@ -290,9 +291,14 @@ export function Dashboard({
     userFilter,
   ]);
 
-  const offlineCount = activeDevices.filter(
-    (device) => device.status === "offline",
-  ).length;
+  const offlineDevices = useMemo(
+    () =>
+      activeDevices
+        .filter((device) => device.status === "offline")
+        .sort((a, b) => a.name.localeCompare(b.name, "ka")),
+    [activeDevices],
+  );
+  const offlineCount = offlineDevices.length;
   const errorCount = activeDevices.filter(
     (device) => device.status === "error",
   ).length;
@@ -327,6 +333,15 @@ export function Dashboard({
     setSelectedTags([]);
     setQuery("");
     recordAudit("dashboard.filter_reset", "dashboard");
+  }
+
+  function toggleOfflineDevices() {
+    const next = !showOfflineDevices;
+    setShowOfflineDevices(next);
+    void recordAudit("dashboard.offline_devices_toggle", "dashboard", undefined, {
+      open: next,
+      count: offlineDevices.length,
+    });
   }
 
   function toggleAssignee(userId: string) {
@@ -481,11 +496,17 @@ export function Dashboard({
           <p>დაგეგმილი ვიზიტები და მიმდინარე ტასკები ერთ ხედში.</p>
         </div>
         <div className="metric-strip">
-          <div className="metric">
+          <button
+            className={`metric metric-button ${showOfflineDevices ? "active" : ""}`}
+            type="button"
+            onClick={toggleOfflineDevices}
+            aria-expanded={showOfflineDevices}
+            aria-controls="dashboard-offline-devices"
+          >
             <WifiOff size={18} />
             <span>{offlineCount}</span>
             <small>offline</small>
-          </div>
+          </button>
           <div className="metric">
             <AlertTriangle size={18} />
             <span>{errorCount}</span>
@@ -503,6 +524,47 @@ export function Dashboard({
           </div>
         </div>
       </section>
+
+      {showOfflineDevices ? (
+        <section
+          id="dashboard-offline-devices"
+          className="offline-device-popout"
+          aria-label="Offline მოწყობილობების ჩამონათვალი"
+        >
+          <header>
+            <div>
+              <p className="eyebrow">Offline</p>
+              <h2>მოწყობილობები</h2>
+            </div>
+            <button
+              className="icon-button"
+              type="button"
+              onClick={() => setShowOfflineDevices(false)}
+              aria-label="ჩამონათვალის დახურვა"
+            >
+              <X size={18} />
+            </button>
+          </header>
+
+          {offlineDevices.length ? (
+            <div className="offline-device-popout-list">
+              {offlineDevices.map((device) => (
+                <Link
+                  key={device.id}
+                  className="offline-device-popout-card"
+                  href={`/devices/${device.id}`}
+                >
+                  <strong>{device.name}</strong>
+                  <span>ID: {device.id}</span>
+                  <small>რაიონი: {device.region}</small>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <p className="muted">ამ დროისთვის offline მოწყობილობა არ არის.</p>
+          )}
+        </section>
+      ) : null}
 
       <section className="filter-bar" aria-label="რუკის ფილტრები">
         <div className="search-field">
