@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarDays,
   CheckCircle2,
@@ -13,11 +13,14 @@ import {
   Save,
   Search,
   SlidersHorizontal,
+  Tag,
   Trash2,
   UserRound,
   X,
 } from "lucide-react";
+import { taskTagCatalog } from "@/lib/catalog";
 import { recordAudit } from "@/lib/client-audit";
+import { withoutDeviceCodes } from "@/lib/display";
 import type {
   AppUser,
   Device,
@@ -30,6 +33,7 @@ type Props = {
   initialTasks: Task[];
   devices: Device[];
   users: AppUser[];
+  initialEditTaskId?: string;
   permissions: TaskPermissions;
 };
 
@@ -46,6 +50,7 @@ type TaskDraft = {
   assigneeIds: string[];
   status: TaskStatus;
   priority: TaskPriority;
+  tags: string[];
   dueDate: string;
 };
 
@@ -67,16 +72,19 @@ export function TasksManager({
   initialTasks,
   devices,
   users,
+  initialEditTaskId,
   permissions,
 }: Props) {
   const [tasks, setTasks] = useState(initialTasks);
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all");
   const [userFilter, setUserFilter] = useState("all");
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [query, setQuery] = useState("");
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<TaskDraft | null>(null);
   const [savingTaskId, setSavingTaskId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const initialEditHandledRef = useRef<string | null>(null);
   const [draft, setDraft] = useState({
     title: "",
     issue: "",
@@ -84,6 +92,7 @@ export function TasksManager({
     assigneeId:
       users.find((user) => user.role !== "viewer")?.id || users[0]?.id || "",
     priority: "normal" as TaskPriority,
+    tags: [] as string[],
     dueDate: new Date().toISOString().slice(0, 10),
   });
 
@@ -100,18 +109,57 @@ export function TasksManager({
     const normalized = query.trim().toLowerCase();
     return tasks.filter((task) => {
       const device = deviceMap.get(task.deviceId);
+      const displayTitle = withoutDeviceCodes(task.title, [device?.code]);
+      const displayIssue = withoutDeviceCodes(task.issue, [device?.code]);
       const matchesStatus =
         statusFilter === "all" || task.status === statusFilter;
       const matchesUser =
         userFilter === "all" || task.assigneeIds.includes(userFilter);
+      const matchesTags =
+        selectedTags.length === 0 ||
+        selectedTags.every((tagName) => task.tags.includes(tagName));
       const matchesQuery =
         !normalized ||
-        task.title.toLowerCase().includes(normalized) ||
-        task.issue.toLowerCase().includes(normalized) ||
-        device?.code.toLowerCase().includes(normalized);
-      return matchesStatus && matchesUser && matchesQuery;
+        displayTitle.toLowerCase().includes(normalized) ||
+        displayIssue.toLowerCase().includes(normalized) ||
+        device?.name.toLowerCase().includes(normalized);
+      return matchesStatus && matchesUser && matchesTags && matchesQuery;
     });
-  }, [deviceMap, query, statusFilter, tasks, userFilter]);
+  }, [deviceMap, query, selectedTags, statusFilter, tasks, userFilter]);
+
+  useEffect(() => {
+    if (
+      !initialEditTaskId ||
+      !permissions.edit ||
+      initialEditHandledRef.current === initialEditTaskId
+    ) {
+      return;
+    }
+
+    const task = tasks.find((item) => item.id === initialEditTaskId);
+    if (!task) {
+      return;
+    }
+
+    const device = deviceMap.get(task.deviceId);
+    setEditingTaskId(task.id);
+    setEditDraft(createEditDraft(task, device?.code));
+    setStatusFilter("all");
+    setUserFilter("all");
+    setSelectedTags([]);
+    setQuery("");
+    setError("");
+    initialEditHandledRef.current = initialEditTaskId;
+
+    const frameId = window.requestAnimationFrame(() => {
+      document.getElementById(`task-${task.id}`)?.scrollIntoView({
+        block: "center",
+        behavior: "smooth",
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [deviceMap, initialEditTaskId, permissions.edit, tasks]);
 
   async function createTask(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -131,12 +179,13 @@ export function TasksManager({
       assigneeIds: draft.assigneeId ? [draft.assigneeId] : [],
       status: "planned",
       priority: draft.priority,
+      tags: draft.tags,
       dueDate: draft.dueDate,
       createdAt: new Date().toISOString(),
     };
 
     setTasks((current) => [optimisticTask, ...current]);
-    setDraft((current) => ({ ...current, title: "", issue: "" }));
+    setDraft((current) => ({ ...current, title: "", issue: "", tags: [] }));
 
     setError("");
     const response = await fetch("/api/tasks", {
@@ -175,17 +224,32 @@ export function TasksManager({
   }
 
   function startEditTask(task: Task) {
+    const device = deviceMap.get(task.deviceId);
     setEditingTaskId(task.id);
-    setEditDraft({
-      title: task.title,
-      issue: task.issue,
-      deviceId: task.deviceId,
-      assigneeIds: task.assigneeIds,
-      status: task.status,
-      priority: task.priority,
-      dueDate: task.dueDate,
-    });
+    setEditDraft(createEditDraft(task, device?.code));
     setError("");
+  }
+
+  function toggleDraftTag(tagName: string) {
+    setDraft((current) => ({
+      ...current,
+      tags: toggleListValue(current.tags, tagName),
+    }));
+  }
+
+  function toggleEditTag(tagName: string) {
+    setEditDraft((current) =>
+      current
+        ? {
+            ...current,
+            tags: toggleListValue(current.tags, tagName),
+          }
+        : current,
+    );
+  }
+
+  function toggleFilterTag(tagName: string) {
+    setSelectedTags((current) => toggleListValue(current, tagName));
   }
 
   function toggleEditAssignee(userId: string) {
@@ -321,7 +385,7 @@ export function TasksManager({
               >
                 {devices.map((device) => (
                   <option key={device.id} value={device.id}>
-                    {device.code} · {device.name}
+                    {device.name}
                   </option>
                 ))}
               </select>
@@ -404,6 +468,7 @@ export function TasksManager({
                 />
               </label>
             </div>
+            <TaskTagPicker selectedTags={draft.tags} onToggle={toggleDraftTag} />
             <button className="primary-button" type="submit">
               <Plus size={18} />
               <span>დამატება</span>
@@ -454,6 +519,19 @@ export function TasksManager({
               </select>
             </label>
           </div>
+          <section className="tag-filter task-tag-filter" aria-label="დავალების ტეგები">
+            {taskTagCatalog.map((tagName) => (
+              <button
+                key={tagName}
+                className={`tag-toggle ${selectedTags.includes(tagName) ? "active" : ""}`}
+                type="button"
+                onClick={() => toggleFilterTag(tagName)}
+              >
+                <Tag size={14} />
+                <span>{tagName}</span>
+              </button>
+            ))}
+          </section>
 
           <div className="task-table">
             <div className="task-table-head">
@@ -466,8 +544,14 @@ export function TasksManager({
             </div>
             {filteredTasks.map((task) => {
               const device = deviceMap.get(task.deviceId);
+              const displayTitle = withoutDeviceCodes(task.title, [device?.code]);
+              const displayIssue = withoutDeviceCodes(task.issue, [device?.code]);
               return editingTaskId === task.id && editDraft ? (
-                <article key={task.id} className="task-table-row editing">
+                <article
+                  key={task.id}
+                  id={`task-${task.id}`}
+                  className="task-table-row editing"
+                >
                   <div className="task-edit-grid">
                     <label>
                       <span>X-Station</span>
@@ -483,7 +567,7 @@ export function TasksManager({
                       >
                         {devices.map((item) => (
                           <option key={item.id} value={item.id}>
-                            {item.code} · {item.name}
+                            {item.name}
                           </option>
                         ))}
                       </select>
@@ -588,6 +672,21 @@ export function TasksManager({
                         ))}
                       </div>
                     </div>
+                    <div className="task-assignee-edit">
+                      <span>ტეგები</span>
+                      <div className="row-tags">
+                        {taskTagCatalog.map((tagName) => (
+                          <button
+                            key={tagName}
+                            type="button"
+                            className={`tag-toggle compact ${editDraft.tags.includes(tagName) ? "active" : ""}`}
+                            onClick={() => toggleEditTag(tagName)}
+                          >
+                            {tagName}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                   <div className="row-actions">
                     <button
@@ -613,23 +712,27 @@ export function TasksManager({
                   </div>
                 </article>
               ) : (
-                <article key={task.id} className="task-table-row">
+                <article
+                  key={task.id}
+                  id={`task-${task.id}`}
+                  className="task-table-row"
+                >
                   <Link
                     className="task-device-cell clickable-cell"
                     href={`/devices/${device?.id ?? task.deviceId}`}
                   >
-                    <span className="device-code-inline">
+                    <span className="device-name-inline">
                       <MapPin size={15} />
-                      {device?.code || task.deviceId}
+                      {device?.name || "დავაისი ვერ მოიძებნა"}
                     </span>
-                    <strong>{device?.name || "დავაისი ვერ მოიძებნა"}</strong>
                   </Link>
                   <Link
                     className="task-summary-cell clickable-cell"
                     href={`/tasks/${task.id}`}
                   >
-                    <strong className="table-title-link">{task.title}</strong>
-                    <p>{task.issue}</p>
+                    <strong className="table-title-link">{displayTitle}</strong>
+                    <p>{displayIssue}</p>
+                    <TaskTagList tags={task.tags} />
                     <small className={`priority-label ${task.priority}`}>
                       {priorityLabels[task.priority]}
                     </small>
@@ -702,4 +805,65 @@ export function TasksManager({
       </section>
     </div>
   );
+}
+
+function TaskTagPicker({
+  selectedTags,
+  onToggle,
+}: {
+  selectedTags: string[];
+  onToggle: (tagName: string) => void;
+}) {
+  return (
+    <div className="task-tag-picker">
+      <span>ტეგები</span>
+      <div className="row-tags">
+        {taskTagCatalog.map((tagName) => (
+          <button
+            key={tagName}
+            type="button"
+            className={`tag-toggle compact ${selectedTags.includes(tagName) ? "active" : ""}`}
+            onClick={() => onToggle(tagName)}
+          >
+            {tagName}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TaskTagList({ tags }: { tags: string[] }) {
+  if (!tags.length) {
+    return null;
+  }
+
+  return (
+    <div className="task-tags">
+      {tags.map((tagName) => (
+        <span key={tagName} className="tag-toggle compact active">
+          {tagName}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function createEditDraft(task: Task, deviceCode?: string): TaskDraft {
+  return {
+    title: withoutDeviceCodes(task.title, [deviceCode]),
+    issue: withoutDeviceCodes(task.issue, [deviceCode]),
+    deviceId: task.deviceId,
+    assigneeIds: task.assigneeIds,
+    status: task.status,
+    priority: task.priority,
+    tags: task.tags,
+    dueDate: task.dueDate,
+  };
+}
+
+function toggleListValue(values: string[], value: string) {
+  return values.includes(value)
+    ? values.filter((item) => item !== value)
+    : [...values, value];
 }

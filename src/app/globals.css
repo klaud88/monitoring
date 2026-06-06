@@ -936,11 +936,11 @@ button.pin-shell {
   background: var(--orange);
 }
 
-.device-code {
+.device-marker-name {
   font-weight: 850;
 }
 
-.device-code:hover {
+.device-marker-name:hover {
   text-decoration: underline;
 }
 
@@ -959,32 +959,75 @@ button.pin-shell {
 
 .assignment-ring {
   position: absolute;
-  bottom: 50px;
+  bottom: 35px;
   left: 50%;
   display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
   transform: translateX(-50%);
   padding: 2px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.92);
+  border-radius: 8px;
+  /* background: rgba(255, 255, 255, 0.92); */
   border: 1px solid var(--line);
   box-shadow: 0 8px 18px rgba(23, 32, 51, 0.12);
 }
 
 .assignment-ring .avatar {
-  width: 21px;
-  height: 21px;
+  display: grid;
+  width: 60px;
+  height: 34px;
+  grid-template-rows: 13px 1fr;
+  justify-items: center;
+  align-items: center;
   border: 1px solid #fff;
   padding: 0;
+  overflow: hidden;
   font-size: 10px;
 }
 
 .assignment-ring .avatar + .avatar {
-  margin-left: -4px;
+  margin-left: 0;
+}
+
+.assignment-status {
+  display: block;
+  margin-bottom: 10px;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 20px;
+  color: white;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 13px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assignment-status.in_progress {
+  color: #c2410c;
+}
+
+.assignment-status.blocked {
+  color: var(--red);
+}
+
+.assignment-status.done {
+  color: var(--green);
+}
+
+.assignment-initials {
+  display: block;
+  font-weight: 600;
+  line-height: 1;
+  font-size: 0.6rem;
+  color: #ffffff;
 }
 
 .assignment-popover {
   position: absolute;
-  bottom: 102px;
+  bottom: 75px;
   left: 50%;
   z-index: 10;
   width: 260px;
@@ -999,7 +1042,7 @@ button.pin-shell {
 
 .device-popover {
   position: absolute;
-  top: 72px;
+  top: 35px;
   left: 50%;
   z-index: 12;
   width: 270px;
@@ -1091,15 +1134,52 @@ button.pin-shell {
 }
 
 .assignment-popover strong,
-.assignment-popover span {
+.assignment-popover-title > span {
   display: block;
   padding-right: 22px;
 }
 
-.assignment-popover span {
+.assignment-popover-title > span {
   margin-top: 3px;
   color: var(--brand-dark);
   font-weight: 750;
+}
+
+.assignment-popover-title {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  margin-top: 3px;
+}
+
+.assignment-popover-title > span {
+  min-width: 0;
+  padding-right: 0;
+}
+
+.assignment-task-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 5px 7px;
+  background: var(--surface-soft);
+  color: var(--brand-dark);
+  font-size: 11px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.assignment-task-link:hover {
+  border-color: rgba(37, 99, 235, 0.35);
+  background: rgba(37, 99, 235, 0.1);
+}
+
+.assignment-popover .status-pill {
+  margin-top: 8px;
 }
 
 .assignment-popover p {
@@ -1535,6 +1615,24 @@ button.pin-shell {
   margin-top: 14px;
 }
 
+.task-tag-filter {
+  margin-top: 12px;
+}
+
+.task-tag-picker {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.task-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 0 0 7px;
+}
+
 .task-table-head,
 .task-table-row {
   display: grid;
@@ -1597,7 +1695,7 @@ button.pin-shell {
   line-height: 1.2;
 }
 
-.device-code-inline {
+.device-name-inline {
   display: inline-flex;
   align-items: center;
   gap: 6px;

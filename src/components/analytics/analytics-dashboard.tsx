@@ -11,7 +11,6 @@ oneYearAgo.setFullYear(now.getFullYear() - 1);
 type AnalyticsEvent = {
   id: string;
   deviceId: string;
-  deviceCode: string;
   deviceName: string;
   region: string;
   tags: string[];
@@ -50,7 +49,6 @@ export function AnalyticsDashboard({
         .map((event) => ({
           id: event.id,
           deviceId: device.id,
-          deviceCode: device.code,
           deviceName: device.name,
           region: device.region,
           tags: device.tags,
@@ -68,7 +66,6 @@ export function AnalyticsDashboard({
       .map((device) => ({
         id: `current-${device.id}`,
         deviceId: device.id,
-        deviceCode: device.code,
         deviceName: device.name,
         region: device.region,
         tags: device.tags,
@@ -86,7 +83,6 @@ export function AnalyticsDashboard({
           return {
             id: `${snapshot.id}-${snapshotDevice.deviceId}`,
             deviceId: snapshotDevice.deviceId,
-            deviceCode: device?.code ?? snapshotDevice.deviceCode,
             deviceName: device?.name ?? snapshotDevice.deviceName,
             region: device?.region ?? "დაუნაწილებელი",
             tags: device?.tags ?? [],
@@ -111,7 +107,7 @@ export function AnalyticsDashboard({
       rank(
         events.map((event) => ({
           id: event.deviceId,
-          label: `${event.deviceCode} · ${event.deviceName}`
+          label: event.deviceName
         }))
       ),
     [events]
@@ -153,7 +149,7 @@ export function AnalyticsDashboard({
         <div>
           <p className="eyebrow">ანალიტიკა</p>
           <h1>Offline სიხშირე</h1>
-          <p>დალაგება მოწყობილობებით, რეგიონებით და ტეგებით არჩეულ პერიოდზე.</p>
+          <p>დალაგება მოწყობილობებით, რაიონებით და ტეგებით არჩეულ პერიოდზე.</p>
         </div>
         <div className="date-range">
           <label>
@@ -177,7 +173,7 @@ export function AnalyticsDashboard({
         </div>
         <div className="surface stat-surface">
           <MapPinned size={20} />
-          <span>რეგიონი</span>
+          <span>რაიონი</span>
           <strong>{regionSummary.length}</strong>
         </div>
         <div className="surface stat-surface">
@@ -194,7 +190,7 @@ export function AnalyticsDashboard({
 
       <section className="content-grid three">
         <RankPanel title="ყველაზე ხშირად offline დავაისები" icon={<WifiOff size={20} />} items={deviceSummary} />
-        <RankPanel title="ყველაზე ხშირი რეგიონები" icon={<MapPinned size={20} />} items={regionSummary} />
+        <RankPanel title="ყველაზე ხშირი რაიონები" icon={<MapPinned size={20} />} items={regionSummary} />
         <RankPanel title="ყველაზე ხშირი ტეგები" icon={<Tags size={20} />} items={tagSummary} />
       </section>
     </div>

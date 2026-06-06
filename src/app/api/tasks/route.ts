@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { normalizeTaskTags } from "@/lib/catalog";
 import { createTask, getTasks } from "@/lib/repositories";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
 
@@ -32,6 +33,7 @@ export async function POST(request: NextRequest) {
   const assigneeIds = Array.isArray(body?.assigneeIds)
     ? body.assigneeIds.map(String).filter(Boolean)
     : [];
+  const tags = normalizeTaskTags(body?.tags);
 
   if (!title || !issue || !deviceId || !dueDate) {
     return NextResponse.json({ message: "Missing required task fields" }, { status: 400 });
@@ -44,6 +46,7 @@ export async function POST(request: NextRequest) {
     assigneeIds,
     status,
     priority,
+    tags,
     startsAt: body?.startsAt ? String(body.startsAt) : undefined,
     dueDate
   });
@@ -53,7 +56,7 @@ export async function POST(request: NextRequest) {
     action: "task.create",
     entityType: "task",
     entityId: task.id,
-    metadata: { deviceId, assigneeIds, priority },
+    metadata: { deviceId, assigneeIds, priority, tags },
     ipAddress: request.headers.get("x-forwarded-for") ?? undefined,
     userAgent: request.headers.get("user-agent") ?? undefined
   });

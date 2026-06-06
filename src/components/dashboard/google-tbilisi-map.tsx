@@ -12,12 +12,9 @@ import {
   Wifi,
   WifiOff,
 } from "lucide-react";
+import { withoutDeviceCodes } from "@/lib/display";
+import { TBILISI_CENTER, clampLatLng, type LatLng } from "@/lib/geo";
 import type { AppUser, Device, Task } from "@/lib/types";
-
-export type LatLng = {
-  lat: number;
-  lng: number;
-};
 
 type GoogleLatLng = {
   lat: () => number;
@@ -35,7 +32,10 @@ type GoogleMapsEventListener = {
 
 type GoogleMap = {
   setOptions: (options: Record<string, unknown>) => void;
-  addListener: (eventName: string, handler: () => void) => GoogleMapsEventListener;
+  addListener: (
+    eventName: string,
+    handler: () => void,
+  ) => GoogleMapsEventListener;
 };
 
 type GoogleMapProjection = {
@@ -58,7 +58,10 @@ type GoogleOverlayView = {
 
 type GoogleMapsApi = {
   maps: {
-    Map: new (element: HTMLElement, options: Record<string, unknown>) => GoogleMap;
+    Map: new (
+      element: HTMLElement,
+      options: Record<string, unknown>,
+    ) => GoogleMap;
     LatLng: new (lat: number, lng: number) => GoogleLatLng;
     Point: new (x: number, y: number) => GooglePoint;
     OverlayView: new () => GoogleOverlayView;
@@ -98,12 +101,17 @@ declare global {
 }
 
 const GOOGLE_MAPS_SCRIPT_ID = "google-maps-js";
-const TBILISI_CENTER: LatLng = { lat: 41.7151, lng: 44.8271 };
-const TBILISI_BOUNDS = {
-  north: 41.84,
-  south: 41.62,
-  west: 44.62,
-  east: 45.02
+const taskStatusLabels: Record<Task["status"], string> = {
+  planned: "დაგეგმილი",
+  in_progress: "მიმდინარეობს",
+  blocked: "შეჩერებული",
+  done: "დასრულებული",
+};
+const taskStatusShortLabels: Record<Task["status"], string> = {
+  planned: "დაგეგმ.",
+  in_progress: "მიმდ.",
+  blocked: "შეჩერ.",
+  done: "დასრულ.",
 };
 
 export function GoogleTbilisiMap({
@@ -122,7 +130,7 @@ export function GoogleTbilisiMap({
   onMove,
   onMoveEnd,
   onShowAssignment,
-  onCloseAssignment
+  onCloseAssignment,
 }: Props) {
   const mapElementRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<GoogleMap | null>(null);
@@ -170,10 +178,10 @@ export function GoogleTbilisiMap({
               north: 42.02,
               south: 41.52,
               west: 44.45,
-              east: 45.18
+              east: 45.18,
             },
-            strictBounds: false
-          }
+            strictBounds: false,
+          },
         };
 
         if (mapId) {
@@ -192,7 +200,9 @@ export function GoogleTbilisiMap({
         mapRef.current = map;
         mapsRef.current = googleApi.maps;
         projectionOverlayRef.current = projectionOverlay;
-        listenersRef.current = [map.addListener("click", () => onCloseDeviceRef.current())];
+        listenersRef.current = [
+          map.addListener("click", () => onCloseDeviceRef.current()),
+        ];
         setMapReady(true);
       })
       .catch(() => {
@@ -218,7 +228,7 @@ export function GoogleTbilisiMap({
   useEffect(() => {
     mapRef.current?.setOptions({
       draggable: !editingDeviceId,
-      scrollwheel: !editingDeviceId
+      scrollwheel: !editingDeviceId,
     });
   }, [editingDeviceId]);
 
@@ -239,14 +249,14 @@ export function GoogleTbilisiMap({
     });
 
     devices.forEach((device) => {
-      const location = deviceLocations[device.id] ?? positionToLatLng(device.position);
+      const location = deviceLocations[device.id] ?? device.position;
       let overlay = overlaysRef.current.get(device.id);
 
       if (!overlay) {
         overlay = createMarkerOverlay({
           maps,
           map,
-          position: location
+          position: location,
         });
         overlaysRef.current.set(device.id, overlay);
       }
@@ -267,20 +277,32 @@ export function GoogleTbilisiMap({
           onStartEdit={onStartEdit}
           onStopEdit={onStopEdit}
           onMove={(clientX, clientY) => {
-            const nextLocation = clientPointToLatLng(clientX, clientY, mapElementRef.current, maps, projectionOverlayRef.current);
+            const nextLocation = clientPointToLatLng(
+              clientX,
+              clientY,
+              mapElementRef.current,
+              maps,
+              projectionOverlayRef.current,
+            );
             if (nextLocation) {
               onMove(device.id, nextLocation);
             }
           }}
           onMoveEnd={(clientX, clientY) => {
-            const nextLocation = clientPointToLatLng(clientX, clientY, mapElementRef.current, maps, projectionOverlayRef.current);
+            const nextLocation = clientPointToLatLng(
+              clientX,
+              clientY,
+              mapElementRef.current,
+              maps,
+              projectionOverlayRef.current,
+            );
             if (nextLocation) {
               onMoveEnd(device.id, nextLocation);
             }
           }}
           onShowAssignment={onShowAssignment}
           onCloseAssignment={onCloseAssignment}
-        />
+        />,
       );
     });
   }, [
@@ -300,7 +322,7 @@ export function GoogleTbilisiMap({
     onStopEdit,
     selectedDeviceId,
     tasksByDevice,
-    userMap
+    userMap,
   ]);
 
   return (
@@ -339,22 +361,6 @@ export function GoogleTbilisiMap({
   );
 }
 
-export function positionToLatLng(position: Device["position"]): LatLng {
-  const lng = TBILISI_BOUNDS.west + (position.x / 100) * (TBILISI_BOUNDS.east - TBILISI_BOUNDS.west);
-  const lat = TBILISI_BOUNDS.north - (position.y / 100) * (TBILISI_BOUNDS.north - TBILISI_BOUNDS.south);
-  return roundLatLng({ lat, lng });
-}
-
-export function latLngToPosition(location: LatLng): Device["position"] {
-  const x = ((location.lng - TBILISI_BOUNDS.west) / (TBILISI_BOUNDS.east - TBILISI_BOUNDS.west)) * 100;
-  const y = ((TBILISI_BOUNDS.north - location.lat) / (TBILISI_BOUNDS.north - TBILISI_BOUNDS.south)) * 100;
-
-  return {
-    x: roundPosition(x),
-    y: roundPosition(y)
-  };
-}
-
 export function isLatLng(value: unknown): value is LatLng {
   return (
     typeof value === "object" &&
@@ -382,7 +388,7 @@ function MapDeviceMarker({
   onMove,
   onMoveEnd,
   onShowAssignment,
-  onCloseAssignment
+  onCloseAssignment,
 }: {
   device: Device;
   location: LatLng;
@@ -405,14 +411,14 @@ function MapDeviceMarker({
   const assignments = tasks.flatMap((task) =>
     task.assigneeIds.map((userId) => ({
       task,
-      user: userMap.get(userId)
-    }))
+      user: userMap.get(userId),
+    })),
   );
   const activeTask = activeAssignment
     ? assignments.find(
         (assignment) =>
           assignment.task.id === activeAssignment.taskId &&
-          assignment.user?.id === activeAssignment.userId
+          assignment.user?.id === activeAssignment.userId,
       )
     : null;
 
@@ -451,8 +457,14 @@ function MapDeviceMarker({
     >
       {assignments.length ? (
         <div className="assignment-ring" aria-label="დაგეგმილი მომხმარებლები">
-          {assignments.map(({ task, user }) =>
-            user ? (
+          {assignments.map(({ task, user }) => {
+            if (!user) {
+              return null;
+            }
+
+            const displayTitle = withoutDeviceCodes(task.title, [device.code]);
+
+            return (
               <button
                 key={`${task.id}-${user.id}`}
                 type="button"
@@ -463,12 +475,18 @@ function MapDeviceMarker({
                   event.stopPropagation();
                   onShowAssignment(device.id, task.id, user.id);
                 }}
-                title={`${user.name} · ${task.title}`}
+                title={`${user.name} · ${displayTitle}`}
               >
-                {user.initials}
+                <span className="assignment-initials">{user.initials}</span>
+                <span
+                  className={`assignment-status ${task.status}`}
+                  title={taskStatusLabels[task.status]}
+                >
+                  {taskStatusShortLabels[task.status]}
+                </span>
               </button>
-            ) : null
-          )}
+            );
+          })}
         </div>
       ) : null}
 
@@ -487,16 +505,19 @@ function MapDeviceMarker({
         ) : (
           <WifiOff size={16} />
         )}
-        <span className="device-code">{device.name}</span>
+        <span className="device-marker-name">{device.name}</span>
       </button>
 
       {isSelected ? (
-        <div className="device-popover" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="device-popover"
+          onClick={(event) => event.stopPropagation()}
+        >
           <button type="button" onClick={onCloseDevice} aria-label="დახურვა">
             ×
           </button>
           <strong>{device.name}</strong>
-          <span className="device-region">რეგიონი: {device.region}</span>
+          <span className="device-region">რაიონი: {device.region}</span>
           <small>
             Lat {location.lat.toFixed(6)} · Lng {location.lng.toFixed(6)}
           </small>
@@ -522,13 +543,34 @@ function MapDeviceMarker({
       ) : null}
 
       {activeTask ? (
-        <div className="assignment-popover" onClick={(event) => event.stopPropagation()}>
-          <button type="button" onClick={onCloseAssignment} aria-label="დახურვა">
+        <div
+          className="assignment-popover"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <button
+            type="button"
+            onClick={onCloseAssignment}
+            aria-label="დახურვა"
+          >
             ×
           </button>
           <strong>{activeTask.user?.name}</strong>
-          <span>{activeTask.task.title}</span>
-          <p>{activeTask.task.issue}</p>
+          <div className="assignment-popover-title">
+            <span>
+              {withoutDeviceCodes(activeTask.task.title, [device.code])}
+            </span>
+            <Link
+              href={`/tasks/${activeTask.task.id}`}
+              className="assignment-task-link"
+            >
+              <ExternalLink size={13} />
+              <span>გადასვლა</span>
+            </Link>
+          </div>
+          <small className={`status-pill ${activeTask.task.status}`}>
+            {taskStatusLabels[activeTask.task.status]}
+          </small>
+          <p>{withoutDeviceCodes(activeTask.task.issue, [device.code])}</p>
         </div>
       ) : null}
     </div>
@@ -538,7 +580,7 @@ function MapDeviceMarker({
 function createMarkerOverlay({
   maps,
   map,
-  position
+  position,
 }: {
   maps: GoogleMapsApi["maps"];
   map: GoogleMap;
@@ -561,7 +603,9 @@ function createMarkerOverlay({
       return;
     }
 
-    const point = projection.fromLatLngToDivPixel(new maps.LatLng(currentPosition.lat, currentPosition.lng));
+    const point = projection.fromLatLngToDivPixel(
+      new maps.LatLng(currentPosition.lat, currentPosition.lng),
+    );
     if (!point) {
       return;
     }
@@ -586,7 +630,7 @@ function createMarkerOverlay({
     setPosition(nextPosition) {
       currentPosition = nextPosition;
       overlay.draw();
-    }
+    },
   };
 }
 
@@ -595,7 +639,7 @@ function clientPointToLatLng(
   clientY: number,
   mapElement: HTMLElement | null,
   maps: GoogleMapsApi["maps"],
-  projectionOverlay: GoogleOverlayView | null
+  projectionOverlay: GoogleOverlayView | null,
 ) {
   const projection = projectionOverlay?.getProjection();
   if (!mapElement || !projection) {
@@ -604,29 +648,17 @@ function clientPointToLatLng(
 
   const rect = mapElement.getBoundingClientRect();
   const latLng = projection.fromContainerPixelToLatLng(
-    new maps.Point(clientX - rect.left, clientY - rect.top)
+    new maps.Point(clientX - rect.left, clientY - rect.top),
   );
 
   if (!latLng) {
     return null;
   }
 
-  return roundLatLng({
+  return clampLatLng({
     lat: latLng.lat(),
-    lng: latLng.lng()
+    lng: latLng.lng(),
   });
-}
-
-function roundLatLng(location: LatLng): LatLng {
-  return {
-    lat: Math.round(location.lat * 1_000_000) / 1_000_000,
-    lng: Math.round(location.lng * 1_000_000) / 1_000_000
-  };
-}
-
-function roundPosition(value: number) {
-  const safeValue = Number.isFinite(value) ? value : 50;
-  return Math.round(Math.max(5, Math.min(95, safeValue)) * 100) / 100;
 }
 
 function loadGoogleMaps(apiKey: string) {
@@ -639,7 +671,9 @@ function loadGoogleMaps(apiKey: string) {
   }
 
   window.__googleMapsPromise = new Promise<GoogleMapsApi>((resolve, reject) => {
-    const existingScript = document.getElementById(GOOGLE_MAPS_SCRIPT_ID) as HTMLScriptElement | null;
+    const existingScript = document.getElementById(
+      GOOGLE_MAPS_SCRIPT_ID,
+    ) as HTMLScriptElement | null;
 
     if (existingScript) {
       existingScript.addEventListener("load", () => {
@@ -655,7 +689,7 @@ function loadGoogleMaps(apiKey: string) {
       key: apiKey,
       v: "weekly",
       language: "ka",
-      region: "GE"
+      region: "GE",
     });
     const script = document.createElement("script");
     script.id = GOOGLE_MAPS_SCRIPT_ID;
@@ -679,11 +713,11 @@ function loadGoogleMaps(apiKey: string) {
 const mapStyles = [
   {
     featureType: "poi.business",
-    stylers: [{ visibility: "off" }]
+    stylers: [{ visibility: "off" }],
   },
   {
     featureType: "transit",
     elementType: "labels.icon",
-    stylers: [{ visibility: "off" }]
-  }
+    stylers: [{ visibility: "off" }],
+  },
 ];

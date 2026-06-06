@@ -16,8 +16,9 @@ import type {
   Task,
   TaskStatus,
 } from "./types";
-import { regions as fallbackRegionNames } from "./catalog";
+import { normalizeTaskTags, regions as fallbackRegionNames } from "./catalog";
 import { queryRows, withConnection } from "./db";
+import { TBILISI_BOUNDS, clampLatLng, type LatLng } from "./geo";
 
 type UserRow = {
   id: string;
@@ -54,8 +55,8 @@ type DeviceRow = {
   status: DeviceStatus;
   is_excluded: boolean | number | string;
   region: string;
-  position_x: number;
-  position_y: number;
+  latitude: number;
+  longitude: number;
   last_seen_at: DatabaseDate;
   tags: string | null;
   associated_devices: string | null;
@@ -113,6 +114,7 @@ type TaskRow = {
   device_id: string;
   status: TaskStatus;
   priority: Task["priority"];
+  tags: unknown;
   starts_at: DatabaseDate | null;
   due_date: DatabaseDate;
   created_at: DatabaseDate;
@@ -300,20 +302,57 @@ async function ensureOperationalSchema() {
       await connection.query(
         "alter table status_events modify status enum('online', 'offline', 'error') not null",
       );
-      const [deviceColumns] = await connection.query(
-        `
-          select column_name
-          from information_schema.columns
-          where table_schema = database()
-            and table_name = 'devices'
-            and column_name = 'is_excluded'
-        `,
+      const deviceColumns = await getTableColumns(connection, "devices");
+      const addedLatitude = await addColumnIfMissing(
+        connection,
+        deviceColumns,
+        "devices",
+        "latitude",
+        "latitude decimal(10, 6) not null default 41.715100 after region_id",
       );
-      if (!(deviceColumns as { column_name: string }[]).length) {
-        await connection.query(
-          "alter table devices add column is_excluded boolean not null default false after biostar_payload",
-        );
+      const addedLongitude = await addColumnIfMissing(
+        connection,
+        deviceColumns,
+        "devices",
+        "longitude",
+        "longitude decimal(10, 6) not null default 44.827100 after latitude",
+      );
+
+      if (
+        (addedLatitude || addedLongitude) &&
+        deviceColumns.has("position_x") &&
+        deviceColumns.has("position_y")
+      ) {
+        const backfillColumns = [
+          addedLatitude
+            ? `latitude = round(${TBILISI_BOUNDS.north} - (position_y / 100) * (${TBILISI_BOUNDS.north} - ${TBILISI_BOUNDS.south}), 6)`
+            : "",
+          addedLongitude
+            ? `longitude = round(${TBILISI_BOUNDS.west} + (position_x / 100) * (${TBILISI_BOUNDS.east} - ${TBILISI_BOUNDS.west}), 6)`
+            : "",
+        ].filter(Boolean);
+
+        await connection.query(`
+          update devices
+          set ${backfillColumns.join(", ")}
+        `);
       }
+
+      await addColumnIfMissing(
+        connection,
+        deviceColumns,
+        "devices",
+        "is_excluded",
+        "is_excluded boolean not null default false after biostar_payload",
+      );
+      const taskColumns = await getTableColumns(connection, "tasks");
+      await addColumnIfMissing(
+        connection,
+        taskColumns,
+        "tasks",
+        "tags",
+        "tags json null after priority",
+      );
       await connection.query(`
         create table if not exists offline_snapshots (
           id varchar(64) primary key,
@@ -358,6 +397,54 @@ async function ensureOperationalSchema() {
   }
 
   await operationalSchemaPromise;
+}
+
+async function getTableColumns(connection: PoolConnection, tableName: string) {
+  const [rows] = await connection.query<RowDataPacket[]>(
+    `
+      select column_name
+      from information_schema.columns
+      where table_schema = database()
+        and table_name = ?
+    `,
+    [tableName],
+  );
+
+  return new Set(rows.map((row) => String(row.column_name)));
+}
+
+async function addColumnIfMissing(
+  connection: PoolConnection,
+  columns: Set<string>,
+  tableName: "devices" | "tasks",
+  columnName: string,
+  columnDefinition: string,
+) {
+  if (columns.has(columnName)) {
+    return false;
+  }
+
+  try {
+    await connection.query(`alter table ${tableName} add column ${columnDefinition}`);
+    columns.add(columnName);
+    return true;
+  } catch (error) {
+    if (isDuplicateColumnError(error)) {
+      columns.add(columnName);
+      return false;
+    }
+
+    throw error;
+  }
+}
+
+function isDuplicateColumnError(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "ER_DUP_FIELDNAME"
+  );
 }
 
 export async function getUserByEmail(email: string): Promise<AppUser | null> {
@@ -779,8 +866,8 @@ export async function getDevices(): Promise<Device[]> {
         d.status,
         d.is_excluded,
         coalesce(r.name, 'დაუნაწილებელი') as region,
-        d.position_x,
-        d.position_y,
+        d.latitude,
+        d.longitude,
         d.last_seen_at,
         group_concat(distinct t.name order by t.name separator ',') as tags,
         group_concat(distinct ad.name order by ad.name separator ',') as associated_devices
@@ -830,7 +917,10 @@ export async function getDevices(): Promise<Device[]> {
     isExcluded: toBoolean(row.is_excluded),
     region: row.region,
     tags: csv(row.tags),
-    position: { x: Number(row.position_x), y: Number(row.position_y) },
+    position: clampLatLng({
+      lat: Number(row.latitude),
+      lng: Number(row.longitude),
+    }),
     lastSeenAt: toDateTimeString(row.last_seen_at),
     associatedDevices: csv(row.associated_devices),
     problems: [],
@@ -977,7 +1067,7 @@ export async function createDevice(input: {
   status: DeviceStatus;
   isExcluded?: boolean;
   region?: string | null;
-  position: { x: number; y: number };
+  position: LatLng;
   tags: string[];
 }): Promise<Device> {
   await ensureOperationalSchema();
@@ -988,10 +1078,11 @@ export async function createDevice(input: {
     await connection.beginTransaction();
     try {
       const regionId = await getRegionIdByName(connection, input.region);
+      const position = clampLatLng(input.position);
       await connection.query<ResultSetHeader>(
         `
           insert into devices
-            (id, code, name, status, is_excluded, region_id, position_x, position_y, last_seen_at)
+            (id, code, name, status, is_excluded, region_id, latitude, longitude, last_seen_at)
           values (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
@@ -1001,8 +1092,8 @@ export async function createDevice(input: {
           input.status,
           Boolean(input.isExcluded),
           regionId,
-          input.position.x,
-          input.position.y,
+          position.lat,
+          position.lng,
           toSqlDateTime(new Date()),
         ],
       );
@@ -1024,7 +1115,7 @@ export async function createDevice(input: {
       isExcluded: Boolean(input.isExcluded),
       region: normalizeRegionName(input.region) ?? UNASSIGNED_REGION,
       tags: input.tags,
-      position: input.position,
+      position: clampLatLng(input.position),
       lastSeenAt: now,
       associatedDevices: [],
       problems: [],
@@ -1041,7 +1132,7 @@ export async function updateDevice(
     status: DeviceStatus;
     isExcluded: boolean;
     region?: string | null;
-    position: { x: number; y: number };
+    position: LatLng;
     tags: string[];
   },
 ): Promise<Device | null> {
@@ -1051,6 +1142,7 @@ export async function updateDevice(
     await connection.beginTransaction();
     try {
       const regionId = await getRegionIdByName(connection, input.region);
+      const position = clampLatLng(input.position);
       const [result] = await connection.query<ResultSetHeader>(
         `
           update devices
@@ -1060,8 +1152,8 @@ export async function updateDevice(
             status = ?,
             is_excluded = ?,
             region_id = ?,
-            position_x = ?,
-            position_y = ?
+            latitude = ?,
+            longitude = ?
           where id = ?
         `,
         [
@@ -1070,8 +1162,8 @@ export async function updateDevice(
           input.status,
           input.isExcluded,
           regionId,
-          input.position.x,
-          input.position.y,
+          position.lat,
+          position.lng,
           id,
         ],
       );
@@ -1101,18 +1193,19 @@ export async function updateDevice(
 
 export async function updateDevicePosition(
   id: string,
-  position: { x: number; y: number },
+  position: LatLng,
 ): Promise<Device | null> {
   await ensureOperationalSchema();
 
+  const location = clampLatLng(position);
   const updated = await withConnection(async (connection) => {
     const [result] = await connection.query<ResultSetHeader>(
       `
         update devices
-        set position_x = ?, position_y = ?
+        set latitude = ?, longitude = ?
         where id = ?
       `,
-      [position.x, position.y, id],
+      [location.lat, location.lng, id],
     );
 
     if (!result.affectedRows) {
@@ -1449,6 +1542,8 @@ function isBuildTime() {
 }
 
 export async function getTasks(): Promise<Task[]> {
+  await ensureOperationalSchema();
+
   const rows = await queryRows<TaskRow>(
     `
       select
@@ -1458,6 +1553,7 @@ export async function getTasks(): Promise<Task[]> {
         t.device_id,
         t.status,
         t.priority,
+        t.tags,
         t.starts_at,
         t.due_date,
         t.created_at,
@@ -1480,6 +1576,7 @@ export async function getTasks(): Promise<Task[]> {
     deviceId: row.device_id,
     status: row.status,
     priority: row.priority,
+    tags: normalizeTaskTags(row.tags),
     startsAt: row.starts_at ? toDateTimeString(row.starts_at) : undefined,
     dueDate: toDateString(row.due_date),
     createdAt: toDateTimeString(row.created_at),
@@ -1495,15 +1592,18 @@ export async function createTask(
     id,
     createdAt: new Date().toISOString(),
     ...input,
+    tags: normalizeTaskTags(input.tags),
   };
+
+  await ensureOperationalSchema();
 
   const inserted = await withConnection(async (connection) => {
     await connection.beginTransaction();
     try {
       await connection.query<ResultSetHeader>(
         `
-          insert into tasks (id, title, issue, device_id, status, priority, starts_at, due_date)
-          values (?, ?, ?, ?, ?, ?, ?, ?)
+          insert into tasks (id, title, issue, device_id, status, priority, tags, starts_at, due_date)
+          values (?, ?, ?, ?, ?, ?, cast(? as json), ?, ?)
         `,
         [
           task.id,
@@ -1512,6 +1612,7 @@ export async function createTask(
           task.deviceId,
           task.status,
           task.priority,
+          JSON.stringify(task.tags),
           task.startsAt ?? null,
           task.dueDate,
         ],
@@ -1542,6 +1643,9 @@ export async function updateTask(
   id: string,
   input: Omit<Task, "id" | "createdAt">,
 ): Promise<Task | null> {
+  await ensureOperationalSchema();
+
+  const tags = normalizeTaskTags(input.tags);
   const updated = await withConnection(async (connection) => {
     await connection.beginTransaction();
     try {
@@ -1554,6 +1658,7 @@ export async function updateTask(
             device_id = ?,
             status = ?,
             priority = ?,
+            tags = cast(? as json),
             starts_at = ?,
             due_date = ?
           where id = ?
@@ -1564,6 +1669,7 @@ export async function updateTask(
           input.deviceId,
           input.status,
           input.priority,
+          JSON.stringify(tags),
           input.startsAt ?? null,
           input.dueDate,
           id,
@@ -1603,7 +1709,7 @@ export async function updateTask(
   }
 
   const task = mockTasks.find((item) => item.id === id);
-  return task ? { ...task, ...input } : null;
+  return task ? { ...task, ...input, tags } : null;
 }
 
 export async function deleteTask(id: string) {

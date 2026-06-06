@@ -17,15 +17,11 @@ import {
   WifiOff,
   X,
 } from "lucide-react";
-import {
-  GoogleTbilisiMap,
-  latLngToPosition,
-  positionToLatLng,
-  type LatLng,
-} from "@/components/dashboard/google-tbilisi-map";
-import { regions, tagCatalog } from "@/lib/catalog";
+import { GoogleTbilisiMap } from "@/components/dashboard/google-tbilisi-map";
+import { regions, taskTagCatalog } from "@/lib/catalog";
 import { recordAudit } from "@/lib/client-audit";
-import { mergeTags, TAG_STORAGE_KEY } from "@/lib/tags";
+import { withoutDeviceCodes } from "@/lib/display";
+import { clampLatLng, type LatLng } from "@/lib/geo";
 import type {
   AppUser,
   Device,
@@ -48,6 +44,7 @@ type NewTaskForm = {
   deviceId: string;
   assigneeIds: string[];
   priority: TaskPriority;
+  tags: string[];
   dueDate: string;
 };
 
@@ -85,12 +82,6 @@ export function Dashboard({
   const [regionFilter, setRegionFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState<DeviceStatus | "all">("all");
   const [userFilter, setUserFilter] = useState("all");
-  const [availableTags, setAvailableTags] = useState<string[]>(() =>
-    mergeTags(
-      [...tagCatalog],
-      initialDevices.flatMap((device) => device.tags),
-    ),
-  );
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [query, setQuery] = useState("");
   const [showCreateTask, setShowCreateTask] = useState(false);
@@ -112,6 +103,7 @@ export function Dashboard({
     deviceId: initialActiveDeviceId,
     assigneeIds: users[1] ? [users[1].id] : [],
     priority: "normal",
+    tags: [],
     dueDate: today,
   });
 
@@ -175,15 +167,6 @@ export function Dashboard({
   );
 
   useEffect(() => {
-    const storedTags = JSON.parse(
-      window.localStorage.getItem(TAG_STORAGE_KEY) || "[]",
-    );
-    if (Array.isArray(storedTags)) {
-      setAvailableTags((current) => mergeTags(current, storedTags.map(String)));
-    }
-  }, []);
-
-  useEffect(() => {
     setDeviceLocations((current) => {
       let changed = false;
       const next: Record<string, LatLng> = {};
@@ -194,7 +177,7 @@ export function Dashboard({
           return;
         }
 
-        const location = positionToLatLng(device.position);
+        const location = clampLatLng(device.position);
         const currentLocation = current[device.id];
         next[device.id] = location;
 
@@ -232,26 +215,31 @@ export function Dashboard({
       ),
     [activeDeviceIds, tasks],
   );
+  const visibleActiveTasks = useMemo(
+    () => activeTasks.filter((task) => taskMatchesTags(task, selectedTags)),
+    [activeTasks, selectedTags],
+  );
   const recentTasks = useMemo(
     () =>
       [...tasks]
+        .filter((task) => taskMatchesTags(task, selectedTags))
         .sort(
           (a, b) =>
             new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
         )
         .slice(0, 7),
-    [tasks],
+    [selectedTags, tasks],
   );
 
   const tasksByDevice = useMemo(() => {
     const grouped = new Map<string, Task[]>();
-    for (const task of activeTasks) {
+    for (const task of visibleActiveTasks) {
       const next = grouped.get(task.deviceId) ?? [];
       next.push(task);
       grouped.set(task.deviceId, next);
     }
     return grouped;
-  }, [activeTasks]);
+  }, [visibleActiveTasks]);
 
   const visibleDevices = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -267,10 +255,9 @@ export function Dashboard({
         deviceTasks.some((task) => task.assigneeIds.includes(userFilter));
       const matchesTags =
         selectedTags.length === 0 ||
-        selectedTags.every((tagName) => device.tags.includes(tagName));
+        deviceTasks.length > 0;
       const matchesQuery =
         !normalized ||
-        device.code.toLowerCase().includes(normalized) ||
         device.name.toLowerCase().includes(normalized);
 
       return (
@@ -353,6 +340,13 @@ export function Dashboard({
     }));
   }
 
+  function toggleFormTag(tagName: string) {
+    setForm((current) => ({
+      ...current,
+      tags: toggleListValue(current.tags, tagName),
+    }));
+  }
+
   async function createTask(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -373,6 +367,7 @@ export function Dashboard({
       assigneeIds: form.assigneeIds,
       status: "planned",
       priority: form.priority,
+      tags: form.tags,
       dueDate: form.dueDate,
       createdAt: new Date().toISOString(),
     };
@@ -384,6 +379,7 @@ export function Dashboard({
       deviceId: form.deviceId,
       assigneeIds: form.assigneeIds,
       priority: "normal",
+      tags: [],
       dueDate: today,
     });
     setShowCreateTask(false);
@@ -450,11 +446,10 @@ export function Dashboard({
     }
 
     setLocationSaveError("");
-    const position = latLngToPosition(location);
     const response = await fetch(`/api/devices/${deviceId}/position`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ position }),
+      body: JSON.stringify({ position: clampLatLng(location) }),
     }).catch(() => null);
 
     if (!response?.ok) {
@@ -462,7 +457,7 @@ export function Dashboard({
       if (device) {
         setDeviceLocations((current) => ({
           ...current,
-          [deviceId]: positionToLatLng(device.position),
+          [deviceId]: clampLatLng(device.position),
         }));
       }
       setLocationSaveError("ლოკაციის შენახვა ვერ მოხერხდა.");
@@ -479,7 +474,7 @@ export function Dashboard({
       );
       setDeviceLocations((current) => ({
         ...current,
-        [savedDevice.id]: positionToLatLng(savedDevice.position),
+        [savedDevice.id]: clampLatLng(savedDevice.position),
       }));
       recordAudit("dashboard.device_location_update", "device", deviceId, {
         position: savedDevice.position,
@@ -555,7 +550,6 @@ export function Dashboard({
                   href={`/devices/${device.id}`}
                 >
                   <strong>{device.name}</strong>
-                  <span>ID: {device.id}</span>
                   <small>რაიონი: {device.region}</small>
                 </Link>
               ))}
@@ -572,7 +566,7 @@ export function Dashboard({
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="ძებნა ნომრით ან სახელით"
+            placeholder="ძებნა სახელით"
           />
         </div>
 
@@ -582,7 +576,7 @@ export function Dashboard({
             value={regionFilter}
             onChange={(event) => updateRegionFilter(event.target.value)}
           >
-            <option value="all">ყველა რეგიონი</option>
+            <option value="all">ყველა რაიონი</option>
             {regions.map((region) => (
               <option key={region} value={region}>
                 {region}
@@ -645,8 +639,8 @@ export function Dashboard({
         ) : null}
       </section>
 
-      <section className="tag-filter" aria-label="ტეგები">
-        {availableTags.map((tagName) => (
+      <section className="tag-filter" aria-label="დავალების ტეგები">
+        {taskTagCatalog.map((tagName) => (
           <button
             key={tagName}
             className={`tag-toggle ${selectedTags.includes(tagName) ? "active" : ""}`}
@@ -703,150 +697,170 @@ export function Dashboard({
             </button>
           </div>
 
-          {showCreateTask ? (
-            <form className="quick-task-form" onSubmit={createTask}>
-              <select
-                value={form.deviceId}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    deviceId: event.target.value,
-                  }))
-                }
-                required
-              >
-                {activeDevices.map((device) => (
-                  <option key={device.id} value={device.id}>
-                    {device.code} · {device.name}
-                  </option>
-                ))}
-              </select>
-              <input
-                value={form.title}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    title: event.target.value,
-                  }))
-                }
-                placeholder="ტასკის სათაური"
-                required
-              />
-              <textarea
-                value={form.issue}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    issue: event.target.value,
-                  }))
-                }
-                placeholder="რა საკითხის მოსაგვარებლად მიდიან"
-                rows={3}
-                required
-              />
-              <div className="form-row">
+          <div className="task-rail-scroll">
+            {showCreateTask ? (
+              <form className="quick-task-form" onSubmit={createTask}>
                 <select
-                  value={form.priority}
+                  value={form.deviceId}
                   onChange={(event) =>
                     setForm((current) => ({
                       ...current,
-                      priority: event.target.value as TaskPriority,
+                      deviceId: event.target.value,
                     }))
                   }
+                  required
                 >
-                  {Object.entries(priorityLabels).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
+                  {activeDevices.map((device) => (
+                    <option key={device.id} value={device.id}>
+                      {device.name}
                     </option>
                   ))}
                 </select>
-              </div>
-              <input
-                type="date"
-                value={form.dueDate}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    dueDate: event.target.value,
-                  }))
-                }
-              />
-              <div className="assignee-picker">
-                {users
-                  .filter((user) => user.role !== "viewer")
-                  .map((user) => (
-                    <button
-                      key={user.id}
-                      className={`avatar-choice ${form.assigneeIds.includes(user.id) ? "active" : ""}`}
-                      type="button"
-                      onClick={() => toggleAssignee(user.id)}
-                      title={user.name}
-                    >
-                      <span style={{ backgroundColor: user.color }}>
-                        {user.initials}
-                      </span>
-                      <small>{user.name.split(" ")[0]}</small>
-                    </button>
-                  ))}
-              </div>
-              <button className="primary-button" type="submit">
-                <Plus size={18} />
-                <span>დამახსოვრება</span>
-              </button>
-            </form>
-          ) : null}
-
-          <div className="task-list">
-            {(showCreateTask ? activeTasks : recentTasks).map((task) => {
-              const device = deviceMap.get(task.deviceId);
-              const firstUser = userMap.get(task.assigneeIds[0]);
-              return (
-                <article
-                  key={task.id}
-                  className={`task-card priority-${task.priority}`}
-                  style={{ borderInlineStartColor: firstUser?.color }}
-                >
-                  <div className="task-card-top">
-                    <div className="avatar-stack">
-                      {task.assigneeIds.map((userId) => {
-                        const user = userMap.get(userId);
-                        return user ? (
-                          <span
-                            key={user.id}
-                            className="avatar small"
-                            style={{ backgroundColor: user.color }}
-                          >
-                            {user.initials}
-                          </span>
-                        ) : null;
-                      })}
-                    </div>
-                    <span className={`status-pill ${task.status}`}>
-                      {statusLabels[task.status]}
-                    </span>
+                <input
+                  value={form.title}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      title: event.target.value,
+                    }))
+                  }
+                  placeholder="ტასკის სათაური"
+                  required
+                />
+                <textarea
+                  value={form.issue}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      issue: event.target.value,
+                    }))
+                  }
+                  placeholder="რა საკითხის მოსაგვარებლად მიდიან"
+                  rows={3}
+                  required
+                />
+                <div className="form-row">
+                  <select
+                    value={form.priority}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        priority: event.target.value as TaskPriority,
+                      }))
+                    }
+                  >
+                    {Object.entries(priorityLabels).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <input
+                  type="date"
+                  value={form.dueDate}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      dueDate: event.target.value,
+                    }))
+                  }
+                />
+                <div className="task-tag-picker">
+                  <span>ტეგები</span>
+                  <div className="row-tags">
+                    {taskTagCatalog.map((tagName) => (
+                      <button
+                        key={tagName}
+                        type="button"
+                        className={`tag-toggle compact ${form.tags.includes(tagName) ? "active" : ""}`}
+                        onClick={() => toggleFormTag(tagName)}
+                      >
+                        {tagName}
+                      </button>
+                    ))}
                   </div>
-                  <h3>{task.title}</h3>
-                  <p>{task.issue}</p>
-                  <footer>
-                    <span>
-                      <MapPin size={14} />
-                      {device?.code || task.deviceId}
-                    </span>
-                    <span>
-                      <CalendarDays size={14} />
-                      {task.dueDate}
-                    </span>
-                    <Link href={`/tasks/${task.id}`}>დეტალურად</Link>
-                  </footer>
-                </article>
-              );
-            })}
+                </div>
+                <div className="assignee-picker">
+                  {users
+                    .filter((user) => user.role !== "viewer")
+                    .map((user) => (
+                      <button
+                        key={user.id}
+                        className={`avatar-choice ${form.assigneeIds.includes(user.id) ? "active" : ""}`}
+                        type="button"
+                        onClick={() => toggleAssignee(user.id)}
+                        title={user.name}
+                      >
+                        <span style={{ backgroundColor: user.color }}>
+                          {user.initials}
+                        </span>
+                        <small>{user.name.split(" ")[0]}</small>
+                      </button>
+                    ))}
+                </div>
+                <button className="primary-button" type="submit">
+                  <Plus size={18} />
+                  <span>დამახსოვრება</span>
+                </button>
+              </form>
+            ) : null}
+
+            <div className="task-list">
+              {(showCreateTask ? visibleActiveTasks : recentTasks).map((task) => {
+                const device = deviceMap.get(task.deviceId);
+                const firstUser = userMap.get(task.assigneeIds[0]);
+                const displayTitle = withoutDeviceCodes(task.title, [device?.code]);
+                const displayIssue = withoutDeviceCodes(task.issue, [device?.code]);
+                return (
+                  <article
+                    key={task.id}
+                    className={`task-card priority-${task.priority}`}
+                    style={{ borderInlineStartColor: firstUser?.color }}
+                  >
+                    <div className="task-card-top">
+                      <div className="avatar-stack">
+                        {task.assigneeIds.map((userId) => {
+                          const user = userMap.get(userId);
+                          return user ? (
+                            <span
+                              key={user.id}
+                              className="avatar small"
+                              style={{ backgroundColor: user.color }}
+                            >
+                              {user.initials}
+                            </span>
+                          ) : null;
+                        })}
+                      </div>
+                      <span className={`status-pill ${task.status}`}>
+                        {statusLabels[task.status]}
+                      </span>
+                    </div>
+                    <h3>{displayTitle}</h3>
+                    <p>{displayIssue}</p>
+                    <TaskTagList tags={task.tags} />
+                    <footer>
+                      <span>
+                        <MapPin size={14} />
+                        {device?.name || "დავაისი ვერ მოიძებნა"}
+                      </span>
+                      <span>
+                        <CalendarDays size={14} />
+                        {task.dueDate}
+                      </span>
+                      <Link href={`/tasks/${task.id}`}>დეტალურად</Link>
+                    </footer>
+                  </article>
+                );
+              })}
+            </div>
+            {!showCreateTask ? (
+              <Link className="rail-link" href="/tasks">
+                ყველა ტასკის ნახვა
+              </Link>
+            ) : null}
           </div>
-          {!showCreateTask ? (
-            <Link className="rail-link" href="/tasks">
-              ყველა ტასკის ნახვა
-            </Link>
-          ) : null}
         </aside>
       </div>
     </div>
@@ -855,8 +869,37 @@ export function Dashboard({
 
 function createDefaultDeviceLocations(devices: Device[]) {
   return Object.fromEntries(
-    devices.map((device) => [device.id, positionToLatLng(device.position)]),
+    devices.map((device) => [device.id, clampLatLng(device.position)]),
   );
+}
+
+function TaskTagList({ tags }: { tags: string[] }) {
+  if (!tags.length) {
+    return null;
+  }
+
+  return (
+    <div className="task-tags">
+      {tags.map((tagName) => (
+        <span key={tagName} className="tag-toggle compact active">
+          {tagName}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function taskMatchesTags(task: Task, selectedTags: string[]) {
+  return (
+    selectedTags.length === 0 ||
+    selectedTags.every((tagName) => task.tags.includes(tagName))
+  );
+}
+
+function toggleListValue(values: string[], value: string) {
+  return values.includes(value)
+    ? values.filter((item) => item !== value)
+    : [...values, value];
 }
 
 function formatSyncTime(value: string) {

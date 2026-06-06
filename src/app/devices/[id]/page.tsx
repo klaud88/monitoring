@@ -14,6 +14,7 @@ import {
   WifiOff,
 } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
+import { withoutDeviceCodes } from "@/lib/display";
 import { getDeviceById, getTasks, getUsers } from "@/lib/repositories";
 import type { ProblemRecord, TaskStatus } from "@/lib/types";
 
@@ -61,9 +62,7 @@ export default async function DeviceDetailsPage({
             რუკაზე დაბრუნება
           </Link>
           <p className="eyebrow">X-Station</p>
-          <h1>
-            {device.code} · {device.name}
-          </h1>
+          <h1>{device.name}</h1>
           <p>
             {device.region} · ბოლო კონტაქტი {formatDateTime(device.lastSeenAt)}
           </p>
@@ -84,7 +83,7 @@ export default async function DeviceDetailsPage({
       <section className="content-grid three">
         <div className="surface stat-surface">
           <MapPin size={20} />
-          <span>რეგიონი</span>
+          <span>რაიონი</span>
           <strong>{device.region}</strong>
         </div>
         <div className="surface stat-surface">
@@ -131,34 +130,48 @@ export default async function DeviceDetailsPage({
           </div>
           <div className="task-list compact-list">
             {deviceTasks.length ? (
-              deviceTasks.map((task) => (
-                <article
-                  key={task.id}
-                  className={`task-card priority-${task.priority}`}
-                >
-                  <div className="task-card-top">
-                    <div className="avatar-stack">
-                      {task.assigneeIds.map((userId) => {
-                        const user = userMap.get(userId);
-                        return user ? (
-                          <span
-                            key={user.id}
-                            className="avatar small"
-                            style={{ backgroundColor: user.color }}
-                          >
-                            {user.initials}
-                          </span>
-                        ) : null;
-                      })}
+              deviceTasks.map((task) => {
+                const displayTitle = withoutDeviceCodes(task.title, [device.code]);
+                const displayIssue = withoutDeviceCodes(task.issue, [device.code]);
+
+                return (
+                  <article
+                    key={task.id}
+                    className={`task-card priority-${task.priority}`}
+                  >
+                    <div className="task-card-top">
+                      <div className="avatar-stack">
+                        {task.assigneeIds.map((userId) => {
+                          const user = userMap.get(userId);
+                          return user ? (
+                            <span
+                              key={user.id}
+                              className="avatar small"
+                              style={{ backgroundColor: user.color }}
+                            >
+                              {user.initials}
+                            </span>
+                          ) : null;
+                        })}
+                      </div>
+                      <span className={`status-pill ${task.status}`}>
+                        {taskLabels[task.status]}
+                      </span>
                     </div>
-                    <span className={`status-pill ${task.status}`}>
-                      {taskLabels[task.status]}
-                    </span>
-                  </div>
-                  <h3>{task.title}</h3>
-                  <p>{task.issue}</p>
-                </article>
-              ))
+                    <h3>{displayTitle}</h3>
+                    <p>{displayIssue}</p>
+                    {task.tags.length ? (
+                      <div className="task-tags">
+                        {task.tags.map((tagName) => (
+                          <span key={tagName} className="tag-toggle compact active">
+                            {tagName}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </article>
+                );
+              })
             ) : (
               <p className="muted">ამ X-Station-ზე აქტიური ტასკი არ არის.</p>
             )}
@@ -174,41 +187,51 @@ export default async function DeviceDetailsPage({
           </div>
           <div className="timeline">
             {device.problems.length ? (
-              device.problems.map((problem) => (
-                <article
-                  key={problem.id}
-                  className={`timeline-item ${problem.status}`}
-                >
-                  <span className="timeline-dot" />
-                  <div>
-                    <div className="timeline-head">
-                      <h3>{problem.title}</h3>
-                      <span className={`status-pill ${problem.status}`}>
-                        {problemLabels[problem.status]}
-                      </span>
-                    </div>
-                    <p>{problem.description}</p>
-                    <dl className="inline-meta">
-                      <div>
-                        <dt>დაფიქსირდა</dt>
-                        <dd>{formatDateTime(problem.reportedAt)}</dd>
+              device.problems.map((problem) => {
+                const displayTitle = withoutDeviceCodes(problem.title, [
+                  device.code,
+                ]);
+                const displayDescription = withoutDeviceCodes(
+                  problem.description,
+                  [device.code],
+                );
+
+                return (
+                  <article
+                    key={problem.id}
+                    className={`timeline-item ${problem.status}`}
+                  >
+                    <span className="timeline-dot" />
+                    <div>
+                      <div className="timeline-head">
+                        <h3>{displayTitle}</h3>
+                        <span className={`status-pill ${problem.status}`}>
+                          {problemLabels[problem.status]}
+                        </span>
                       </div>
-                      {problem.plannedAt ? (
+                      <p>{displayDescription}</p>
+                      <dl className="inline-meta">
                         <div>
-                          <dt>იგეგმება</dt>
-                          <dd>{formatDateTime(problem.plannedAt)}</dd>
+                          <dt>დაფიქსირდა</dt>
+                          <dd>{formatDateTime(problem.reportedAt)}</dd>
                         </div>
-                      ) : null}
-                      {problem.resolvedAt ? (
-                        <div>
-                          <dt>მოგვარდა</dt>
-                          <dd>{formatDateTime(problem.resolvedAt)}</dd>
-                        </div>
-                      ) : null}
-                    </dl>
-                  </div>
-                </article>
-              ))
+                        {problem.plannedAt ? (
+                          <div>
+                            <dt>იგეგმება</dt>
+                            <dd>{formatDateTime(problem.plannedAt)}</dd>
+                          </div>
+                        ) : null}
+                        {problem.resolvedAt ? (
+                          <div>
+                            <dt>მოგვარდა</dt>
+                            <dd>{formatDateTime(problem.resolvedAt)}</dd>
+                          </div>
+                        ) : null}
+                      </dl>
+                    </div>
+                  </article>
+                );
+              })
             ) : (
               <p className="muted">პრობლემები არ ფიქსირდება.</p>
             )}

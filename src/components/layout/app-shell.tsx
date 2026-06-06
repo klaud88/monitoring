@@ -34,7 +34,7 @@ const navItems: NavItem[] = [
   },
   {
     href: "/devices/regions",
-    label: "X-Stations/რეგიონები",
+    label: "X-Stations/რაიონები",
     permission: ["devices.view", "regions.view"],
     icon: MonitorCog,
   },

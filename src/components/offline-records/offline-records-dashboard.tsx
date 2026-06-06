@@ -119,8 +119,7 @@ export function OfflineRecordsDashboard({
         (device) =>
           !normalized ||
           device.id.toLowerCase().includes(normalized) ||
-          device.name.toLowerCase().includes(normalized) ||
-          device.code.toLowerCase().includes(normalized),
+          device.name.toLowerCase().includes(normalized),
       )
       .sort((a, b) => compareDevices(a, b, deviceSort));
   }, [deviceSort, devices, query]);
@@ -130,7 +129,7 @@ export function OfflineRecordsDashboard({
       const device = deviceMap.get(deviceId);
       return {
         deviceId,
-        label: device ? `${device.code} · ${device.name}` : deviceId,
+        label: device ? device.name : "დავაისი ვერ მოიძებნა",
         count,
       };
     });
@@ -333,7 +332,6 @@ export function OfflineRecordsDashboard({
                   <span className={`status-dot ${device.status}`} />
                   <span>
                     <strong>{device.name}</strong>
-                    <small>{device.code}</small>
                   </span>
                   {selected ? <CheckCircle2 size={17} /> : null}
                   {monitored ? (
@@ -442,7 +440,6 @@ function SnapshotDeviceChip({
     >
       {isAlerting ? <BellRing size={13} /> : null}
       <strong>{device.deviceName}</strong>
-      <small>{device.deviceCode}</small>
     </span>
   );
 }
@@ -479,7 +476,6 @@ function compareStatusFirst(
 function compareDeviceNames(a: Device, b: Device) {
   return (
     a.name.localeCompare(b.name, "ka") ||
-    a.code.localeCompare(b.code, "ka") ||
     a.id.localeCompare(b.id, "ka")
   );
 }

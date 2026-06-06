@@ -20,7 +20,7 @@ import type {
 const pages: { key: PageKey; label: string }[] = [
   { key: "dashboard", label: "რუკა" },
   { key: "devices", label: "X-Stations" },
-  { key: "regions", label: "რეგიონები" },
+  { key: "regions", label: "რაიონები" },
   { key: "tasks", label: "ტასკები" },
   { key: "offline_records", label: "Offline აღრიცხვა" },
   { key: "users", label: "მომხმარებლები" },

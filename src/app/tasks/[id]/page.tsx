@@ -1,14 +1,19 @@
+import { cookies } from "next/headers";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   CalendarDays,
   ChevronLeft,
   ClipboardList,
+  Edit3,
   MapPin,
   ShieldAlert,
+  Tags,
   UserRoundCheck,
 } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
+import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
+import { withoutDeviceCodes } from "@/lib/display";
 import { getDevices, getTasks, getUsers } from "@/lib/repositories";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
 
@@ -32,10 +37,12 @@ export default async function TaskDetailsPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const [tasks, devices, users] = await Promise.all([
+  const cookieStore = await cookies();
+  const [tasks, devices, users, user] = await Promise.all([
     getTasks(),
     getDevices(),
     getUsers(),
+    verifySessionToken(cookieStore.get(SESSION_COOKIE)?.value),
   ]);
   const task = tasks.find((item) => item.id === id);
 
@@ -45,6 +52,9 @@ export default async function TaskDetailsPage({
 
   const device = devices.find((item) => item.id === task.deviceId);
   const assignees = users.filter((user) => task.assigneeIds.includes(user.id));
+  const displayTitle = withoutDeviceCodes(task.title, [device?.code]);
+  const displayIssue = withoutDeviceCodes(task.issue, [device?.code]);
+  const canEditTask = hasPermission(user, "tasks.edit");
 
   return (
     <AppShell>
@@ -55,29 +65,54 @@ export default async function TaskDetailsPage({
             ტასკებში დაბრუნება
           </Link>
           <p className="eyebrow">ტასკი</p>
-          <h1>{task.title}</h1>
-          <p>{task.issue}</p>
+          <h1>{displayTitle}</h1>
+          <p>{displayIssue}</p>
         </div>
-        <div className="metric-strip">
-          <div className="metric">
-            <ClipboardList size={18} />
-            <span>{statusLabels[task.status]}</span>
-            <small>სტატუსი</small>
-          </div>
-          <div className="metric">
-            <ShieldAlert size={18} />
-            <span>{priorityLabels[task.priority]}</span>
-            <small>პრიორიტეტი</small>
+        <div className="page-actions">
+          {canEditTask ? (
+            <Link
+              className="primary-button"
+              href={`/tasks?edit=${encodeURIComponent(task.id)}#task-${task.id}`}
+            >
+              <Edit3 size={16} />
+              <span>რედაქტირება</span>
+            </Link>
+          ) : null}
+          <div className="metric-strip">
+            <div className="metric">
+              <ClipboardList size={18} />
+              <span>{statusLabels[task.status]}</span>
+              <small>სტატუსი</small>
+            </div>
+            <div className="metric">
+              <ShieldAlert size={18} />
+              <span>{priorityLabels[task.priority]}</span>
+              <small>პრიორიტეტი</small>
+            </div>
+            <div className="metric">
+              <Tags size={18} />
+              <span>{task.tags.length}</span>
+              <small>ტეგი</small>
+            </div>
           </div>
         </div>
       </section>
+
+      {task.tags.length ? (
+        <section className="tag-filter task-tag-filter" aria-label="დავალების ტეგები">
+          {task.tags.map((tagName) => (
+            <span key={tagName} className="tag-toggle active">
+              {tagName}
+            </span>
+          ))}
+        </section>
+      ) : null}
 
       <section className="content-grid three">
         <div className="surface stat-surface">
           <MapPin size={20} />
           <span>X-Station</span>
-          <strong>{device?.code ?? task.deviceId}</strong>
-          <small>{device?.name}</small>
+          <strong>{device?.name ?? "დავაისი ვერ მოიძებნა"}</strong>
         </div>
         <div className="surface stat-surface">
           <CalendarDays size={20} />
@@ -130,7 +165,7 @@ export default async function TaskDetailsPage({
           {device ? (
             <dl className="details-list">
               <div>
-                <dt>რეგიონი</dt>
+                <dt>რაიონი</dt>
                 <dd>{device.region}</dd>
               </div>
               <div>
@@ -145,7 +180,7 @@ export default async function TaskDetailsPage({
                 <dt>დეტალური გვერდი</dt>
                 <dd>
                   <Link className="inline-link" href={`/devices/${device.id}`}>
-                    {device.code}-ზე გადასვლა
+                    დავაისის გვერდზე გადასვლა
                   </Link>
                 </dd>
               </div>

@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { readDevicePosition } from "@/lib/device-position";
 import { createDevice, getDevices } from "@/lib/repositories";
 import type { DeviceStatus } from "@/lib/types";
 
@@ -22,19 +23,16 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json().catch(() => null);
-  const code = String(body?.code || "").trim().toUpperCase();
   const name = String(body?.name || "").trim();
+  const code = normalizeDeviceCode(body?.code, name);
   const status = deviceStatuses.includes(body?.status) ? body.status : "online";
   const isExcluded = Boolean(body?.isExcluded);
   const region = body?.region ? String(body.region) : null;
   const tags = Array.isArray(body?.tags) ? body.tags.map(String) : [];
-  const position = {
-    x: clampPosition(Number(body?.position?.x ?? 50)),
-    y: clampPosition(Number(body?.position?.y ?? 50)),
-  };
+  const position = readDevicePosition(body?.position);
 
-  if (!code || !name) {
-    return NextResponse.json({ message: "Device code and name are required" }, { status: 400 });
+  if (!name) {
+    return NextResponse.json({ message: "Device name is required" }, { status: 400 });
   }
 
   const device = await createDevice({
@@ -60,6 +58,17 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({ device }, { status: 201 });
 }
 
-function clampPosition(value: number) {
-  return Math.max(5, Math.min(95, Number.isFinite(value) ? value : 50));
+function normalizeDeviceCode(value: unknown, name: string) {
+  const code = String(value || "").trim().toUpperCase();
+  if (code) {
+    return code;
+  }
+
+  const slug = name
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^\p{L}\p{N}-]/gu, "")
+    .toUpperCase();
+
+  return `${slug || "DEVICE"}-${Date.now().toString(36).toUpperCase()}`;
 }

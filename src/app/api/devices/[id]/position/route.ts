@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { parseDevicePosition } from "@/lib/device-position";
 import { updateDevicePosition } from "@/lib/repositories";
 
 export async function PATCH(
@@ -16,20 +17,14 @@ export async function PATCH(
 
   const { id } = await context.params;
   const body = await request.json().catch(() => null);
-  const x = Number(body?.position?.x);
-  const y = Number(body?.position?.y);
+  const position = parseDevicePosition(body?.position);
 
-  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+  if (!position) {
     return NextResponse.json(
       { message: "Valid position is required" },
       { status: 400 },
     );
   }
-
-  const position = {
-    x: clampPosition(x),
-    y: clampPosition(y),
-  };
 
   const device = await updateDevicePosition(id, position);
   if (!device) {
@@ -47,8 +42,4 @@ export async function PATCH(
   });
 
   return NextResponse.json({ device });
-}
-
-function clampPosition(value: number) {
-  return Math.max(5, Math.min(95, Number.isFinite(value) ? value : 50));
 }

@@ -1,3 +1,5 @@
+import type { LatLng } from "./geo";
+
 export type DeviceStatus = "online" | "offline" | "error";
 export type TaskStatus = "planned" | "in_progress" | "blocked" | "done";
 export type TaskPriority = "low" | "normal" | "high" | "urgent";
@@ -53,10 +55,7 @@ export type Device = {
   isExcluded: boolean;
   region: string;
   tags: string[];
-  position: {
-    x: number;
-    y: number;
-  };
+  position: LatLng;
   lastSeenAt: string;
   associatedDevices: string[];
   problems: ProblemRecord[];
@@ -71,6 +70,7 @@ export type Task = {
   assigneeIds: string[];
   status: TaskStatus;
   priority: TaskPriority;
+  tags: string[];
   startsAt?: string;
   dueDate: string;
   createdAt: string;

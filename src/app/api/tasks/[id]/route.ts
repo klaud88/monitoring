@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { normalizeTaskTags } from "@/lib/catalog";
 import { deleteTask, getTasks, updateTask } from "@/lib/repositories";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
 
@@ -49,6 +50,10 @@ export async function PATCH(
   const assigneeIds = Array.isArray(body?.assigneeIds)
     ? body.assigneeIds.map(String).filter(Boolean)
     : existingTask.assigneeIds;
+  const tags =
+    body?.tags === undefined
+      ? existingTask.tags
+      : normalizeTaskTags(body.tags);
 
   if (!title || !issue || !deviceId || !dueDate) {
     return NextResponse.json({ message: "Missing required task fields" }, { status: 400 });
@@ -61,6 +66,7 @@ export async function PATCH(
     assigneeIds,
     status,
     priority,
+    tags,
     startsAt: body?.startsAt ? String(body.startsAt) : existingTask.startsAt,
     dueDate,
   });
@@ -73,7 +79,7 @@ export async function PATCH(
     action: "task.update",
     entityType: "task",
     entityId: id,
-    metadata: { status, priority, deviceId, assigneeIds },
+    metadata: { status, priority, deviceId, assigneeIds, tags },
     ipAddress: request.headers.get("x-forwarded-for") ?? undefined,
     userAgent: request.headers.get("user-agent") ?? undefined
   });

@@ -14,17 +14,17 @@ import {
   X,
 } from "lucide-react";
 import { tagCatalog } from "@/lib/catalog";
+import { TBILISI_CENTER, clampLatLng } from "@/lib/geo";
 import { mergeTags, TAG_STORAGE_KEY } from "@/lib/tags";
 import type { Device, DeviceStatus, Region } from "@/lib/types";
 
 type DeviceDraft = {
-  code: string;
   name: string;
   region: string;
   status: DeviceStatus;
   isExcluded: boolean;
-  x: number;
-  y: number;
+  lat: number;
+  lng: number;
   tags: string[];
 };
 
@@ -68,13 +68,12 @@ export function RegionManager({
   );
   const [newTagName, setNewTagName] = useState("");
   const [draft, setDraft] = useState<DeviceDraft>({
-    code: "",
     name: "",
     region: initialRegions[0]?.name || "",
     status: "online",
     isExcluded: false,
-    x: 50,
-    y: 50,
+    lat: TBILISI_CENTER.lat,
+    lng: TBILISI_CENTER.lng,
     tags: [],
   });
   const [newRegion, setNewRegion] = useState<RegionDraft>({
@@ -100,8 +99,6 @@ export function RegionManager({
         (device) =>
           (regionFilter === "all" || device.region === regionFilter) &&
           (!normalized ||
-            device.id.toLowerCase().includes(normalized) ||
-            device.code.toLowerCase().includes(normalized) ||
             device.name.toLowerCase().includes(normalized) ||
             device.region.toLowerCase().includes(normalized)),
       )
@@ -165,7 +162,7 @@ export function RegionManager({
       color: newRegion.color,
     };
     if (!payload.name) {
-      setError("რეგიონის სახელი აუცილებელია.");
+      setError("რაიონის სახელი აუცილებელია.");
       return;
     }
 
@@ -179,7 +176,7 @@ export function RegionManager({
     setSaving(false);
 
     if (!response.ok) {
-      setError("რეგიონის დამატება ვერ მოხერხდა.");
+      setError("რაიონის დამატება ვერ მოხერხდა.");
       return;
     }
 
@@ -207,7 +204,7 @@ export function RegionManager({
       color: regionEdit.color,
     };
     if (!payload.name) {
-      setError("რეგიონის სახელი აუცილებელია.");
+      setError("რაიონის სახელი აუცილებელია.");
       return;
     }
 
@@ -221,7 +218,7 @@ export function RegionManager({
     setSaving(false);
 
     if (!response.ok) {
-      setError("რეგიონის რედაქტირება ვერ მოხერხდა.");
+      setError("რაიონის რედაქტირება ვერ მოხერხდა.");
       return;
     }
 
@@ -250,7 +247,7 @@ export function RegionManager({
     }
 
     const confirmed = window.confirm(
-      "წავშალო რეგიონი? ამ რეგიონზე მიბმული X-Station-ები დარჩებიან რეგიონის გარეშე.",
+      "წავშალო რაიონი? ამ რაიონზე მიბმული X-Station-ები დარჩებიან რაიონის გარეშე.",
     );
     if (!confirmed) {
       return;
@@ -264,7 +261,7 @@ export function RegionManager({
     setSaving(false);
 
     if (!response.ok) {
-      setError("რეგიონის წაშლა ვერ მოხერხდა.");
+      setError("რაიონის წაშლა ვერ მოხერხდა.");
       return;
     }
 
@@ -288,8 +285,8 @@ export function RegionManager({
     }
 
     const payload = devicePayload(draft);
-    if (!payload.code || !payload.name) {
-      setError("X-Station-ის ნომერი და სახელი აუცილებელია.");
+    if (!payload.name) {
+      setError("X-Station-ის სახელი აუცილებელია.");
       return;
     }
 
@@ -310,13 +307,12 @@ export function RegionManager({
     const data = (await response.json()) as { device: Device };
     setDevices((current) => [data.device, ...current]);
     setDraft({
-      code: "",
       name: "",
       region: draft.region,
       status: "online",
       isExcluded: false,
-      x: 50,
-      y: 50,
+      lat: TBILISI_CENTER.lat,
+      lng: TBILISI_CENTER.lng,
       tags: [],
     });
   }
@@ -324,13 +320,12 @@ export function RegionManager({
   function startEditDevice(device: Device) {
     setEditingDeviceId(device.id);
     setDeviceEdit({
-      code: device.code,
       name: device.name,
       region: device.region === unassignedRegion ? "" : device.region,
       status: device.status,
       isExcluded: device.isExcluded,
-      x: device.position.x,
-      y: device.position.y,
+      lat: device.position.lat,
+      lng: device.position.lng,
       tags: device.tags,
     });
     setError("");
@@ -342,8 +337,8 @@ export function RegionManager({
     }
 
     const payload = devicePayload(deviceEdit);
-    if (!payload.code || !payload.name) {
-      setError("X-Station-ის ნომერი და სახელი აუცილებელია.");
+    if (!payload.name) {
+      setError("X-Station-ის სახელი აუცილებელია.");
       return;
     }
 
@@ -443,8 +438,8 @@ export function RegionManager({
       <section className="page-header">
         <div>
           <p className="eyebrow">X-Stations</p>
-          <h1>რეგიონებისა და X-Station-ების მართვა</h1>
-          <p>რეგიონების, ტეგების და X-Station ჩანაწერების CRUD მართვა.</p>
+          <h1>რაიონებისა და X-Station-ების მართვა</h1>
+          <p>რაიონების, ტეგების და X-Station ჩანაწერების CRUD მართვა.</p>
         </div>
         <div className="metric-strip">
           <div className="metric">
@@ -455,7 +450,7 @@ export function RegionManager({
           <div className="metric">
             <Tags size={18} />
             <span>{regions.length}</span>
-            <small>რეგიონი</small>
+            <small>რაიონი</small>
           </div>
         </div>
       </section>
@@ -466,7 +461,7 @@ export function RegionManager({
         <aside className="region-left-column">
           <section className="surface">
           <div className="section-title">
-            <h2>რეგიონები</h2>
+            <h2>რაიონები</h2>
             <MapPinned size={20} />
           </div>
 
@@ -480,7 +475,7 @@ export function RegionManager({
                     name: event.target.value,
                   }))
                 }
-                placeholder="ახალი რეგიონი"
+                placeholder="ახალი რაიონი"
               />
               <input
                 type="color"
@@ -491,7 +486,7 @@ export function RegionManager({
                     color: event.target.value,
                   }))
                 }
-                aria-label="რეგიონის ფერი"
+                aria-label="რაიონის ფერი"
               />
               <button className="primary-button" type="submit" disabled={saving}>
                 <Plus size={16} />
@@ -523,7 +518,7 @@ export function RegionManager({
                           color: event.target.value,
                         }))
                       }
-                      aria-label="რეგიონის ფერი"
+                      aria-label="რაიონის ფერი"
                     />
                     <div className="row-actions">
                       <button
@@ -563,8 +558,8 @@ export function RegionManager({
                           className="icon-button"
                           type="button"
                           onClick={() => startEditRegion(item.region)}
-                          aria-label="რეგიონის რედაქტირება"
-                          title="რეგიონის რედაქტირება"
+                          aria-label="რაიონის რედაქტირება"
+                          title="რაიონის რედაქტირება"
                         >
                           <Edit3 size={16} />
                         </button>
@@ -574,8 +569,8 @@ export function RegionManager({
                           className="icon-button danger"
                           type="button"
                           onClick={() => removeRegion(item.region)}
-                          aria-label="რეგიონის წაშლა"
-                          title="რეგიონის წაშლა"
+                          aria-label="რაიონის წაშლა"
+                          title="რაიონის წაშლა"
                         >
                           <Trash2 size={16} />
                         </button>
@@ -621,7 +616,7 @@ export function RegionManager({
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="ძებნა X-Station-ით ან რეგიონით"
+                placeholder="ძებნა სახელით ან რაიონით"
               />
             </div>
             <label className="select-control compact-filter-control">
@@ -634,17 +629,17 @@ export function RegionManager({
               >
                 <option value="az">A-Z</option>
                 <option value="za">Z-A</option>
-                <option value="region">რეგიონების მიხედვით</option>
+                <option value="region">რაიონების მიხედვით</option>
               </select>
             </label>
             <label className="select-control compact-filter-control">
               <select
                 value={regionFilter}
                 onChange={(event) => setRegionFilter(event.target.value)}
-                aria-label="რეგიონის ფილტრი"
+                aria-label="რაიონის ფილტრი"
               >
-                <option value="all">ყველა რეგიონი</option>
-                <option value={unassignedRegion}>რეგიონის გარეშე</option>
+                <option value="all">ყველა რაიონი</option>
+                <option value={unassignedRegion}>რაიონის გარეშე</option>
                 {regionNames.map((region) => (
                   <option key={region} value={region}>
                     {region}
@@ -711,13 +706,12 @@ export function RegionManager({
                 <article key={device.id} className="region-device-row">
                   <div>
                     <strong>{device.name}</strong>
-                    <span>{device.code}</span>
                     <span>{device.status}</span>
                   </div>
                   <div>
                     <strong>{device.region}</strong>
                     <span>
-                      X {device.position.x}%, Y {device.position.y}%
+                      Lat {device.position.lat.toFixed(6)}, Lng {device.position.lng.toFixed(6)}
                     </span>
                   </div>
                   <div className="row-tags">
@@ -800,34 +794,23 @@ function DeviceDraftFields({
 }) {
   return (
     <>
+      <label>
+        <span>სახელი</span>
+        <input
+          value={draft.name}
+          onChange={(event) => onChange({ name: event.target.value })}
+          placeholder="ლოკაციის დასახელება"
+          required
+        />
+      </label>
       <div className="form-row">
         <label>
-          <span>ნომერი</span>
-          <input
-            value={draft.code}
-            onChange={(event) => onChange({ code: event.target.value })}
-            placeholder="TB-601"
-            required
-          />
-        </label>
-        <label>
-          <span>სახელი</span>
-          <input
-            value={draft.name}
-            onChange={(event) => onChange({ name: event.target.value })}
-            placeholder="ლოკაციის დასახელება"
-            required
-          />
-        </label>
-      </div>
-      <div className="form-row">
-        <label>
-          <span>რეგიონი</span>
+          <span>რაიონი</span>
           <select
             value={draft.region}
             onChange={(event) => onChange({ region: event.target.value })}
           >
-            <option value="">რეგიონის გარეშე</option>
+            <option value="">რაიონის გარეშე</option>
             {regionNames.map((region) => (
               <option key={region} value={region}>
                 {region}
@@ -851,23 +834,25 @@ function DeviceDraftFields({
       </div>
       <div className="form-row">
         <label>
-          <span>რუკაზე X %</span>
+          <span>Latitude</span>
           <input
             type="number"
-            min={5}
-            max={95}
-            value={draft.x}
-            onChange={(event) => onChange({ x: Number(event.target.value) })}
+            min={41.62}
+            max={41.84}
+            step={0.000001}
+            value={draft.lat}
+            onChange={(event) => onChange({ lat: Number(event.target.value) })}
           />
         </label>
         <label>
-          <span>რუკაზე Y %</span>
+          <span>Longitude</span>
           <input
             type="number"
-            min={5}
-            max={95}
-            value={draft.y}
-            onChange={(event) => onChange({ y: Number(event.target.value) })}
+            min={44.62}
+            max={45.02}
+            step={0.000001}
+            value={draft.lng}
+            onChange={(event) => onChange({ lng: Number(event.target.value) })}
           />
         </label>
       </div>
@@ -888,23 +873,22 @@ function DeviceDraftFields({
 }
 
 function devicePayload(draft: DeviceDraft) {
+  const position = clampLatLng({
+    lat: Number(draft.lat),
+    lng: Number(draft.lng),
+  });
   return {
-    code: draft.code.trim().toUpperCase(),
     name: draft.name.trim(),
     status: draft.status,
     isExcluded: draft.isExcluded,
     region: draft.region || null,
-    position: {
-      x: clampPosition(Number(draft.x)),
-      y: clampPosition(Number(draft.y)),
-    },
+    position,
     tags: draft.tags,
   };
 }
 
 function devicePayloadFromDevice(device: Device, isExcluded = device.isExcluded) {
   return {
-    code: device.code.trim().toUpperCase(),
     name: device.name.trim(),
     status: device.status,
     isExcluded,
@@ -912,10 +896,6 @@ function devicePayloadFromDevice(device: Device, isExcluded = device.isExcluded)
     position: device.position,
     tags: device.tags,
   };
-}
-
-function clampPosition(value: number) {
-  return Math.max(5, Math.min(95, Number.isFinite(value) ? value : 50));
 }
 
 function toggleListValue(values: string[], value: string) {
@@ -929,13 +909,11 @@ function compareDevices(a: Device, b: Device, sortMode: DeviceSortMode) {
     return (
       a.region.localeCompare(b.region, "ka") ||
       a.name.localeCompare(b.name, "ka") ||
-      a.code.localeCompare(b.code, "ka")
+      a.id.localeCompare(b.id, "ka")
     );
   }
 
   const result =
-    a.name.localeCompare(b.name, "ka") ||
-    a.code.localeCompare(b.code, "ka") ||
-    a.id.localeCompare(b.id, "ka");
+    a.name.localeCompare(b.name, "ka") || a.id.localeCompare(b.id, "ka");
   return sortMode === "za" ? -result : result;
 }

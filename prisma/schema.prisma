@@ -69,8 +69,8 @@ model devices {
   name               String               @db.VarChar(180)
   status             devices_status       @default(online)
   region_id          String?              @db.VarChar(64)
-  position_x         Decimal              @default(50.00) @db.Decimal(5, 2)
-  position_y         Decimal              @default(50.00) @db.Decimal(5, 2)
+  latitude           Decimal              @default(41.715100) @db.Decimal(10, 6)
+  longitude          Decimal              @default(44.827100) @db.Decimal(10, 6)
   last_seen_at       DateTime             @db.DateTime(0)
   biostar_payload    Json?
   is_excluded        Boolean              @default(false)
@@ -195,6 +195,7 @@ model tasks {
   device_id      String           @db.VarChar(64)
   status         tasks_status     @default(planned)
   priority       tasks_priority   @default(normal)
+  tags           Json?
   starts_at      DateTime?        @db.DateTime(0)
   due_date       DateTime         @db.Date
   created_by     String?          @db.VarChar(64)
