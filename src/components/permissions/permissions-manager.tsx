@@ -17,22 +17,38 @@ import type {
   PermissionKey,
 } from "@/lib/types";
 
-const pages: { key: PageKey; label: string }[] = [
-  { key: "dashboard", label: "რუკა" },
-  { key: "devices", label: "X-Stations" },
-  { key: "regions", label: "რაიონები" },
-  { key: "tasks", label: "ტასკები" },
-  { key: "offline_records", label: "Offline აღრიცხვა" },
-  { key: "users", label: "მომხმარებლები" },
-  { key: "analytics", label: "ანალიტიკა" },
-  { key: "permissions", label: "უფლებები" },
-];
-
-const actions: { key: PermissionAction; label: string }[] = [
+const defaultActions: { key: PermissionAction; label: string }[] = [
   { key: "view", label: "ნახვა" },
   { key: "create", label: "დამატება" },
   { key: "edit", label: "შეცვლა" },
   { key: "delete", label: "წაშლა" },
+];
+
+const problemReportActions: { key: PermissionAction; label: string }[] = [
+  ...defaultActions,
+  { key: "assign", label: "მომხმარებლები" },
+  { key: "tag", label: "ტეგები" },
+  { key: "status", label: "სტატუსები" },
+];
+
+const pages: {
+  key: PageKey;
+  label: string;
+  actions?: { key: PermissionAction; label: string }[];
+}[] = [
+  { key: "dashboard", label: "რუკა" },
+  { key: "devices", label: "X-Stations" },
+  { key: "regions", label: "რაიონები" },
+  { key: "tasks", label: "ტასკები" },
+  {
+    key: "problem_reports",
+    label: "პრობლემების რეგისტრაცია",
+    actions: problemReportActions,
+  },
+  { key: "offline_records", label: "Offline აღრიცხვა" },
+  { key: "users", label: "მომხმარებლები" },
+  { key: "analytics", label: "ანალიტიკა" },
+  { key: "permissions", label: "უფლებები" },
 ];
 
 export function PermissionsManager({
@@ -160,38 +176,40 @@ export function PermissionsManager({
           <div className="permission-matrix">
             <div className="permission-row head">
               <span>სექცია</span>
-              {actions.map((action) => (
-                <span key={action.key}>{action.label}</span>
-              ))}
+              <span>უფლებები</span>
               <span>მენიუში</span>
             </div>
             {pages.map((page) => {
+              const actions = page.actions ?? defaultActions;
               const canView = selectedPermissions.includes(
                 `${page.key}.view` as PermissionKey,
               );
               return (
                 <div key={page.key} className="permission-row">
                   <strong>{page.label}</strong>
-                  {actions.map((action) => {
-                    const permission = `${page.key}.${action.key}` as PermissionKey;
-                    const enabled = selectedPermissions.includes(permission);
-                    return (
-                      <button
-                        key={permission}
-                        type="button"
-                        className={`permission-toggle ${enabled ? "enabled" : ""}`}
-                        onClick={() => togglePermission(permission)}
-                        aria-label={`${page.label} ${action.label}`}
-                        disabled={!canEdit || saving}
-                      >
-                        {enabled ? (
-                          <ToggleRight size={28} />
-                        ) : (
-                          <ToggleLeft size={28} />
-                        )}
-                      </button>
-                    );
-                  })}
+                  <div className="permission-action-list">
+                    {actions.map((action) => {
+                      const permission = `${page.key}.${action.key}` as PermissionKey;
+                      const enabled = selectedPermissions.includes(permission);
+                      return (
+                        <button
+                          key={permission}
+                          type="button"
+                          className={`permission-toggle ${enabled ? "enabled" : ""}`}
+                          onClick={() => togglePermission(permission)}
+                          aria-label={`${page.label} ${action.label}`}
+                          disabled={!canEdit || saving}
+                        >
+                          {enabled ? (
+                            <ToggleRight size={28} />
+                          ) : (
+                            <ToggleLeft size={28} />
+                          )}
+                          <span>{action.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                   <span className={`visibility-pill ${canView ? "visible" : "hidden"}`}>
                     {canView ? <Eye size={15} /> : <EyeOff size={15} />}
                     {canView ? "ჩანს" : "დამალულია"}

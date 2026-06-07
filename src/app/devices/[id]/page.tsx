@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { cookies } from "next/headers";
+import { notFound, redirect } from "next/navigation";
 import {
   Activity,
   AlertTriangle,
@@ -14,7 +15,9 @@ import {
   WifiOff,
 } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
+import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { withoutDeviceCodes } from "@/lib/display";
+import { getFirstAllowedPath } from "@/lib/navigation";
 import { getDeviceById, getTasks, getUsers } from "@/lib/repositories";
 import type { ProblemRecord, TaskStatus } from "@/lib/types";
 
@@ -37,6 +40,13 @@ export default async function DeviceDetailsPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const cookieStore = await cookies();
+  const user = await verifySessionToken(cookieStore.get(SESSION_COOKIE)?.value);
+  const homePath = getFirstAllowedPath(user);
+  if (!hasPermission(user, "dashboard.view") && !hasPermission(user, "devices.view")) {
+    redirect(homePath);
+  }
+
   const [device, tasks, users] = await Promise.all([
     getDeviceById(id),
     getTasks(),
@@ -57,7 +67,7 @@ export default async function DeviceDetailsPage({
     <AppShell>
       <section className="page-header">
         <div>
-          <Link className="back-link" href="/dashboard">
+          <Link className="back-link" href={homePath}>
             <ChevronLeft size={16} />
             რუკაზე დაბრუნება
           </Link>

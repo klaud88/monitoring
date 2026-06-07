@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   BellRing,
@@ -59,7 +59,16 @@ export function OfflineRecordsDashboard({
     () => new Set(devices.map((device) => device.id)),
     [devices],
   );
+  const activeMonitoredDevices = useMemo(
+    () => monitoredDevices.filter((device) => device.isActive),
+    [monitoredDevices],
+  );
   const monitoredMap = useMemo(
+    () =>
+      new Map(activeMonitoredDevices.map((device) => [device.deviceId, device])),
+    [activeMonitoredDevices],
+  );
+  const monitoringHistoryMap = useMemo(
     () => new Map(monitoredDevices.map((device) => [device.deviceId, device])),
     [monitoredDevices],
   );
@@ -101,16 +110,13 @@ export function OfflineRecordsDashboard({
 
   const alertingDeviceIds = useMemo(() => {
     const ids = new Set<string>();
-    filteredSnapshots.forEach((snapshot) => {
-      snapshot.devices.forEach((device) => {
-        const monitored = monitoredMap.get(device.deviceId);
-        if (monitored && snapshot.date > monitored.enabledDate) {
-          ids.add(device.deviceId);
-        }
-      });
+    activeMonitoredDevices.forEach((device) => {
+      if (device.lastStatus === "offline" && device.offlineCount > 0) {
+        ids.add(device.deviceId);
+      }
     });
     return ids;
-  }, [filteredSnapshots, monitoredMap]);
+  }, [activeMonitoredDevices]);
 
   const filteredDevices = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -144,6 +150,35 @@ export function OfflineRecordsDashboard({
         : [...current, deviceId],
     );
   }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function refreshMonitoring() {
+      const response = await fetch("/api/offline-records/monitoring", {
+        cache: "no-store",
+      }).catch(() => null);
+
+      if (!response?.ok || cancelled) {
+        return;
+      }
+
+      const payload = (await response.json()) as {
+        monitoredDevices?: MonitoredDevice[];
+      };
+      if (payload.monitoredDevices) {
+        setMonitoredDevices(payload.monitoredDevices);
+      }
+    }
+
+    void refreshMonitoring();
+    const intervalId = window.setInterval(refreshMonitoring, 12000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   async function captureSnapshot() {
     setBusyAction("capture");
@@ -222,7 +257,7 @@ export function OfflineRecordsDashboard({
           </div>
           <div className="metric">
             <BellRing size={18} />
-            <span>{monitoredDevices.length}</span>
+            <span>{activeMonitoredDevices.length}</span>
             <small>მონიტორინგი</small>
           </div>
         </div>
@@ -321,6 +356,7 @@ export function OfflineRecordsDashboard({
             {filteredDevices.map((device) => {
               const selected = selectedDeviceIds.includes(device.id);
               const monitored = monitoredMap.has(device.id);
+              const monitoringRecord = monitoringHistoryMap.get(device.id);
               const alerting = alertingDeviceIds.has(device.id);
               return (
                 <button
@@ -334,11 +370,23 @@ export function OfflineRecordsDashboard({
                     <strong>{device.name}</strong>
                   </span>
                   {selected ? <CheckCircle2 size={17} /> : null}
-                  {monitored ? (
-                    <span className="monitor-pill">
-                      <BellRing size={13} />
-                    </span>
-                  ) : null}
+                  <span className="monitor-indicators">
+                    {monitoringRecord ? (
+                      <span
+                        className={`monitor-count-pill ${
+                          monitoringRecord.isActive ? "" : "inactive"
+                        }`}
+                        title={`მონიტორინგის offline რაოდენობა: ${monitoringRecord.offlineCount}`}
+                      >
+                        {monitoringRecord.offlineCount}
+                      </span>
+                    ) : null}
+                    {monitored ? (
+                      <span className="monitor-pill">
+                        <BellRing size={13} />
+                      </span>
+                    ) : null}
+                  </span>
                 </button>
               );
             })}

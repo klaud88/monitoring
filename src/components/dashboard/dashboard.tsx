@@ -41,6 +41,7 @@ type DashboardProps = {
 type NewTaskForm = {
   title: string;
   issue: string;
+  phone: string;
   deviceId: string;
   assigneeIds: string[];
   priority: TaskPriority;
@@ -100,6 +101,7 @@ export function Dashboard({
   const [form, setForm] = useState<NewTaskForm>({
     title: "",
     issue: "",
+    phone: "",
     deviceId: initialActiveDeviceId,
     assigneeIds: users[1] ? [users[1].id] : [],
     priority: "normal",
@@ -363,6 +365,7 @@ export function Dashboard({
       id: `task-local-${Date.now()}`,
       title: form.title.trim(),
       issue: form.issue.trim(),
+      phone: form.phone.trim(),
       deviceId: form.deviceId,
       assigneeIds: form.assigneeIds,
       status: "planned",
@@ -376,6 +379,7 @@ export function Dashboard({
     setForm({
       title: "",
       issue: "",
+      phone: "",
       deviceId: form.deviceId,
       assigneeIds: form.assigneeIds,
       priority: "normal",
@@ -739,6 +743,17 @@ export function Dashboard({
                   rows={3}
                   required
                 />
+                <input
+                  value={form.phone}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      phone: event.target.value,
+                    }))
+                  }
+                  placeholder="ტელეფონი"
+                  inputMode="tel"
+                />
                 <div className="form-row">
                   <select
                     value={form.priority}
@@ -819,6 +834,12 @@ export function Dashboard({
                     style={{ borderInlineStartColor: firstUser?.color }}
                   >
                     <div className="task-card-top">
+                      {task.problemReportId ? (
+                        <span
+                          className={`issue-indicator ${getIssueIndicatorState(task)}`}
+                          aria-label="პრობლემის ინდიკატორი"
+                        />
+                      ) : null}
                       <div className="avatar-stack">
                         {task.assigneeIds.map((userId) => {
                           const user = userMap.get(userId);
@@ -839,6 +860,9 @@ export function Dashboard({
                     </div>
                     <h3>{displayTitle}</h3>
                     <p>{displayIssue}</p>
+                    {task.phone ? (
+                      <small className="phone-inline">{task.phone}</small>
+                    ) : null}
                     <TaskTagList tags={task.tags} />
                     <footer>
                       <span>
@@ -900,6 +924,14 @@ function toggleListValue(values: string[], value: string) {
   return values.includes(value)
     ? values.filter((item) => item !== value)
     : [...values, value];
+}
+
+function getIssueIndicatorState(task: Pick<Task, "status" | "dueDate">) {
+  if (task.status === "done") {
+    return "done";
+  }
+
+  return task.dueDate < today ? "overdue" : "active";
 }
 
 function formatSyncTime(value: string) {

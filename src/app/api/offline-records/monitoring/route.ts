@@ -1,6 +1,28 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
-import { setDeviceMonitoring } from "@/lib/repositories";
+import {
+  refreshMonitoredDeviceStatuses,
+  setDeviceMonitoring,
+} from "@/lib/repositories";
+import type { MonitoredDevice } from "@/lib/types";
+
+export async function GET(request: NextRequest) {
+  const user = await verifySessionToken(
+    request.cookies.get(SESSION_COOKIE)?.value,
+  );
+  if (!hasPermission(user, "offline_records.view")) {
+    return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+  }
+
+  const monitoredDevices = await refreshMonitoredDeviceStatuses({
+    sync: true,
+    includeInactive: true,
+  });
+  return NextResponse.json({
+    monitoredDevices,
+    notifications: getMonitoringNotifications(monitoredDevices),
+  });
+}
 
 export async function POST(request: NextRequest) {
   const user = await verifySessionToken(
@@ -21,5 +43,26 @@ export async function POST(request: NextRequest) {
   }
 
   const monitoredDevices = await setDeviceMonitoring(deviceIds, enabled);
-  return NextResponse.json({ monitoredDevices });
+  return NextResponse.json({
+    monitoredDevices,
+    notifications: getMonitoringNotifications(monitoredDevices),
+  });
+}
+
+function getMonitoringNotifications(monitoredDevices: MonitoredDevice[]) {
+  return monitoredDevices
+    .filter(
+      (device) =>
+        device.isActive &&
+        device.lastStatus === "offline" &&
+        device.offlineCount > 0 &&
+        device.lastNotificationAt,
+    )
+    .map((device) => ({
+      deviceId: device.deviceId,
+      deviceName: device.deviceName,
+      offlineCount: device.offlineCount,
+      lastOfflineAt: device.lastOfflineAt,
+      lastNotificationAt: device.lastNotificationAt,
+    }));
 }

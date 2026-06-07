@@ -8,13 +8,21 @@ export type PageKey =
   | "dashboard"
   | "devices"
   | "tasks"
+  | "problem_reports"
   | "regions"
   | "offline_records"
   | "users"
   | "permissions"
   | "analytics";
 
-export type PermissionAction = "view" | "create" | "edit" | "delete";
+export type PermissionAction =
+  | "view"
+  | "create"
+  | "edit"
+  | "delete"
+  | "assign"
+  | "tag"
+  | "status";
 export type PermissionKey = `${PageKey}.${PermissionAction}`;
 
 export type AppUser = {
@@ -25,6 +33,7 @@ export type AppUser = {
   initials: string;
   color: string;
   permissions: PermissionKey[];
+  deviceGroupCode?: string;
   passwordHash?: string;
 };
 
@@ -66,6 +75,7 @@ export type Task = {
   id: string;
   title: string;
   issue: string;
+  phone?: string;
   deviceId: string;
   assigneeIds: string[];
   status: TaskStatus;
@@ -74,6 +84,25 @@ export type Task = {
   startsAt?: string;
   dueDate: string;
   createdAt: string;
+  problemReportId?: string;
+};
+
+export type ProblemReport = {
+  id: string;
+  taskId?: string;
+  deviceId: string;
+  deviceGroupCode: string;
+  title: string;
+  issue: string;
+  phone?: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  tags: string[];
+  assigneeIds: string[];
+  dueDate: string;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type AuditLog = {
@@ -122,6 +151,12 @@ export type OfflineSnapshot = {
 
 export type MonitoredDevice = {
   deviceId: string;
+  deviceName: string;
   enabledAt: string;
   enabledDate: string;
+  isActive: boolean;
+  offlineCount: number;
+  lastStatus?: DeviceStatus;
+  lastOfflineAt?: string;
+  lastNotificationAt?: string;
 };

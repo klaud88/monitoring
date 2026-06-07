@@ -13,6 +13,13 @@ const allPermissions: PermissionKey[] = [
   "tasks.create",
   "tasks.edit",
   "tasks.delete",
+  "problem_reports.view",
+  "problem_reports.create",
+  "problem_reports.edit",
+  "problem_reports.delete",
+  "problem_reports.assign",
+  "problem_reports.tag",
+  "problem_reports.status",
   "regions.view",
   "regions.create",
   "regions.edit",
@@ -70,6 +77,12 @@ export const mockUsers: AppUser[] = [
       "tasks.view",
       "tasks.create",
       "tasks.edit",
+      "problem_reports.view",
+      "problem_reports.create",
+      "problem_reports.edit",
+      "problem_reports.assign",
+      "problem_reports.tag",
+      "problem_reports.status",
       "regions.view",
       "analytics.view"
     ]
@@ -91,6 +104,17 @@ export const mockUsers: AppUser[] = [
     initials: "AG",
     color: "#0f766e",
     permissions: ["dashboard.view", "devices.view", "tasks.view", "analytics.view"]
+  },
+  {
+    id: "u-garden-101",
+    name: "ბაღი 101",
+    email: "xstation-101@local.ge",
+    role: "garden",
+    initials: "101",
+    color: "#0f766e",
+    deviceGroupCode: "101",
+    permissions: ["problem_reports.view", "problem_reports.create"],
+    passwordHash: "dev:101"
   }
 ];
 

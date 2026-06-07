@@ -20,7 +20,8 @@ export function sanitizeUser(user: AppUser): SessionUser {
     role: user.role,
     initials: user.initials,
     color: user.color,
-    permissions: user.permissions
+    permissions: user.permissions,
+    deviceGroupCode: user.deviceGroupCode
   };
 }
 
@@ -31,7 +32,8 @@ export async function createSessionToken(user: AppUser | SessionUser) {
     role: user.role,
     initials: user.initials,
     color: user.color,
-    permissions: user.permissions
+    permissions: user.permissions,
+    deviceGroupCode: user.deviceGroupCode
   })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(user.id)
@@ -60,7 +62,10 @@ export async function verifySessionToken(token?: string): Promise<SessionUser | 
       color: String(payload.color || "#2563eb"),
       permissions: Array.isArray(payload.permissions)
         ? (payload.permissions as PermissionKey[])
-        : []
+        : [],
+      deviceGroupCode: payload.deviceGroupCode
+        ? String(payload.deviceGroupCode)
+        : undefined
     };
 
     return (await getUserById(sessionUser.id).catch(() => null)) ?? sessionUser;

@@ -20,6 +20,7 @@ const roleLabels: Record<string, string> = {
   dispatcher: "დისპეტჩერი",
   technician: "ტექნიკოსი",
   viewer: "მხოლოდ ნახვა",
+  garden: "ბაღი",
 };
 
 type UserPermissions = {
@@ -199,7 +200,7 @@ export function UsersManager({
 
       <section className="content-grid user-admin-grid">
         {permissions.create ? (
-          <form className="surface admin-form" onSubmit={createUser}>
+          <form className="surface admin-form user-create-form" onSubmit={createUser}>
             <div className="section-title">
               <h2>ახალი მომხმარებელი</h2>
               <Plus size={20} />

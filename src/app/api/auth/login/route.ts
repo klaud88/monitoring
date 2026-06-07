@@ -1,23 +1,23 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createSessionToken, sanitizeUser, SESSION_COOKIE, verifyPassword } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
-import { getUserByEmail } from "@/lib/repositories";
+import { getUserByLogin } from "@/lib/repositories";
 import { shouldUseSecureCookie } from "@/lib/session";
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
-  const email = String(body?.email || "").trim().toLowerCase();
+  const identifier = String(body?.email || body?.identifier || "").trim().toLowerCase();
   const password = String(body?.password || "");
 
-  if (!email || !password) {
-    return NextResponse.json({ message: "ელფოსტა და პაროლი აუცილებელია." }, { status: 400 });
+  if (!identifier || !password) {
+    return NextResponse.json({ message: "ელფოსტა/X-Station და პაროლი აუცილებელია." }, { status: 400 });
   }
 
-  const user = await getUserByEmail(email);
+  const user = await getUserByLogin(identifier);
   const isValid = user ? await verifyPassword(password, user.passwordHash) : false;
 
   if (!user || !isValid) {
-    return NextResponse.json({ message: "არასწორი ელფოსტა ან პაროლი." }, { status: 401 });
+    return NextResponse.json({ message: "არასწორი ელფოსტა/X-Station ან პაროლი." }, { status: 401 });
   }
 
   const sessionUser = sanitizeUser(user);

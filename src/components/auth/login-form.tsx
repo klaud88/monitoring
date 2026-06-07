@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { KeyRound, LogIn, Mail } from "lucide-react";
+import { canAccessPath, getFirstAllowedPath } from "@/lib/navigation";
+import type { SessionUser } from "@/lib/types";
 
 type LoginFormProps = {
   nextPath?: string;
@@ -24,7 +26,7 @@ function getSafeNextPath(nextPath?: string) {
 
 export function LoginForm({ nextPath }: LoginFormProps) {
   const router = useRouter();
-  const [email, setEmail] = useState("admin@local.ge");
+  const [identifier, setIdentifier] = useState("admin@local.ge");
   const [password, setPassword] = useState("admin123");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -38,7 +40,7 @@ export function LoginForm({ nextPath }: LoginFormProps) {
     const response = await fetch("/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password })
+      body: JSON.stringify({ email: identifier, password })
     });
 
     setLoading(false);
@@ -49,21 +51,27 @@ export function LoginForm({ nextPath }: LoginFormProps) {
       return;
     }
 
-    router.replace(redirectTo);
+    const payload = (await response.json().catch(() => null)) as {
+      user?: SessionUser;
+    } | null;
+    const target = canAccessPath(payload?.user, redirectTo)
+      ? redirectTo
+      : getFirstAllowedPath(payload?.user);
+    router.replace(target);
     router.refresh();
   }
 
   return (
     <form className="login-form" onSubmit={submit}>
       <label>
-        <span>ელფოსტა</span>
+        <span>ელფოსტა ან X-Station</span>
         <div className="field-with-icon">
           <Mail size={18} />
           <input
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            autoComplete="email"
+            type="text"
+            value={identifier}
+            onChange={(event) => setIdentifier(event.target.value)}
+            autoComplete="username"
             required
           />
         </div>

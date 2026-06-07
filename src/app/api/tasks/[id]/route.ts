@@ -39,6 +39,10 @@ export async function PATCH(
     body?.title === undefined ? existingTask.title : String(body.title).trim();
   const issue =
     body?.issue === undefined ? existingTask.issue : String(body.issue).trim();
+  const phone =
+    body?.phone === undefined
+      ? (existingTask.phone ?? "")
+      : String(body.phone).trim();
   const deviceId =
     body?.deviceId === undefined
       ? existingTask.deviceId
@@ -62,6 +66,7 @@ export async function PATCH(
   const task = await updateTask(id, {
     title,
     issue,
+    phone,
     deviceId,
     assigneeIds,
     status,

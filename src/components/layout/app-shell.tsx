@@ -2,6 +2,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import {
   Activity,
+  AlertCircle,
   BarChart3,
   ClipboardList,
   DoorOpen,
@@ -15,7 +16,10 @@ import {
   WifiOff,
 } from "lucide-react";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
+import { getFirstAllowedPath } from "@/lib/navigation";
 import type { PermissionKey } from "@/lib/types";
+import { OfflineMonitorNotifications } from "./offline-monitor-notifications";
+import { ThemeToggle } from "./theme-toggle";
 
 type NavItem = {
   href: string;
@@ -31,6 +35,12 @@ const navItems: NavItem[] = [
     label: "დავალებები",
     permission: "tasks.view",
     icon: ClipboardList,
+  },
+  {
+    href: "/problem-reports",
+    label: "პრობლემების რეგისტრაცია",
+    permission: "problem_reports.view",
+    icon: AlertCircle,
   },
   {
     href: "/devices/regions",
@@ -69,6 +79,7 @@ export async function AppShell({
 }: Readonly<{ children: React.ReactNode }>) {
   const cookieStore = await cookies();
   const user = await verifySessionToken(cookieStore.get(SESSION_COOKIE)?.value);
+  const homeHref = getFirstAllowedPath(user);
   const visibleItems = navItems.filter((item) => {
     if (!item.permission) {
       return true;
@@ -84,7 +95,7 @@ export async function AppShell({
     <div className="app-shell">
       <header className="topbar">
         <div className="topbar-main">
-          <Link href="/dashboard" className="brand" aria-label="BioStar2 Status Ops">
+          <Link href={homeHref} className="brand" aria-label="BioStar2 Status Ops">
             <span className="brand-mark">
               <Activity size={20} strokeWidth={2.4} />
             </span>
@@ -113,6 +124,10 @@ export async function AppShell({
           </details>
 
           <div className="account-actions">
+            <ThemeToggle />
+            {hasPermission(user, "offline_records.view") ? (
+              <OfflineMonitorNotifications />
+            ) : null}
             <Link
               className="profile-button"
               href="/profile"

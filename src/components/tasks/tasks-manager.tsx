@@ -46,6 +46,7 @@ type TaskPermissions = {
 type TaskDraft = {
   title: string;
   issue: string;
+  phone: string;
   deviceId: string;
   assigneeIds: string[];
   status: TaskStatus;
@@ -88,6 +89,7 @@ export function TasksManager({
   const [draft, setDraft] = useState({
     title: "",
     issue: "",
+    phone: "",
     deviceId: devices[0]?.id || "",
     assigneeId:
       users.find((user) => user.role !== "viewer")?.id || users[0]?.id || "",
@@ -175,6 +177,7 @@ export function TasksManager({
       id: `task-local-${Date.now()}`,
       title: draft.title.trim(),
       issue: draft.issue.trim(),
+      phone: draft.phone.trim(),
       deviceId: draft.deviceId,
       assigneeIds: draft.assigneeId ? [draft.assigneeId] : [],
       status: "planned",
@@ -185,7 +188,13 @@ export function TasksManager({
     };
 
     setTasks((current) => [optimisticTask, ...current]);
-    setDraft((current) => ({ ...current, title: "", issue: "", tags: [] }));
+    setDraft((current) => ({
+      ...current,
+      title: "",
+      issue: "",
+      phone: "",
+      tags: [],
+    }));
 
     setError("");
     const response = await fetch("/api/tasks", {
@@ -274,6 +283,7 @@ export function TasksManager({
       ...editDraft,
       title: editDraft.title.trim(),
       issue: editDraft.issue.trim(),
+      phone: editDraft.phone.trim(),
     };
 
     if (!payload.title || !payload.issue || !payload.deviceId || !payload.dueDate) {
@@ -418,6 +428,19 @@ export function TasksManager({
               />
             </label>
             <label>
+              <span>ტელეფონი</span>
+              <input
+                value={draft.phone}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    phone: event.target.value,
+                  }))
+                }
+                inputMode="tel"
+              />
+            </label>
+            <label>
               <span>მომხმარებელი</span>
               <select
                 value={draft.assigneeId}
@@ -535,8 +558,10 @@ export function TasksManager({
 
           <div className="task-table">
             <div className="task-table-head">
+              <span />
               <span>დავაისი</span>
               <span>ტასკი</span>
+              <span>ტელეფონი</span>
               <span>მომხმარებლები</span>
               <span>სტატუსი</span>
               <span>ვადა</span>
@@ -643,6 +668,20 @@ export function TasksManager({
                         }
                       />
                     </label>
+                    <label>
+                      <span>ტელეფონი</span>
+                      <input
+                        value={editDraft.phone}
+                        onChange={(event) =>
+                          setEditDraft((current) =>
+                            current
+                              ? { ...current, phone: event.target.value }
+                              : current,
+                          )
+                        }
+                        inputMode="tel"
+                      />
+                    </label>
                     <label className="task-edit-issue">
                       <span>საკითხი</span>
                       <textarea
@@ -717,6 +756,14 @@ export function TasksManager({
                   id={`task-${task.id}`}
                   className="task-table-row"
                 >
+                  <span
+                    className={
+                      task.problemReportId
+                        ? `issue-indicator ${getIssueIndicatorState(task)}`
+                        : "issue-indicator empty"
+                    }
+                    aria-label="პრობლემის ინდიკატორი"
+                  />
                   <Link
                     className="task-device-cell clickable-cell"
                     href={`/devices/${device?.id ?? task.deviceId}`}
@@ -737,6 +784,9 @@ export function TasksManager({
                       {priorityLabels[task.priority]}
                     </small>
                   </Link>
+                  <span className="phone-inline task-phone-cell">
+                    {task.phone || "—"}
+                  </span>
                   <span className="avatar-stack">
                     {task.assigneeIds.map((userId) => {
                       const user = userMap.get(userId);
@@ -853,6 +903,7 @@ function createEditDraft(task: Task, deviceCode?: string): TaskDraft {
   return {
     title: withoutDeviceCodes(task.title, [deviceCode]),
     issue: withoutDeviceCodes(task.issue, [deviceCode]),
+    phone: task.phone ?? "",
     deviceId: task.deviceId,
     assigneeIds: task.assigneeIds,
     status: task.status,
@@ -866,4 +917,14 @@ function toggleListValue(values: string[], value: string) {
   return values.includes(value)
     ? values.filter((item) => item !== value)
     : [...values, value];
+}
+
+function getIssueIndicatorState(task: Pick<Task, "status" | "dueDate">) {
+  if (task.status === "done") {
+    return "done";
+  }
+
+  return task.dueDate < new Date().toISOString().slice(0, 10)
+    ? "overdue"
+    : "active";
 }

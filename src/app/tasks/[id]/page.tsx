@@ -1,12 +1,13 @@
 import { cookies } from "next/headers";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import {
   CalendarDays,
   ChevronLeft,
   ClipboardList,
   Edit3,
   MapPin,
+  Phone,
   ShieldAlert,
   Tags,
   UserRoundCheck,
@@ -14,6 +15,7 @@ import {
 import { AppShell } from "@/components/layout/app-shell";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { withoutDeviceCodes } from "@/lib/display";
+import { getFirstAllowedPath } from "@/lib/navigation";
 import { getDevices, getTasks, getUsers } from "@/lib/repositories";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
 
@@ -38,11 +40,15 @@ export default async function TaskDetailsPage({
 }) {
   const { id } = await params;
   const cookieStore = await cookies();
-  const [tasks, devices, users, user] = await Promise.all([
+  const user = await verifySessionToken(cookieStore.get(SESSION_COOKIE)?.value);
+  if (!hasPermission(user, "tasks.view")) {
+    redirect(getFirstAllowedPath(user));
+  }
+
+  const [tasks, devices, users] = await Promise.all([
     getTasks(),
     getDevices(),
     getUsers(),
-    verifySessionToken(cookieStore.get(SESSION_COOKIE)?.value),
   ]);
   const task = tasks.find((item) => item.id === id);
 
@@ -131,6 +137,16 @@ export default async function TaskDetailsPage({
           <small>მომხმარებელი</small>
         </div>
       </section>
+
+      {task.phone ? (
+        <section className="content-grid two">
+          <div className="surface stat-surface">
+            <Phone size={20} />
+            <span>ტელეფონი</span>
+            <strong>{task.phone}</strong>
+          </div>
+        </section>
+      ) : null}
 
       <section className="content-grid two">
         <div className="surface">

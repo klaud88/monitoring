@@ -26,6 +26,7 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
   const title = String(body?.title || "").trim();
   const issue = String(body?.issue || "").trim();
+  const phone = String(body?.phone || "").trim();
   const deviceId = String(body?.deviceId || "");
   const dueDate = String(body?.dueDate || "");
   const status = taskStatuses.includes(body?.status) ? body.status : "planned";
@@ -42,6 +43,7 @@ export async function POST(request: NextRequest) {
   const task = await createTask({
     title,
     issue,
+    phone,
     deviceId,
     assigneeIds,
     status,

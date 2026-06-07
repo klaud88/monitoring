@@ -81,6 +81,7 @@ model devices {
   device_tags        device_tags[]
   monitored_devices  monitored_devices?
   offline_snapshot_devices offline_snapshot_devices[]
+  problem_reports    problem_reports[]
   regions            regions?             @relation(fields: [region_id], references: [id], onUpdate: NoAction, map: "fk_devices_region")
   status_events      status_events[]
   tasks              tasks[]
@@ -160,15 +161,20 @@ model offline_snapshot_devices {
 }
 
 model monitored_devices {
-  device_id    String   @id @db.VarChar(64)
-  enabled_at   DateTime @db.DateTime(0)
-  enabled_date DateTime @db.Date
-  is_active    Boolean  @default(true)
-  created_at   DateTime @default(now()) @db.Timestamp(0)
-  updated_at   DateTime @default(now()) @db.Timestamp(0)
-  devices      devices  @relation(fields: [device_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_monitored_devices_device")
+  device_id            String    @id @db.VarChar(64)
+  enabled_at           DateTime  @db.DateTime(0)
+  enabled_date         DateTime  @db.Date
+  is_active            Boolean   @default(true)
+  offline_count        Int       @default(0)
+  last_status          String?   @db.VarChar(16)
+  last_offline_at      DateTime? @db.DateTime(0)
+  last_notification_at DateTime? @db.DateTime(0)
+  created_at           DateTime  @default(now()) @db.Timestamp(0)
+  updated_at           DateTime  @default(now()) @db.Timestamp(0)
+  devices              devices   @relation(fields: [device_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_monitored_devices_device")
 
   @@index([is_active, enabled_date], map: "idx_monitored_devices_active_date")
+  @@index([last_notification_at], map: "idx_monitored_devices_alert")
 }
 
 model tags {
@@ -188,10 +194,46 @@ model task_assignees {
   @@index([user_id], map: "fk_task_assignees_user")
 }
 
+model problem_report_assignees {
+  problem_report_id String          @db.VarChar(64)
+  user_id           String          @db.VarChar(64)
+  problem_reports   problem_reports @relation(fields: [problem_report_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_problem_report_assignees_report")
+  users             users           @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_problem_report_assignees_user")
+
+  @@id([problem_report_id, user_id])
+  @@index([user_id], map: "fk_problem_report_assignees_user")
+}
+
+model problem_reports {
+  id                       String                     @id @db.VarChar(64)
+  task_id                  String?                    @unique(map: "task_id") @db.VarChar(64)
+  device_id                String                     @db.VarChar(64)
+  device_group_code        String                     @db.VarChar(80)
+  title                    String                     @db.VarChar(220)
+  issue                    String                     @db.Text
+  phone                    String?                    @db.VarChar(80)
+  status                   tasks_status               @default(planned)
+  priority                 tasks_priority             @default(normal)
+  tags                     Json?
+  due_date                 DateTime                   @db.Date
+  created_by               String?                    @db.VarChar(64)
+  created_at               DateTime                   @default(now()) @db.Timestamp(0)
+  updated_at               DateTime                   @default(now()) @db.Timestamp(0)
+  problem_report_assignees problem_report_assignees[]
+  devices                  devices                    @relation(fields: [device_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_problem_reports_device")
+  tasks                    tasks?                     @relation(fields: [task_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_problem_reports_task")
+  users                    users?                     @relation(fields: [created_by], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_problem_reports_created_by")
+
+  @@index([device_id], map: "fk_problem_reports_device")
+  @@index([created_by], map: "fk_problem_reports_created_by")
+  @@index([device_group_code], map: "idx_problem_reports_device_group")
+}
+
 model tasks {
   id             String           @id @db.VarChar(64)
   title          String           @db.VarChar(220)
   issue          String           @db.Text
+  phone          String?          @db.VarChar(80)
   device_id      String           @db.VarChar(64)
   status         tasks_status     @default(planned)
   priority       tasks_priority   @default(normal)
@@ -202,6 +244,7 @@ model tasks {
   created_at     DateTime         @default(now()) @db.Timestamp(0)
   updated_at     DateTime         @default(now()) @db.Timestamp(0)
   task_assignees task_assignees[]
+  problem_reports problem_reports?
   users          users?           @relation(fields: [created_by], references: [id], onUpdate: NoAction, map: "fk_tasks_created_by")
   devices        devices          @relation(fields: [device_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_tasks_device")
 
@@ -217,16 +260,20 @@ model users {
   password_hash  String           @db.VarChar(255)
   initials       String           @db.VarChar(12)
   color          String           @db.VarChar(24)
+  device_group_code String?       @db.VarChar(80)
   is_active      Boolean          @default(true)
   created_at     DateTime         @default(now()) @db.Timestamp(0)
   updated_at     DateTime         @default(now()) @db.Timestamp(0)
   audit_logs     audit_logs[]
   device_issues  device_issues[]
+  problem_report_assignees problem_report_assignees[]
+  problem_reports problem_reports[]
   task_assignees task_assignees[]
   tasks          tasks[]
   roles          roles            @relation(fields: [role_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_users_role")
 
   @@index([role_id], map: "fk_users_role")
+  @@index([device_group_code], map: "idx_users_device_group")
 }
 
 enum status_events_status {

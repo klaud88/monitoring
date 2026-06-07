@@ -1,3 +1,4 @@
+import bcrypt from "bcryptjs";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 import { fetchBiostarDevices, hasBiostarConfig } from "./biostar";
@@ -10,6 +11,7 @@ import type {
   MonitoredDevice,
   OfflineSnapshot,
   PermissionKey,
+  ProblemReport,
   Region,
   SessionUser,
   StatusEvent,
@@ -27,6 +29,7 @@ type UserRow = {
   role_name: string;
   initials: string;
   color: string;
+  device_group_code: string | null;
   password_hash: string;
   permissions: string | null;
 };
@@ -85,8 +88,14 @@ type StatusEventRow = {
 
 type MonitoredDeviceRow = {
   device_id: string;
+  device_name: string;
   enabled_at: DatabaseDate;
   enabled_date: DatabaseDate;
+  is_active: boolean | number | string;
+  offline_count: number | null;
+  last_status: string | null;
+  last_offline_at: DatabaseDate | null;
+  last_notification_at: DatabaseDate | null;
 };
 
 type DatabaseDate = string | Date;
@@ -102,6 +111,49 @@ const DEFAULT_REGION_COLORS = [
   "#dc2626",
   "#64748b",
 ];
+const GARDEN_ROLE_NAME = "garden";
+const GARDEN_ROLE_LABEL = "ბაღი";
+const PROBLEM_REPORT_PERMISSIONS: {
+  code: PermissionKey;
+  label: string;
+  roles: string[];
+}[] = [
+  {
+    code: "problem_reports.view",
+    label: "პრობლემების რეგისტრაცია: ნახვა",
+    roles: ["admin", "dispatcher", GARDEN_ROLE_NAME],
+  },
+  {
+    code: "problem_reports.create",
+    label: "პრობლემების რეგისტრაცია: დამატება",
+    roles: ["admin", "dispatcher", GARDEN_ROLE_NAME],
+  },
+  {
+    code: "problem_reports.edit",
+    label: "პრობლემების რეგისტრაცია: რედაქტირება",
+    roles: ["admin", "dispatcher"],
+  },
+  {
+    code: "problem_reports.delete",
+    label: "პრობლემების რეგისტრაცია: წაშლა",
+    roles: ["admin"],
+  },
+  {
+    code: "problem_reports.assign",
+    label: "ბაღები: მომხმარებლების დამატება",
+    roles: ["admin", "dispatcher"],
+  },
+  {
+    code: "problem_reports.tag",
+    label: "ბაღები: ტეგების დამატება/რედაქტირება",
+    roles: ["admin", "dispatcher"],
+  },
+  {
+    code: "problem_reports.status",
+    label: "ბაღები: სტატუსების დამატება/რედაქტირება",
+    roles: ["admin", "dispatcher"],
+  },
+];
 let lastBiostarSyncAt = 0;
 let biostarSyncPromise: Promise<{ synced: number; syncedAt: string }> | null =
   null;
@@ -111,6 +163,7 @@ type TaskRow = {
   id: string;
   title: string;
   issue: string;
+  phone: string | null;
   device_id: string;
   status: TaskStatus;
   priority: Task["priority"];
@@ -118,6 +171,25 @@ type TaskRow = {
   starts_at: DatabaseDate | null;
   due_date: DatabaseDate;
   created_at: DatabaseDate;
+  problem_report_id: string | null;
+  assignee_ids: string | null;
+};
+
+type ProblemReportRow = {
+  id: string;
+  task_id: string | null;
+  device_id: string;
+  device_group_code: string;
+  title: string;
+  issue: string;
+  phone: string | null;
+  status: TaskStatus;
+  priority: Task["priority"];
+  tags: unknown;
+  due_date: DatabaseDate;
+  created_by: string | null;
+  created_at: DatabaseDate;
+  updated_at: DatabaseDate;
   assignee_ids: string | null;
 };
 
@@ -137,12 +209,44 @@ const normalizeRegionName = (region?: string | null) => {
 const toBoolean = (value: boolean | number | string | null | undefined) =>
   value === true || value === 1 || value === "1";
 
+const normalizeDeviceStatus = (value: unknown): DeviceStatus | null => {
+  if (value === "online" || value === "offline" || value === "error") {
+    return value;
+  }
+
+  return null;
+};
+
 const makeId = (prefix: string) =>
   `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 
 const makeStableId = (prefix: string, value: string) => {
   const normalized = Buffer.from(value).toString("hex").slice(0, 36);
   return `${prefix}-${normalized || Date.now().toString(16)}`;
+};
+
+export const normalizeDeviceGroupCode = (value?: string | null) => {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  const firstPart = trimmed.split("-")[0]?.trim();
+  if (firstPart && /^\d+$/.test(firstPart)) {
+    return firstPart;
+  }
+
+  const numeric = trimmed.match(/\d+/)?.[0];
+  if (numeric) {
+    return numeric;
+  }
+
+  return firstPart || trimmed;
+};
+
+export const getDeviceGroupCode = (device: Pick<Device, "code" | "name">) => {
+  const name = String(device.name || "").trim();
+  return normalizeDeviceGroupCode(name) || normalizeDeviceGroupCode(device.code);
 };
 
 const toDateTimeString = (value: DatabaseDate) =>
@@ -254,13 +358,18 @@ async function runBiostarDeviceSync() {
   }
 
   const synced = await withConnection(async (connection) => {
-    await connection.beginTransaction();
-    try {
-      for (const device of biostarDevices) {
-        await connection.query<ResultSetHeader>(
-          `
-            insert into devices
-              (id, code, name, status, last_seen_at)
+      await connection.beginTransaction();
+      try {
+        for (const device of biostarDevices) {
+          const [existingRows] = await connection.query<RowDataPacket[]>(
+            "select status from devices where id = ? limit 1 for update",
+            [device.id],
+          );
+          const previousStatus = normalizeDeviceStatus(existingRows[0]?.status);
+          await connection.query<ResultSetHeader>(
+            `
+              insert into devices
+                (id, code, name, status, last_seen_at)
             values (?, ?, ?, ?, ?)
             on duplicate key update
               name = values(name),
@@ -275,6 +384,13 @@ async function runBiostarDeviceSync() {
             toSqlDateTime(syncedAt),
           ],
         );
+          await updateMonitoredDeviceStatus(
+            connection,
+            device.id,
+            device.status,
+            syncedAt,
+            previousStatus,
+          );
       }
 
       await connection.commit();
@@ -301,6 +417,9 @@ async function ensureOperationalSchema() {
       );
       await connection.query(
         "alter table status_events modify status enum('online', 'offline', 'error') not null",
+      );
+      await connection.query(
+        "alter table tasks modify priority enum('low', 'normal', 'high', 'urgent') not null default 'normal'",
       );
       const deviceColumns = await getTableColumns(connection, "devices");
       const addedLatitude = await addColumnIfMissing(
@@ -350,8 +469,29 @@ async function ensureOperationalSchema() {
         connection,
         taskColumns,
         "tasks",
+        "phone",
+        "phone varchar(80) null after issue",
+      );
+      await addColumnIfMissing(
+        connection,
+        taskColumns,
+        "tasks",
         "tags",
         "tags json null after priority",
+      );
+      const userColumns = await getTableColumns(connection, "users");
+      await addColumnIfMissing(
+        connection,
+        userColumns,
+        "users",
+        "device_group_code",
+        "device_group_code varchar(80) null after color",
+      );
+      await addIndexIfMissing(
+        connection,
+        "users",
+        "idx_users_device_group",
+        "device_group_code",
       );
       await connection.query(`
         create table if not exists offline_snapshots (
@@ -382,12 +522,91 @@ async function ensureOperationalSchema() {
           enabled_at datetime not null,
           enabled_date date not null,
           is_active boolean not null default true,
+          offline_count int not null default 0,
+          last_status varchar(16) null,
+          last_offline_at datetime null,
+          last_notification_at datetime null,
           created_at timestamp not null default current_timestamp,
           updated_at timestamp not null default current_timestamp on update current_timestamp,
           constraint fk_monitored_devices_device foreign key (device_id) references devices(id) on delete cascade,
-          index idx_monitored_devices_active_date (is_active, enabled_date)
+          index idx_monitored_devices_active_date (is_active, enabled_date),
+          index idx_monitored_devices_alert (last_notification_at)
         )
       `);
+      const monitoredColumns = await getTableColumns(
+        connection,
+        "monitored_devices",
+      );
+      await addColumnIfMissing(
+        connection,
+        monitoredColumns,
+        "monitored_devices",
+        "offline_count",
+        "offline_count int not null default 0 after is_active",
+      );
+      await addColumnIfMissing(
+        connection,
+        monitoredColumns,
+        "monitored_devices",
+        "last_status",
+        "last_status varchar(16) null after offline_count",
+      );
+      await addColumnIfMissing(
+        connection,
+        monitoredColumns,
+        "monitored_devices",
+        "last_offline_at",
+        "last_offline_at datetime null after last_status",
+      );
+      await addColumnIfMissing(
+        connection,
+        monitoredColumns,
+        "monitored_devices",
+        "last_notification_at",
+        "last_notification_at datetime null after last_offline_at",
+      );
+      await addIndexIfMissing(
+        connection,
+        "monitored_devices",
+        "idx_monitored_devices_alert",
+        "last_notification_at",
+      );
+      await connection.query(`
+        create table if not exists problem_reports (
+          id varchar(64) primary key,
+          task_id varchar(64) null unique,
+          device_id varchar(64) not null,
+          device_group_code varchar(80) not null,
+          title varchar(220) not null,
+          issue text not null,
+          phone varchar(80) null,
+          status enum('planned', 'in_progress', 'blocked', 'done') not null default 'planned',
+          priority enum('low', 'normal', 'high', 'urgent') not null default 'normal',
+          tags json null,
+          due_date date not null,
+          created_by varchar(64) null,
+          created_at timestamp not null default current_timestamp,
+          updated_at timestamp not null default current_timestamp on update current_timestamp,
+          constraint fk_problem_reports_device foreign key (device_id) references devices(id) on delete cascade,
+          constraint fk_problem_reports_task foreign key (task_id) references tasks(id) on delete set null,
+          constraint fk_problem_reports_created_by foreign key (created_by) references users(id) on delete set null,
+          index idx_problem_reports_device_group (device_group_code),
+          index fk_problem_reports_device (device_id),
+          index fk_problem_reports_created_by (created_by)
+        )
+      `);
+      await connection.query(`
+        create table if not exists problem_report_assignees (
+          problem_report_id varchar(64) not null,
+          user_id varchar(64) not null,
+          primary key (problem_report_id, user_id),
+          constraint fk_problem_report_assignees_report foreign key (problem_report_id) references problem_reports(id) on delete cascade,
+          constraint fk_problem_report_assignees_user foreign key (user_id) references users(id) on delete cascade,
+          index fk_problem_report_assignees_user (user_id)
+        )
+      `);
+      await ensureProblemReportAccess(connection);
+      await ensureGardenUsersForDevices(connection);
     })
       .then(() => undefined)
       .catch((error) => {
@@ -416,7 +635,7 @@ async function getTableColumns(connection: PoolConnection, tableName: string) {
 async function addColumnIfMissing(
   connection: PoolConnection,
   columns: Set<string>,
-  tableName: "devices" | "tasks",
+  tableName: "devices" | "tasks" | "users" | "monitored_devices",
   columnName: string,
   columnDefinition: string,
 ) {
@@ -438,6 +657,41 @@ async function addColumnIfMissing(
   }
 }
 
+async function addIndexIfMissing(
+  connection: PoolConnection,
+  tableName: "users" | "monitored_devices",
+  indexName: string,
+  columnName: string,
+) {
+  const [rows] = await connection.query<RowDataPacket[]>(
+    `
+      select index_name
+      from information_schema.statistics
+      where table_schema = database()
+        and table_name = ?
+        and index_name = ?
+      limit 1
+    `,
+    [tableName, indexName],
+  );
+
+  if (rows.length) {
+    return;
+  }
+
+  try {
+    await connection.query(
+      `alter table ${tableName} add index ${indexName} (${columnName})`,
+    );
+  } catch (error) {
+    if (isDuplicateIndexError(error)) {
+      return;
+    }
+
+    throw error;
+  }
+}
+
 function isDuplicateColumnError(error: unknown) {
   return (
     typeof error === "object" &&
@@ -447,7 +701,150 @@ function isDuplicateColumnError(error: unknown) {
   );
 }
 
+function isDuplicateIndexError(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "ER_DUP_KEYNAME"
+  );
+}
+
+async function ensureProblemReportAccess(connection: PoolConnection) {
+  await connection.query<ResultSetHeader>(
+    `
+      insert into roles (id, name, label)
+      values (?, ?, ?)
+      on duplicate key update label = values(label)
+    `,
+    [makeStableId("role", GARDEN_ROLE_NAME), GARDEN_ROLE_NAME, GARDEN_ROLE_LABEL],
+  );
+
+  for (const permission of PROBLEM_REPORT_PERMISSIONS) {
+    const [pageKey, actionKey] = permission.code.split(".");
+    await connection.query<ResultSetHeader>(
+      `
+        insert into permissions (id, code, label, page_key, action_key)
+        values (?, ?, ?, ?, ?)
+        on duplicate key update
+          label = values(label),
+          page_key = values(page_key),
+          action_key = values(action_key)
+      `,
+      [
+        makeStableId("perm", permission.code),
+        permission.code,
+        permission.label,
+        pageKey,
+        actionKey,
+      ],
+    );
+
+    if (permission.roles.length) {
+      await connection.query<ResultSetHeader>(
+        `
+          insert ignore into role_permissions (role_id, permission_id)
+          select r.id, p.id
+          from roles r
+          join permissions p on p.code = ?
+          where r.name in (?)
+        `,
+        [permission.code, permission.roles],
+      );
+    }
+  }
+}
+
+async function ensureGardenUsersForDevices(connection: PoolConnection) {
+  const [roleRows] = await connection.query<RoleIdRow[]>(
+    "select id from roles where name = ? limit 1",
+    [GARDEN_ROLE_NAME],
+  );
+  const gardenRoleId = roleRows[0]?.id;
+  if (!gardenRoleId) {
+    return;
+  }
+
+  const [deviceRows] = await connection.query<RowDataPacket[]>(
+    "select code, name from devices where is_excluded = false order by code",
+  );
+  const groups = new Map<string, string>();
+  const invalidGeneratedGroups = new Set<string>();
+  for (const row of deviceRows) {
+    const code = String(row.code || "");
+    const name = String(row.name || "");
+    const groupCode = getDeviceGroupCode({ code, name });
+    const codeOnlyGroup = normalizeDeviceGroupCode(code);
+    if (codeOnlyGroup && codeOnlyGroup !== groupCode) {
+      invalidGeneratedGroups.add(codeOnlyGroup);
+    }
+    if (groupCode && !groups.has(groupCode)) {
+      groups.set(groupCode, name || `X-Station ${groupCode}`);
+    }
+  }
+
+  if (invalidGeneratedGroups.size) {
+    await connection.query<ResultSetHeader>(
+      `
+        update users u
+        join roles r on r.id = u.role_id and r.name = ?
+        set u.is_active = false
+        where u.email like 'xstation-%@local.ge'
+          and u.device_group_code in (?)
+      `,
+      [GARDEN_ROLE_NAME, [...invalidGeneratedGroups]],
+    );
+  }
+
+  for (const [groupCode, deviceName] of groups) {
+    const [existingRows] = await connection.query<RowDataPacket[]>(
+      `
+        select id
+        from users
+        where is_active = true and device_group_code = ?
+        limit 1
+      `,
+      [groupCode],
+    );
+
+    if (existingRows.length) {
+      continue;
+    }
+
+    const email = `xstation-${groupCode}@local.ge`;
+    const initials = groupCode.slice(0, 3).toUpperCase();
+    const passwordHash = await bcrypt.hash(groupCode, 10);
+    await connection.query<ResultSetHeader>(
+      `
+        insert into users
+          (id, role_id, name, email, password_hash, initials, color, device_group_code)
+        values (?, ?, ?, ?, ?, ?, ?, ?)
+        on duplicate key update
+          role_id = values(role_id),
+          name = values(name),
+          initials = values(initials),
+          device_group_code = values(device_group_code),
+          is_active = true
+      `,
+      [
+        makeStableId("garden", groupCode),
+        gardenRoleId,
+        `ბაღი ${groupCode}`,
+        email,
+        passwordHash,
+        initials || "BG",
+        "#0f766e",
+        groupCode,
+      ],
+    );
+
+    void deviceName;
+  }
+}
+
 export async function getUserByEmail(email: string): Promise<AppUser | null> {
+  await ensureOperationalSchema();
+
   const rows = await queryRows<UserRow>(
     `
       select
@@ -457,6 +854,7 @@ export async function getUserByEmail(email: string): Promise<AppUser | null> {
         r.name as role_name,
         u.initials,
         u.color,
+        u.device_group_code,
         u.password_hash,
         group_concat(distinct p.code order by p.code separator ',') as permissions
       from users u
@@ -490,6 +888,68 @@ export async function getUserByEmail(email: string): Promise<AppUser | null> {
     role: row.role_name,
     initials: row.initials,
     color: row.color,
+    deviceGroupCode: row.device_group_code ?? undefined,
+    passwordHash: row.password_hash,
+    permissions: csv(row.permissions) as PermissionKey[],
+  };
+}
+
+export async function getUserByLogin(identifier: string): Promise<AppUser | null> {
+  const normalized = identifier.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized.includes("@")) {
+    return getUserByEmail(normalized);
+  }
+
+  await ensureOperationalSchema();
+  const deviceGroupCode = normalizeDeviceGroupCode(normalized);
+  const rows = await queryRows<UserRow>(
+    `
+      select
+        u.id,
+        u.name,
+        u.email,
+        r.name as role_name,
+        u.initials,
+        u.color,
+        u.device_group_code,
+        u.password_hash,
+        group_concat(distinct p.code order by p.code separator ',') as permissions
+      from users u
+      join roles r on r.id = u.role_id
+      left join role_permissions rp on rp.role_id = r.id
+      left join permissions p on p.id = rp.permission_id
+      where u.device_group_code = ? and u.is_active = true
+      group by u.id, r.name
+      limit 1
+    `,
+    [deviceGroupCode],
+  );
+
+  if (!rows) {
+    return (
+      mockUsers.find(
+        (user) => normalizeDeviceGroupCode(user.deviceGroupCode) === deviceGroupCode,
+      ) ?? null
+    );
+  }
+
+  const row = rows[0];
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    role: row.role_name,
+    initials: row.initials,
+    color: row.color,
+    deviceGroupCode: row.device_group_code ?? undefined,
     passwordHash: row.password_hash,
     permissions: csv(row.permissions) as PermissionKey[],
   };
@@ -503,11 +963,14 @@ function toPublicUser(user: AppUser): SessionUser {
     role: user.role,
     initials: user.initials,
     color: user.color,
+    deviceGroupCode: user.deviceGroupCode,
     permissions: user.permissions,
   };
 }
 
 export async function getUsers(): Promise<SessionUser[]> {
+  await ensureOperationalSchema();
+
   const rows = await queryRows<UserRow>(
     `
       select
@@ -517,6 +980,7 @@ export async function getUsers(): Promise<SessionUser[]> {
         r.name as role_name,
         u.initials,
         u.color,
+        u.device_group_code,
         group_concat(distinct p.code order by p.code separator ',') as permissions
       from users u
       join roles r on r.id = u.role_id
@@ -539,6 +1003,7 @@ export async function getUsers(): Promise<SessionUser[]> {
     role: row.role_name,
     initials: row.initials,
     color: row.color,
+    deviceGroupCode: row.device_group_code ?? undefined,
     permissions: csv(row.permissions) as PermissionKey[],
   }));
 }
@@ -684,6 +1149,13 @@ const fallbackRoles: AppRole[] = [
       "tasks.create",
       "tasks.edit",
       "tasks.delete",
+      "problem_reports.view",
+      "problem_reports.create",
+      "problem_reports.edit",
+      "problem_reports.delete",
+      "problem_reports.assign",
+      "problem_reports.tag",
+      "problem_reports.status",
       "regions.view",
       "regions.create",
       "regions.edit",
@@ -718,6 +1190,12 @@ const fallbackRoles: AppRole[] = [
       "tasks.view",
       "tasks.create",
       "tasks.edit",
+      "problem_reports.view",
+      "problem_reports.create",
+      "problem_reports.edit",
+      "problem_reports.assign",
+      "problem_reports.tag",
+      "problem_reports.status",
       "regions.view",
       "offline_records.view",
       "offline_records.create",
@@ -735,6 +1213,7 @@ const fallbackRoles: AppRole[] = [
       "devices.edit",
       "tasks.view",
       "tasks.edit",
+      "problem_reports.view",
       "regions.view",
       "offline_records.view",
       "offline_records.edit",
@@ -749,10 +1228,17 @@ const fallbackRoles: AppRole[] = [
       "dashboard.view",
       "devices.view",
       "tasks.view",
+      "problem_reports.view",
       "regions.view",
       "offline_records.view",
       "analytics.view",
     ],
+  },
+  {
+    id: "role-garden",
+    name: GARDEN_ROLE_NAME,
+    label: GARDEN_ROLE_LABEL,
+    permissions: ["problem_reports.view", "problem_reports.create"],
   },
 ];
 
@@ -768,7 +1254,7 @@ export async function getRoles(): Promise<AppRole[]> {
       left join role_permissions rp on rp.role_id = r.id
       left join permissions p on p.id = rp.permission_id
       group by r.id
-      order by field(r.name, 'admin', 'dispatcher', 'technician', 'viewer'), r.name
+      order by field(r.name, 'admin', 'dispatcher', 'technician', 'viewer', 'garden'), r.name
     `,
   );
 
@@ -1143,6 +1629,11 @@ export async function updateDevice(
     try {
       const regionId = await getRegionIdByName(connection, input.region);
       const position = clampLatLng(input.position);
+      const [existingRows] = await connection.query<RowDataPacket[]>(
+        "select status from devices where id = ? limit 1 for update",
+        [id],
+      );
+      const previousStatus = normalizeDeviceStatus(existingRows[0]?.status);
       const [result] = await connection.query<ResultSetHeader>(
         `
           update devices
@@ -1178,6 +1669,14 @@ export async function updateDevice(
         await connection.query(
           "update monitored_devices set is_active = false where device_id = ?",
           [id],
+        );
+      } else {
+        await updateMonitoredDeviceStatus(
+          connection,
+          id,
+          input.status,
+          new Date(),
+          previousStatus,
         );
       }
       await connection.commit();
@@ -1405,7 +1904,11 @@ export async function getOfflineSnapshots(fromDate?: string, toDate?: string) {
   }));
 }
 
-export async function getMonitoredDevices(): Promise<MonitoredDevice[]> {
+export async function getMonitoredDevices({
+  includeInactive = false,
+}: {
+  includeInactive?: boolean;
+} = {}): Promise<MonitoredDevice[]> {
   if (isBuildTime()) {
     return [];
   }
@@ -1414,11 +1917,20 @@ export async function getMonitoredDevices(): Promise<MonitoredDevice[]> {
 
   const rows = await queryRows<MonitoredDeviceRow>(
     `
-      select md.device_id, md.enabled_at, md.enabled_date
+      select
+        md.device_id,
+        d.name as device_name,
+        md.enabled_at,
+        md.enabled_date,
+        md.is_active,
+        md.offline_count,
+        md.last_status,
+        md.last_offline_at,
+        md.last_notification_at
       from monitored_devices md
       join devices d on d.id = md.device_id and d.is_excluded = false
-      where md.is_active = true
-      order by md.enabled_date desc, md.device_id
+      ${includeInactive ? "" : "where md.is_active = true"}
+      order by md.is_active desc, md.enabled_date desc, md.device_id
     `,
   );
 
@@ -1426,11 +1938,61 @@ export async function getMonitoredDevices(): Promise<MonitoredDevice[]> {
     return [];
   }
 
-  return rows.map((row) => ({
-    deviceId: row.device_id,
-    enabledAt: toDateTimeString(row.enabled_at),
-    enabledDate: toDateString(row.enabled_date),
-  }));
+  return rows.map(mapMonitoredDeviceRow);
+}
+
+export async function refreshMonitoredDeviceStatuses({
+  sync = false,
+  includeInactive = true,
+}: {
+  sync?: boolean;
+  includeInactive?: boolean;
+} = {}) {
+  if (sync && hasBiostarConfig()) {
+    try {
+      await syncBiostarDevices({ force: true });
+    } catch (error) {
+      console.warn(
+        `[biostar] ${
+          error instanceof Error ? error.message : "Monitoring sync failed"
+        }`,
+      );
+    }
+  }
+
+  await ensureOperationalSchema();
+
+  await withConnection(async (connection) => {
+    await connection.beginTransaction();
+    try {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `
+          select md.device_id, md.last_status, d.status
+          from monitored_devices md
+          join devices d on d.id = md.device_id and d.is_excluded = false
+          where md.is_active = true
+          for update
+        `,
+      );
+
+      for (const row of rows) {
+        await updateMonitoredDeviceStatus(
+          connection,
+          String(row.device_id),
+          normalizeDeviceStatus(row.status) ?? "error",
+          new Date(),
+          normalizeDeviceStatus(row.last_status),
+        );
+      }
+
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    }
+  });
+
+  return getMonitoredDevices({ includeInactive });
 }
 
 export async function setDeviceMonitoring(
@@ -1454,30 +2016,34 @@ export async function setDeviceMonitoring(
   await withConnection(async (connection) => {
     if (enabled) {
       const [deviceRows] = await connection.query(
-        "select id from devices where id in (?) and is_excluded = false",
+        "select id, status from devices where id in (?) and is_excluded = false",
         [uniqueDeviceIds],
       );
-      const activeDeviceIds = (deviceRows as { id: string }[]).map(
-        (device) => device.id,
-      );
-      if (!activeDeviceIds.length) {
+      const activeDevices = deviceRows as { id: string; status: DeviceStatus }[];
+      if (!activeDevices.length) {
         return;
       }
 
       await connection.query<ResultSetHeader>(
         `
-          insert into monitored_devices (device_id, enabled_at, enabled_date, is_active)
-          values ${activeDeviceIds.map(() => "(?, ?, ?, true)").join(", ")}
+          insert into monitored_devices
+            (device_id, enabled_at, enabled_date, is_active, offline_count, last_status, last_offline_at, last_notification_at)
+          values ${activeDevices.map(() => "(?, ?, ?, true, 0, ?, null, null)").join(", ")}
           on duplicate key update
             enabled_at = values(enabled_at),
             enabled_date = values(enabled_date),
             is_active = true,
+            offline_count = 0,
+            last_status = values(last_status),
+            last_offline_at = null,
+            last_notification_at = null,
             updated_at = current_timestamp
         `,
-        activeDeviceIds.flatMap((deviceId) => [
-          deviceId,
+        activeDevices.flatMap((device) => [
+          device.id,
           enabledAt,
           enabledDate,
+          device.status,
         ]),
       );
       return;
@@ -1489,7 +2055,84 @@ export async function setDeviceMonitoring(
     );
   });
 
-  return getMonitoredDevices();
+  return getMonitoredDevices({ includeInactive: true });
+}
+
+function mapMonitoredDeviceRow(row: MonitoredDeviceRow): MonitoredDevice {
+  const lastStatus = normalizeDeviceStatus(row.last_status);
+
+  return {
+    deviceId: row.device_id,
+    deviceName: row.device_name,
+    enabledAt: toDateTimeString(row.enabled_at),
+    enabledDate: toDateString(row.enabled_date),
+    isActive: toBoolean(row.is_active),
+    offlineCount: Number(row.offline_count ?? 0),
+    lastStatus: lastStatus ?? undefined,
+    lastOfflineAt: row.last_offline_at
+      ? toDateTimeString(row.last_offline_at)
+      : undefined,
+    lastNotificationAt: row.last_notification_at
+      ? toDateTimeString(row.last_notification_at)
+      : undefined,
+  };
+}
+
+async function updateMonitoredDeviceStatus(
+  connection: PoolConnection,
+  deviceId: string,
+  status: DeviceStatus,
+  happenedAt: Date,
+  previousStatus?: DeviceStatus | null,
+) {
+  const [rows] = await connection.query<RowDataPacket[]>(
+    `
+      select last_status, is_active
+      from monitored_devices
+      where device_id = ? and is_active = true
+      limit 1
+      for update
+    `,
+    [deviceId],
+  );
+  const row = rows[0];
+  if (!row || !toBoolean(row.is_active)) {
+    return;
+  }
+
+  const trackedStatus =
+    normalizeDeviceStatus(row.last_status) ?? previousStatus ?? null;
+  const shouldIncrement =
+    status === "offline" && trackedStatus !== null && trackedStatus !== "offline";
+
+  if (shouldIncrement) {
+    const happenedAtSql = toSqlDateTime(happenedAt);
+    await connection.query<ResultSetHeader>(
+      `
+        update monitored_devices
+        set
+          offline_count = offline_count + 1,
+          last_status = ?,
+          last_offline_at = ?,
+          last_notification_at = ?,
+          updated_at = current_timestamp
+        where device_id = ?
+      `,
+      [status, happenedAtSql, happenedAtSql, deviceId],
+    );
+    return;
+  }
+
+  if (trackedStatus !== status) {
+    await connection.query<ResultSetHeader>(
+      `
+        update monitored_devices
+        set last_status = ?, updated_at = current_timestamp
+        where device_id = ?
+      `,
+      [status, deviceId],
+    );
+  }
 }
 
 function getMockOfflineSnapshots(): OfflineSnapshot[] {
@@ -1550,6 +2193,7 @@ export async function getTasks(): Promise<Task[]> {
         t.id,
         t.title,
         t.issue,
+        t.phone,
         t.device_id,
         t.status,
         t.priority,
@@ -1557,9 +2201,18 @@ export async function getTasks(): Promise<Task[]> {
         t.starts_at,
         t.due_date,
         t.created_at,
+        pr.id as problem_report_id,
         group_concat(ta.user_id order by ta.user_id separator ',') as assignee_ids
       from tasks t
       left join task_assignees ta on ta.task_id = t.id
+      left join problem_reports pr on pr.task_id = t.id
+      where pr.id is null
+        or exists (
+          select 1
+          from task_assignees ready_ta
+          where ready_ta.task_id = t.id
+          limit 1
+        )
       group by t.id
       order by t.created_at desc
     `,
@@ -1573,6 +2226,7 @@ export async function getTasks(): Promise<Task[]> {
     id: row.id,
     title: row.title,
     issue: row.issue,
+    phone: row.phone ?? undefined,
     deviceId: row.device_id,
     status: row.status,
     priority: row.priority,
@@ -1580,6 +2234,7 @@ export async function getTasks(): Promise<Task[]> {
     startsAt: row.starts_at ? toDateTimeString(row.starts_at) : undefined,
     dueDate: toDateString(row.due_date),
     createdAt: toDateTimeString(row.created_at),
+    problemReportId: row.problem_report_id ?? undefined,
     assigneeIds: csv(row.assignee_ids),
   }));
 }
@@ -1602,13 +2257,14 @@ export async function createTask(
     try {
       await connection.query<ResultSetHeader>(
         `
-          insert into tasks (id, title, issue, device_id, status, priority, tags, starts_at, due_date)
-          values (?, ?, ?, ?, ?, ?, cast(? as json), ?, ?)
+          insert into tasks (id, title, issue, phone, device_id, status, priority, tags, starts_at, due_date)
+          values (?, ?, ?, ?, ?, ?, ?, cast(? as json), ?, ?)
         `,
         [
           task.id,
           task.title,
           task.issue,
+          task.phone ?? null,
           task.deviceId,
           task.status,
           task.priority,
@@ -1655,6 +2311,7 @@ export async function updateTask(
           set
             title = ?,
             issue = ?,
+            phone = ?,
             device_id = ?,
             status = ?,
             priority = ?,
@@ -1666,6 +2323,7 @@ export async function updateTask(
         [
           input.title,
           input.issue,
+          input.phone ?? null,
           input.deviceId,
           input.status,
           input.priority,
@@ -1726,6 +2384,430 @@ export async function deleteTask(id: string) {
   }
 
   return mockTasks.some((task) => task.id === id);
+}
+
+export async function getProblemReports({
+  deviceGroupCode,
+}: {
+  deviceGroupCode?: string;
+} = {}): Promise<ProblemReport[]> {
+  await ensureOperationalSchema();
+
+  const filters: string[] = [];
+  const params: string[] = [];
+  const normalizedGroup = normalizeDeviceGroupCode(deviceGroupCode);
+
+  if (normalizedGroup) {
+    filters.push("pr.device_group_code = ?");
+    params.push(normalizedGroup);
+  }
+
+  const rows = await queryRows<ProblemReportRow>(
+    `
+      select
+        pr.id,
+        pr.task_id,
+        pr.device_id,
+        pr.device_group_code,
+        pr.title,
+        pr.issue,
+        pr.phone,
+        pr.status,
+        pr.priority,
+        pr.tags,
+        pr.due_date,
+        pr.created_by,
+        pr.created_at,
+        pr.updated_at,
+        group_concat(pra.user_id order by pra.user_id separator ',') as assignee_ids
+      from problem_reports pr
+      left join problem_report_assignees pra on pra.problem_report_id = pr.id
+      ${filters.length ? `where ${filters.join(" and ")}` : ""}
+      group by pr.id
+      order by pr.created_at desc
+    `,
+    params,
+  );
+
+  if (!rows) {
+    return [];
+  }
+
+  return rows.map(mapProblemReportRow);
+}
+
+export async function getProblemReportById(id: string) {
+  const reports = await getProblemReports();
+  return reports.find((report) => report.id === id) ?? null;
+}
+
+export async function createProblemReport(
+  input: Omit<
+    ProblemReport,
+    "id" | "taskId" | "deviceGroupCode" | "createdAt" | "updatedAt"
+  >,
+  options: { createdBy?: string; allowedDeviceGroupCode?: string } = {},
+): Promise<ProblemReport> {
+  await ensureOperationalSchema();
+
+  const reportId = makeId("problem");
+  const taskId = makeId("task");
+  const tags = normalizeTaskTags(input.tags);
+  const assigneeIds = normalizeUserIds(input.assigneeIds);
+  const syncTask = shouldSyncProblemReportToTask(assigneeIds);
+  const dueDate = input.dueDate || getTbilisiDateKey();
+  const createdAt = new Date().toISOString();
+  const fallbackReport: ProblemReport = {
+    ...input,
+    id: reportId,
+    taskId: syncTask ? taskId : undefined,
+    tags,
+    assigneeIds,
+    dueDate,
+    deviceGroupCode: normalizeDeviceGroupCode(options.allowedDeviceGroupCode),
+    createdBy: options.createdBy,
+    createdAt,
+    updatedAt: createdAt,
+  };
+
+  const insertedId = await withConnection(async (connection) => {
+    await connection.beginTransaction();
+    try {
+      const device = await getDeviceIdentity(connection, input.deviceId);
+      if (!device) {
+        await connection.rollback();
+        return null;
+      }
+
+      const deviceGroupCode = getDeviceGroupCode(device);
+      const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
+      if (allowedGroup && deviceGroupCode !== allowedGroup) {
+        await connection.rollback();
+        return null;
+      }
+
+      if (syncTask) {
+        await upsertTaskForProblemReport(connection, {
+          taskId,
+          title: input.title,
+          issue: input.issue,
+          phone: input.phone,
+          deviceId: input.deviceId,
+          status: input.status,
+          priority: input.priority,
+          tags,
+          dueDate,
+          assigneeIds,
+          createdBy: options.createdBy,
+        });
+      }
+
+      await connection.query<ResultSetHeader>(
+        `
+          insert into problem_reports
+            (id, task_id, device_id, device_group_code, title, issue, phone, status, priority, tags, due_date, created_by)
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, cast(? as json), ?, ?)
+        `,
+        [
+          reportId,
+          syncTask ? taskId : null,
+          input.deviceId,
+          deviceGroupCode,
+          input.title,
+          input.issue,
+          input.phone ?? null,
+          input.status,
+          input.priority,
+          JSON.stringify(tags),
+          dueDate,
+          options.createdBy ?? null,
+        ],
+      );
+
+      await replaceProblemReportAssignees(connection, reportId, assigneeIds);
+
+      await connection.commit();
+      return reportId;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    }
+  });
+
+  if (!insertedId) {
+    return fallbackReport;
+  }
+
+  return (await getProblemReportById(insertedId)) ?? fallbackReport;
+}
+
+export async function updateProblemReport(
+  id: string,
+  input: Omit<
+    ProblemReport,
+    "id" | "taskId" | "deviceGroupCode" | "createdAt" | "updatedAt"
+  >,
+  options: { allowedDeviceGroupCode?: string } = {},
+): Promise<ProblemReport | null> {
+  await ensureOperationalSchema();
+
+  const tags = normalizeTaskTags(input.tags);
+  const assigneeIds = normalizeUserIds(input.assigneeIds);
+  const dueDate = input.dueDate || getTbilisiDateKey();
+  const updatedId = await withConnection(async (connection) => {
+    await connection.beginTransaction();
+    try {
+      const [existingRows] = await connection.query<RowDataPacket[]>(
+        "select task_id, device_group_code, created_by from problem_reports where id = ? limit 1 for update",
+        [id],
+      );
+      const existing = existingRows[0] as
+        | { task_id?: string | null; device_group_code?: string; created_by?: string | null }
+        | undefined;
+      if (!existing) {
+        await connection.rollback();
+        return null;
+      }
+
+      const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
+      if (allowedGroup && existing.device_group_code !== allowedGroup) {
+        await connection.rollback();
+        return null;
+      }
+
+      const device = await getDeviceIdentity(connection, input.deviceId);
+      if (!device) {
+        await connection.rollback();
+        return null;
+      }
+
+      const deviceGroupCode = getDeviceGroupCode(device);
+      if (allowedGroup && deviceGroupCode !== allowedGroup) {
+        await connection.rollback();
+        return null;
+      }
+
+      const taskId = existing.task_id || makeId("task");
+      const syncTask = shouldSyncProblemReportToTask(assigneeIds);
+      if (syncTask) {
+        await upsertTaskForProblemReport(connection, {
+          taskId,
+          title: input.title,
+          issue: input.issue,
+          phone: input.phone,
+          deviceId: input.deviceId,
+          status: input.status,
+          priority: input.priority,
+          tags,
+          dueDate,
+          assigneeIds,
+          createdBy: existing.created_by ?? undefined,
+        });
+      }
+
+      await connection.query<ResultSetHeader>(
+        `
+          update problem_reports
+          set
+            task_id = ?,
+            device_id = ?,
+            device_group_code = ?,
+            title = ?,
+            issue = ?,
+            phone = ?,
+            status = ?,
+            priority = ?,
+            tags = cast(? as json),
+            due_date = ?
+          where id = ?
+        `,
+        [
+          syncTask ? taskId : null,
+          input.deviceId,
+          deviceGroupCode,
+          input.title,
+          input.issue,
+          input.phone ?? null,
+          input.status,
+          input.priority,
+          JSON.stringify(tags),
+          dueDate,
+          id,
+        ],
+      );
+
+      await replaceProblemReportAssignees(connection, id, assigneeIds);
+      if (!syncTask && existing.task_id) {
+        await connection.query<ResultSetHeader>(
+          "delete from tasks where id = ?",
+          [existing.task_id],
+        );
+      }
+
+      await connection.commit();
+      return id;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    }
+  });
+
+  if (!updatedId) {
+    return null;
+  }
+
+  return getProblemReportById(updatedId);
+}
+
+export async function deleteProblemReport(id: string) {
+  await ensureOperationalSchema();
+
+  const deleted = await withConnection(async (connection) => {
+    await connection.beginTransaction();
+    try {
+      const [existingRows] = await connection.query<RowDataPacket[]>(
+        "select task_id from problem_reports where id = ? limit 1 for update",
+        [id],
+      );
+      const taskId = String(existingRows[0]?.task_id || "");
+      const [result] = await connection.query<ResultSetHeader>(
+        "delete from problem_reports where id = ?",
+        [id],
+      );
+
+      if (taskId) {
+        await connection.query<ResultSetHeader>(
+          "delete from tasks where id = ?",
+          [taskId],
+        );
+      }
+
+      await connection.commit();
+      return result.affectedRows > 0;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    }
+  });
+
+  return deleted ?? false;
+}
+
+function mapProblemReportRow(row: ProblemReportRow): ProblemReport {
+  return {
+    id: row.id,
+    taskId: row.task_id ?? undefined,
+    deviceId: row.device_id,
+    deviceGroupCode: row.device_group_code,
+    title: row.title,
+    issue: row.issue,
+    phone: row.phone ?? undefined,
+    status: row.status,
+    priority: row.priority,
+    tags: normalizeTaskTags(row.tags),
+    assigneeIds: csv(row.assignee_ids),
+    dueDate: toDateString(row.due_date),
+    createdBy: row.created_by ?? undefined,
+    createdAt: toDateTimeString(row.created_at),
+    updatedAt: toDateTimeString(row.updated_at),
+  };
+}
+
+function normalizeUserIds(userIds: string[]) {
+  return [...new Set(userIds.map((id) => id.trim()))].filter(Boolean);
+}
+
+function shouldSyncProblemReportToTask(assigneeIds: string[]) {
+  return assigneeIds.length > 0;
+}
+
+async function getDeviceIdentity(connection: PoolConnection, deviceId: string) {
+  const [deviceRows] = await connection.query<RowDataPacket[]>(
+    "select id, code, name from devices where id = ? limit 1",
+    [deviceId],
+  );
+  const row = deviceRows[0];
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: String(row.id),
+    code: String(row.code || ""),
+    name: String(row.name || ""),
+  };
+}
+
+async function replaceProblemReportAssignees(
+  connection: PoolConnection,
+  problemReportId: string,
+  assigneeIds: string[],
+) {
+  await connection.query(
+    "delete from problem_report_assignees where problem_report_id = ?",
+    [problemReportId],
+  );
+
+  if (assigneeIds.length) {
+    await connection.query(
+      `
+        insert ignore into problem_report_assignees (problem_report_id, user_id)
+        values ${assigneeIds.map(() => "(?, ?)").join(", ")}
+      `,
+      assigneeIds.flatMap((userId) => [problemReportId, userId]),
+    );
+  }
+}
+
+async function upsertTaskForProblemReport(
+  connection: PoolConnection,
+  input: Omit<Task, "id" | "createdAt" | "problemReportId" | "startsAt"> & {
+    taskId: string;
+    createdBy?: string;
+  },
+) {
+  await connection.query<ResultSetHeader>(
+    `
+      insert into tasks
+        (id, title, issue, phone, device_id, status, priority, tags, due_date, created_by)
+      values (?, ?, ?, ?, ?, ?, ?, cast(? as json), ?, ?)
+      on duplicate key update
+        title = values(title),
+        issue = values(issue),
+        phone = values(phone),
+        device_id = values(device_id),
+        status = values(status),
+        priority = values(priority),
+        tags = values(tags),
+        due_date = values(due_date)
+    `,
+    [
+      input.taskId,
+      input.title,
+      input.issue,
+      input.phone ?? null,
+      input.deviceId,
+      input.status,
+      input.priority,
+      JSON.stringify(input.tags),
+      input.dueDate,
+      input.createdBy ?? null,
+    ],
+  );
+
+  await connection.query("delete from task_assignees where task_id = ?", [
+    input.taskId,
+  ]);
+
+  if (input.assigneeIds.length) {
+    await connection.query(
+      `
+        insert ignore into task_assignees (task_id, user_id)
+        values ${input.assigneeIds.map(() => "(?, ?)").join(", ")}
+      `,
+      input.assigneeIds.flatMap((userId) => [input.taskId, userId]),
+    );
+  }
 }
 
 export async function updateTaskStatus(

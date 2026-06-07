@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { AppShell } from "@/components/layout/app-shell";
 import { PermissionsManager } from "@/components/permissions/permissions-manager";
 import {
@@ -7,23 +8,24 @@ import {
   isAdmin,
   verifySessionToken,
 } from "@/lib/auth";
+import { getFirstAllowedPath } from "@/lib/navigation";
 import { getRoles } from "@/lib/repositories";
 
 export default async function PermissionsPage() {
   const cookieStore = await cookies();
   const user = await verifySessionToken(cookieStore.get(SESSION_COOKIE)?.value);
+  if (!hasPermission(user, "permissions.view")) {
+    redirect(getFirstAllowedPath(user));
+  }
+
   const roles = await getRoles();
 
   return (
     <AppShell>
-      {hasPermission(user, "permissions.view") ? (
-        <PermissionsManager
-          roles={roles}
-          canEdit={isAdmin(user)}
-        />
-      ) : (
-        <section className="surface empty-state">წვდომა შეზღუდულია.</section>
-      )}
+      <PermissionsManager
+        roles={roles}
+        canEdit={isAdmin(user)}
+      />
     </AppShell>
   );
 }

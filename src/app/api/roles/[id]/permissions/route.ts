@@ -8,6 +8,7 @@ const pageKeys = new Set<PageKey>([
   "dashboard",
   "devices",
   "tasks",
+  "problem_reports",
   "regions",
   "offline_records",
   "users",
@@ -19,6 +20,9 @@ const permissionActions = new Set<PermissionAction>([
   "create",
   "edit",
   "delete",
+  "assign",
+  "tag",
+  "status",
 ]);
 
 export async function PUT(
