@@ -6,10 +6,12 @@ import {
   BellRing,
   CalendarDays,
   CheckCircle2,
+  Clock,
   Filter,
   RefreshCw,
   Search,
   WifiOff,
+  X,
   XCircle,
 } from "lucide-react";
 import { recordAudit } from "@/lib/client-audit";
@@ -26,7 +28,7 @@ type Props = {
   initialMonitoredDevices: MonitoredDevice[];
 };
 
-type DeviceSortMode = "offline" | "online" | "az" | "za";
+type DeviceSortMode = "offline" | "online" | "monitoring" | "az" | "za";
 
 const defaultToDate = getDateKey(new Date());
 const defaultFromDate = getDateKey(addDays(new Date(), -30));
@@ -47,6 +49,7 @@ export function OfflineRecordsDashboard({
   const [threshold, setThreshold] = useState(10);
   const [query, setQuery] = useState("");
   const [deviceSort, setDeviceSort] = useState<DeviceSortMode>("offline");
+  const [historyDeviceId, setHistoryDeviceId] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<
     "capture" | "monitor" | "stop" | null
   >(null);
@@ -65,13 +68,21 @@ export function OfflineRecordsDashboard({
   );
   const monitoredMap = useMemo(
     () =>
-      new Map(activeMonitoredDevices.map((device) => [device.deviceId, device])),
+      new Map(
+        activeMonitoredDevices.map((device) => [device.deviceId, device]),
+      ),
     [activeMonitoredDevices],
   );
   const monitoringHistoryMap = useMemo(
     () => new Map(monitoredDevices.map((device) => [device.deviceId, device])),
     [monitoredDevices],
   );
+  const historyDevice = historyDeviceId
+    ? deviceMap.get(historyDeviceId)
+    : undefined;
+  const historyMonitoringRecord = historyDeviceId
+    ? monitoringHistoryMap.get(historyDeviceId)
+    : undefined;
 
   const filteredSnapshots = useMemo(
     () =>
@@ -127,8 +138,11 @@ export function OfflineRecordsDashboard({
           device.id.toLowerCase().includes(normalized) ||
           device.name.toLowerCase().includes(normalized),
       )
+      .filter(
+        (device) => deviceSort !== "monitoring" || monitoredMap.has(device.id),
+      )
       .sort((a, b) => compareDevices(a, b, deviceSort));
-  }, [deviceSort, devices, query]);
+  }, [deviceSort, devices, monitoredMap, query]);
 
   const rankedDevices = useMemo(() => {
     const rows = [...offlineCounts.entries()].map(([deviceId, count]) => {
@@ -180,6 +194,21 @@ export function OfflineRecordsDashboard({
     };
   }, []);
 
+  useEffect(() => {
+    if (!historyDeviceId) {
+      return;
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setHistoryDeviceId(null);
+      }
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [historyDeviceId]);
+
   async function captureSnapshot() {
     setBusyAction("capture");
     const response = await fetch("/api/offline-records/capture", {
@@ -206,7 +235,11 @@ export function OfflineRecordsDashboard({
         b.date.localeCompare(a.date),
       );
     });
-    recordAudit("offline_snapshot.capture", "offline_snapshot", payload.snapshot.id);
+    recordAudit(
+      "offline_snapshot.capture",
+      "offline_snapshot",
+      payload.snapshot.id,
+    );
   }
 
   async function updateMonitoring(enabled: boolean) {
@@ -242,7 +275,10 @@ export function OfflineRecordsDashboard({
         <div>
           <p className="eyebrow">Offline აღრიცხვა</p>
           <h1>09:00 X-Station snapshot-ები</h1>
-          <p>დღიური ჩამონათვალი იმ X-Station-ებისთვის, რომლებიც 09:00-ზე offline იყვნენ.</p>
+          <p>
+            დღიური ჩამონათვალი იმ X-Station-ებისთვის, რომლებიც 09:00-ზე offline
+            იყვნენ.
+          </p>
         </div>
         <div className="metric-strip">
           <div className="metric">
@@ -263,7 +299,10 @@ export function OfflineRecordsDashboard({
         </div>
       </section>
 
-      <section className="filter-bar offline-filter-bar" aria-label="აღრიცხვის ფილტრები">
+      <section
+        className="filter-bar offline-filter-bar"
+        aria-label="აღრიცხვის ფილტრები"
+      >
         <label className="date-control">
           <CalendarDays size={16} />
           <span>დან</span>
@@ -289,7 +328,9 @@ export function OfflineRecordsDashboard({
             type="number"
             min={1}
             value={threshold}
-            onChange={(event) => setThreshold(Math.max(1, Number(event.target.value) || 1))}
+            onChange={(event) =>
+              setThreshold(Math.max(1, Number(event.target.value) || 1))
+            }
           />
         </label>
         <button
@@ -327,6 +368,7 @@ export function OfflineRecordsDashboard({
             >
               <option value="offline">Offline</option>
               <option value="online">Online</option>
+              <option value="monitoring">მონიტორინგი</option>
               <option value="az">A-Z</option>
               <option value="za">Z-A</option>
             </select>
@@ -359,27 +401,34 @@ export function OfflineRecordsDashboard({
               const monitoringRecord = monitoringHistoryMap.get(device.id);
               const alerting = alertingDeviceIds.has(device.id);
               return (
-                <button
+                <div
                   key={device.id}
-                  type="button"
                   className={`offline-device-option ${selected ? "selected" : ""} ${alerting ? "alerting" : ""}`}
-                  onClick={() => toggleSelectedDevice(device.id)}
                 >
-                  <span className={`status-dot ${device.status}`} />
-                  <span>
-                    <strong>{device.name}</strong>
-                  </span>
-                  {selected ? <CheckCircle2 size={17} /> : null}
+                  <button
+                    type="button"
+                    className="offline-device-main"
+                    onClick={() => toggleSelectedDevice(device.id)}
+                  >
+                    <span className={`status-dot ${device.status}`} />
+                    <span>
+                      <strong>{device.name}</strong>
+                    </span>
+                    {selected ? <CheckCircle2 size={17} /> : null}
+                  </button>
                   <span className="monitor-indicators">
                     {monitoringRecord ? (
-                      <span
+                      <button
+                        type="button"
                         className={`monitor-count-pill ${
                           monitoringRecord.isActive ? "" : "inactive"
                         }`}
                         title={`მონიტორინგის offline რაოდენობა: ${monitoringRecord.offlineCount}`}
+                        aria-label={`${device.name} მონიტორინგის ისტორია`}
+                        onClick={() => setHistoryDeviceId(device.id)}
                       >
                         {monitoringRecord.offlineCount}
-                      </span>
+                      </button>
                     ) : null}
                     {monitored ? (
                       <span className="monitor-pill">
@@ -387,12 +436,42 @@ export function OfflineRecordsDashboard({
                       </span>
                     ) : null}
                   </span>
-                </button>
+                </div>
               );
             })}
           </div>
         </aside>
-
+        <aside className="surface offline-rank-panel">
+          <div className="section-title">
+            <h2>სიხშირე</h2>
+            <AlertTriangle size={20} />
+          </div>
+          <div className="rank-list">
+            {rankedDevices.length ? (
+              rankedDevices.map((device) => (
+                <div
+                  key={device.deviceId}
+                  className={`rank-row ${thresholdDeviceIds.has(device.deviceId) ? "critical" : ""}`}
+                >
+                  <div>
+                    <strong>{device.label}</strong>
+                    <span>{device.count} დღე offline</span>
+                  </div>
+                  <div
+                    className="rank-bar"
+                    style={{
+                      ["--bar-width" as string]: `${Math.min(100, (device.count / threshold) * 100)}%`,
+                    }}
+                  />
+                </div>
+              ))
+            ) : (
+              <p className="muted">
+                არჩეულ პერიოდში offline მოწყობილობა არ არის.
+              </p>
+            )}
+          </div>
+        </aside>
         <section className="surface offline-snapshot-panel">
           <div className="section-title">
             <h2>დღიური აღრიცხვა</h2>
@@ -435,36 +514,80 @@ export function OfflineRecordsDashboard({
             )}
           </div>
         </section>
+      </section>
 
-        <aside className="surface offline-rank-panel">
-          <div className="section-title">
-            <h2>სიხშირე</h2>
-            <AlertTriangle size={20} />
+      {historyMonitoringRecord ? (
+        <MonitoringHistoryModal
+          deviceName={historyDevice?.name ?? historyMonitoringRecord.deviceName}
+          record={historyMonitoringRecord}
+          onClose={() => setHistoryDeviceId(null)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function MonitoringHistoryModal({
+  deviceName,
+  record,
+  onClose,
+}: {
+  deviceName: string;
+  record: MonitoredDevice;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="offline-history-backdrop"
+      role="presentation"
+      onClick={onClose}
+    >
+      <section
+        className="offline-history-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="offline-history-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header>
+          <div>
+            <p className="eyebrow">მონიტორინგი</p>
+            <h2 id="offline-history-title">{deviceName}</h2>
+            <span>{record.offlineCount} offline შემთხვევა</span>
           </div>
-          <div className="rank-list">
-            {rankedDevices.length ? (
-              rankedDevices.map((device) => (
-                <div
-                  key={device.deviceId}
-                  className={`rank-row ${thresholdDeviceIds.has(device.deviceId) ? "critical" : ""}`}
-                >
-                  <div>
-                    <strong>{device.label}</strong>
-                    <span>{device.count} დღე offline</span>
-                  </div>
-                  <div
-                    className="rank-bar"
-                    style={{
-                      ["--bar-width" as string]: `${Math.min(100, (device.count / threshold) * 100)}%`,
-                    }}
-                  />
-                </div>
-              ))
-            ) : (
-              <p className="muted">არჩეულ პერიოდში offline მოწყობილობა არ არის.</p>
-            )}
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="დახურვა"
+            onClick={onClose}
+          >
+            <X size={18} />
+          </button>
+        </header>
+
+        {record.offlinePeriods.length ? (
+          <ol className="offline-history-list">
+            {record.offlinePeriods.map((period, index) => (
+              <li key={period.id} className="offline-history-row">
+                <span className="offline-history-index">{index + 1}</span>
+                <span className="offline-history-time">
+                  <Clock size={15} />
+                  <strong>
+                    {formatMonitoringDateTime(period.offlineAt)} -{" "}
+                    {period.onlineAt
+                      ? formatMonitoringDateTime(period.onlineAt)
+                      : "ჯერ offline"}
+                  </strong>
+                </span>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <div className="offline-history-empty">
+            <WifiOff size={20} />
+            <p>ამ მონიტორინგისთვის დეტალური ისტორია ჯერ არ არის.</p>
           </div>
-        </aside>
+        )}
       </section>
     </div>
   );
@@ -493,18 +616,16 @@ function SnapshotDeviceChip({
 }
 
 function compareDevices(a: Device, b: Device, sortMode: DeviceSortMode) {
+  if (sortMode === "monitoring") {
+    return compareDeviceNames(a, b);
+  }
+
   if (sortMode === "offline") {
-    return (
-      compareStatusFirst(a, b, "offline") ||
-      compareDeviceNames(a, b)
-    );
+    return compareStatusFirst(a, b, "offline") || compareDeviceNames(a, b);
   }
 
   if (sortMode === "online") {
-    return (
-      compareStatusFirst(a, b, "online") ||
-      compareDeviceNames(a, b)
-    );
+    return compareStatusFirst(a, b, "online") || compareDeviceNames(a, b);
   }
 
   const nameCompare = compareDeviceNames(a, b);
@@ -522,10 +643,7 @@ function compareStatusFirst(
 }
 
 function compareDeviceNames(a: Device, b: Device) {
-  return (
-    a.name.localeCompare(b.name, "ka") ||
-    a.id.localeCompare(b.id, "ka")
-  );
+  return a.name.localeCompare(b.name, "ka") || a.id.localeCompare(b.id, "ka");
 }
 
 function addDays(value: Date, days: number) {
@@ -542,4 +660,23 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat("ka-GE", {
     dateStyle: "medium",
   }).format(new Date(`${value}T00:00:00+04:00`));
+}
+
+function formatMonitoringDateTime(value: string) {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})(?:T|\s)(\d{2}):(\d{2})/);
+
+  if (match) {
+    const [, year, month, day, hour, minute] = match;
+    return `${day}.${month}.${year.slice(-2)} ${hour}:${minute}`;
+  }
+
+  return new Intl.DateTimeFormat("ka-GE", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+    .format(new Date(value))
+    .replace(",", "");
 }

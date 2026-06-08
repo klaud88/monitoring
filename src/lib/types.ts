@@ -159,4 +159,12 @@ export type MonitoredDevice = {
   lastStatus?: DeviceStatus;
   lastOfflineAt?: string;
   lastNotificationAt?: string;
+  offlinePeriods: MonitoredOfflinePeriod[];
+};
+
+export type MonitoredOfflinePeriod = {
+  id: string;
+  deviceId: string;
+  offlineAt: string;
+  onlineAt?: string;
 };

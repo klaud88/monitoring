@@ -2881,7 +2881,7 @@ progress::-webkit-progress-value {
 
 .offline-device-option {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 9px;
   width: 100%;
@@ -2889,14 +2889,34 @@ progress::-webkit-progress-value {
   border-radius: 8px;
   background: var(--surface);
   color: var(--text);
-  padding: 10px;
+  padding: 0;
   text-align: left;
+  overflow: hidden;
 }
 
 .offline-device-option:hover,
 .offline-device-option.selected {
   border-color: rgba(37, 99, 235, 0.42);
   background: rgba(37, 99, 235, 0.07);
+}
+
+.offline-device-main {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 10px 0 10px 10px;
+  text-align: left;
+}
+
+.offline-device-main:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
 }
 
 .offline-device-option strong,
@@ -2916,6 +2936,7 @@ progress::-webkit-progress-value {
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
+  padding-right: 10px;
 }
 
 .monitor-pill {
@@ -2943,10 +2964,124 @@ progress::-webkit-progress-value {
   font-weight: 900;
 }
 
+button.monitor-count-pill {
+  padding: 0 8px;
+}
+
+.monitor-count-pill:hover {
+  border-color: rgba(220, 38, 38, 0.52);
+  background: rgba(220, 38, 38, 0.14);
+}
+
 .monitor-count-pill.inactive {
   border-color: var(--line);
   background: var(--surface-soft);
   color: var(--muted);
+}
+
+.offline-history-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 16, 28, 0.48);
+  padding: 18px;
+}
+
+.offline-history-modal {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(560px, 100%);
+  max-height: min(620px, calc(100vh - 36px));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.offline-history-modal header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid var(--line);
+  padding: 16px;
+}
+
+.offline-history-modal h2 {
+  margin: 2px 0 4px;
+  font-size: 20px;
+  line-height: 1.22;
+}
+
+.offline-history-modal header span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.offline-history-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  overflow: auto;
+  padding: 14px 16px 16px;
+  list-style: none;
+}
+
+.offline-history-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  padding: 10px;
+}
+
+.offline-history-index {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--danger-soft);
+  color: var(--red);
+  font-weight: 900;
+}
+
+.offline-history-time {
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.offline-history-time svg {
+  color: var(--red);
+}
+
+.offline-history-time strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+
+.offline-history-empty {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  min-height: 180px;
+  padding: 24px;
+  color: var(--muted);
+  text-align: center;
 }
 
 .status-dot {

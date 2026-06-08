@@ -9,6 +9,7 @@ import type {
   Device,
   DeviceStatus,
   MonitoredDevice,
+  MonitoredOfflinePeriod,
   OfflineSnapshot,
   PermissionKey,
   ProblemReport,
@@ -96,6 +97,13 @@ type MonitoredDeviceRow = {
   last_status: string | null;
   last_offline_at: DatabaseDate | null;
   last_notification_at: DatabaseDate | null;
+};
+
+type MonitoredOfflinePeriodRow = {
+  id: string;
+  device_id: string;
+  offline_at: DatabaseDate;
+  online_at: DatabaseDate | null;
 };
 
 type DatabaseDate = string | Date;
@@ -531,6 +539,18 @@ async function ensureOperationalSchema() {
           constraint fk_monitored_devices_device foreign key (device_id) references devices(id) on delete cascade,
           index idx_monitored_devices_active_date (is_active, enabled_date),
           index idx_monitored_devices_alert (last_notification_at)
+        )
+      `);
+      await connection.query(`
+        create table if not exists monitored_device_offline_periods (
+          id varchar(64) primary key,
+          device_id varchar(64) not null,
+          offline_at datetime not null,
+          online_at datetime null,
+          created_at timestamp not null default current_timestamp,
+          constraint fk_monitored_offline_periods_device foreign key (device_id) references devices(id) on delete cascade,
+          index idx_monitored_offline_periods_device_time (device_id, offline_at),
+          index idx_monitored_offline_periods_open (online_at)
         )
       `);
       const monitoredColumns = await getTableColumns(
@@ -1938,7 +1958,27 @@ export async function getMonitoredDevices({
     return [];
   }
 
-  return rows.map(mapMonitoredDeviceRow);
+  const periodRows = rows.length
+    ? await queryRows<MonitoredOfflinePeriodRow>(
+        `
+          select id, device_id, offline_at, online_at
+          from monitored_device_offline_periods
+          where device_id in (?)
+          order by offline_at desc
+        `,
+        [rows.map((row) => row.device_id)],
+      )
+    : [];
+  const periodsByDevice = new Map<string, MonitoredOfflinePeriod[]>();
+  (periodRows ?? []).forEach((row) => {
+    const periods = periodsByDevice.get(row.device_id) ?? [];
+    periods.push(mapMonitoredOfflinePeriodRow(row));
+    periodsByDevice.set(row.device_id, periods);
+  });
+
+  return rows.map((row) =>
+    mapMonitoredDeviceRow(row, periodsByDevice.get(row.device_id) ?? []),
+  );
 }
 
 export async function refreshMonitoredDeviceStatuses({
@@ -2023,6 +2063,12 @@ export async function setDeviceMonitoring(
       if (!activeDevices.length) {
         return;
       }
+      const activeDeviceIds = activeDevices.map((device) => device.id);
+
+      await connection.query<ResultSetHeader>(
+        "delete from monitored_device_offline_periods where device_id in (?)",
+        [activeDeviceIds],
+      );
 
       await connection.query<ResultSetHeader>(
         `
@@ -2037,7 +2083,7 @@ export async function setDeviceMonitoring(
             last_status = values(last_status),
             last_offline_at = null,
             last_notification_at = null,
-            updated_at = current_timestamp
+          updated_at = current_timestamp
         `,
         activeDevices.flatMap((device) => [
           device.id,
@@ -2058,7 +2104,10 @@ export async function setDeviceMonitoring(
   return getMonitoredDevices({ includeInactive: true });
 }
 
-function mapMonitoredDeviceRow(row: MonitoredDeviceRow): MonitoredDevice {
+function mapMonitoredDeviceRow(
+  row: MonitoredDeviceRow,
+  offlinePeriods: MonitoredOfflinePeriod[],
+): MonitoredDevice {
   const lastStatus = normalizeDeviceStatus(row.last_status);
 
   return {
@@ -2075,6 +2124,18 @@ function mapMonitoredDeviceRow(row: MonitoredDeviceRow): MonitoredDevice {
     lastNotificationAt: row.last_notification_at
       ? toDateTimeString(row.last_notification_at)
       : undefined,
+    offlinePeriods,
+  };
+}
+
+function mapMonitoredOfflinePeriodRow(
+  row: MonitoredOfflinePeriodRow,
+): MonitoredOfflinePeriod {
+  return {
+    id: row.id,
+    deviceId: row.device_id,
+    offlineAt: toDateTimeString(row.offline_at),
+    onlineAt: row.online_at ? toDateTimeString(row.online_at) : undefined,
   };
 }
 
@@ -2104,9 +2165,17 @@ async function updateMonitoredDeviceStatus(
     normalizeDeviceStatus(row.last_status) ?? previousStatus ?? null;
   const shouldIncrement =
     status === "offline" && trackedStatus !== null && trackedStatus !== "offline";
+  const happenedAtSql = toSqlDateTime(happenedAt);
 
   if (shouldIncrement) {
-    const happenedAtSql = toSqlDateTime(happenedAt);
+    await connection.query<ResultSetHeader>(
+      `
+        insert into monitored_device_offline_periods
+          (id, device_id, offline_at)
+        values (?, ?, ?)
+      `,
+      [makeId("mon-offline"), deviceId, happenedAtSql],
+    );
     await connection.query<ResultSetHeader>(
       `
         update monitored_devices
@@ -2121,6 +2190,19 @@ async function updateMonitoredDeviceStatus(
       [status, happenedAtSql, happenedAtSql, deviceId],
     );
     return;
+  }
+
+  if (trackedStatus === "offline" && status !== "offline") {
+    await connection.query<ResultSetHeader>(
+      `
+        update monitored_device_offline_periods
+        set online_at = ?
+        where device_id = ? and online_at is null
+        order by offline_at desc
+        limit 1
+      `,
+      [happenedAtSql, deviceId],
+    );
   }
 
   if (trackedStatus !== status) {
