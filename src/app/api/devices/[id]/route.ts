@@ -29,11 +29,32 @@ export async function PATCH(
     body?.code === undefined
       ? existingDevice.code
       : String(body.code).trim().toUpperCase() || existingDevice.code;
-  const name = String(body?.name || "").trim();
-  const status = deviceStatuses.includes(body?.status) ? body.status : "online";
-  const isExcluded = Boolean(body?.isExcluded);
-  const region = body?.region ? String(body.region) : null;
-  const tags = Array.isArray(body?.tags) ? body.tags.map(String) : [];
+  const name =
+    body?.name === undefined
+      ? existingDevice.name
+      : String(body.name || "").trim();
+  const status =
+    body?.status === undefined
+      ? existingDevice.status
+      : deviceStatuses.includes(body.status)
+        ? body.status
+        : existingDevice.status;
+  const isExcluded =
+    body?.isExcluded === undefined
+      ? existingDevice.isExcluded
+      : Boolean(body.isExcluded);
+  const region =
+    body?.region === undefined
+      ? existingDevice.region
+      : body?.region
+        ? String(body.region)
+        : null;
+  const tags =
+    body?.tags === undefined
+      ? existingDevice.tags
+      : Array.isArray(body.tags)
+        ? body.tags.map(String)
+        : [];
   const position =
     body?.position === undefined
       ? existingDevice.position

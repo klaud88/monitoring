@@ -148,7 +148,9 @@ export function Dashboard({
           throw new Error("Devices refresh failed.");
         }
 
-        const payload = (await devicesResponse.json()) as { devices?: Device[] };
+        const payload = (await devicesResponse.json()) as {
+          devices?: Device[];
+        };
         if (!Array.isArray(payload.devices)) {
           throw new Error("Devices response is invalid.");
         }
@@ -203,12 +205,30 @@ export function Dashboard({
   }, [devices, editingDeviceId]);
 
   useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      void refreshDevices("interval");
-    }, 60 * 60 * 1000);
+    const intervalId = window.setInterval(
+      () => {
+        void refreshDevices("interval");
+      },
+      60 * 60 * 1000,
+    );
 
     return () => window.clearInterval(intervalId);
   }, [refreshDevices]);
+
+  useEffect(() => {
+    if (!showCreateTask) {
+      return;
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setShowCreateTask(false);
+      }
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [showCreateTask]);
 
   const activeTasks = useMemo(
     () =>
@@ -228,8 +248,7 @@ export function Dashboard({
         .sort(
           (a, b) =>
             new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-        )
-        .slice(0, 7),
+        ),
     [selectedTags, tasks],
   );
 
@@ -255,12 +274,9 @@ export function Dashboard({
       const matchesUser =
         userFilter === "all" ||
         deviceTasks.some((task) => task.assigneeIds.includes(userFilter));
-      const matchesTags =
-        selectedTags.length === 0 ||
-        deviceTasks.length > 0;
+      const matchesTags = selectedTags.length === 0 || deviceTasks.length > 0;
       const matchesQuery =
-        !normalized ||
-        device.name.toLowerCase().includes(normalized);
+        !normalized || device.name.toLowerCase().includes(normalized);
 
       return (
         matchesRegion &&
@@ -327,10 +343,15 @@ export function Dashboard({
   function toggleOfflineDevices() {
     const next = !showOfflineDevices;
     setShowOfflineDevices(next);
-    void recordAudit("dashboard.offline_devices_toggle", "dashboard", undefined, {
-      open: next,
-      count: offlineDevices.length,
-    });
+    void recordAudit(
+      "dashboard.offline_devices_toggle",
+      "dashboard",
+      undefined,
+      {
+        open: next,
+        count: offlineDevices.length,
+      },
+    );
   }
 
   function toggleAssignee(userId: string) {
@@ -689,148 +710,34 @@ export function Dashboard({
           <div className="rail-header">
             <div>
               <p className="eyebrow">ტასკები</p>
-              <h2>{showCreateTask ? "ახალი ტასკი" : "ბოლო დამატებული"}</h2>
+              <h2>ტასკების ჩამონათვალი</h2>
             </div>
             <button
-              className={showCreateTask ? "ghost-button" : "primary-button"}
+              className="primary-button"
               type="button"
-              onClick={() => setShowCreateTask((current) => !current)}
+              onClick={() => setShowCreateTask(true)}
             >
-              {showCreateTask ? <X size={17} /> : <Plus size={17} />}
-              <span>{showCreateTask ? "დახურვა" : "დამატება"}</span>
+              <Plus size={17} />
+              <span>დამატება</span>
             </button>
           </div>
 
           <div className="task-rail-scroll">
-            {showCreateTask ? (
-              <form className="quick-task-form" onSubmit={createTask}>
-                <select
-                  value={form.deviceId}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      deviceId: event.target.value,
-                    }))
-                  }
-                  required
-                >
-                  {activeDevices.map((device) => (
-                    <option key={device.id} value={device.id}>
-                      {device.name}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  value={form.title}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      title: event.target.value,
-                    }))
-                  }
-                  placeholder="ტასკის სათაური"
-                  required
-                />
-                <textarea
-                  value={form.issue}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      issue: event.target.value,
-                    }))
-                  }
-                  placeholder="რა საკითხის მოსაგვარებლად მიდიან"
-                  rows={3}
-                  required
-                />
-                <input
-                  value={form.phone}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      phone: event.target.value,
-                    }))
-                  }
-                  placeholder="ტელეფონი"
-                  inputMode="tel"
-                />
-                <div className="form-row">
-                  <select
-                    value={form.priority}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        priority: event.target.value as TaskPriority,
-                      }))
-                    }
-                  >
-                    {Object.entries(priorityLabels).map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <input
-                  type="date"
-                  value={form.dueDate}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      dueDate: event.target.value,
-                    }))
-                  }
-                />
-                <div className="task-tag-picker">
-                  <span>ტეგები</span>
-                  <div className="row-tags">
-                    {taskTagCatalog.map((tagName) => (
-                      <button
-                        key={tagName}
-                        type="button"
-                        className={`tag-toggle compact ${form.tags.includes(tagName) ? "active" : ""}`}
-                        onClick={() => toggleFormTag(tagName)}
-                      >
-                        {tagName}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="assignee-picker">
-                  {users
-                    .filter((user) => user.role !== "viewer")
-                    .map((user) => (
-                      <button
-                        key={user.id}
-                        className={`avatar-choice ${form.assigneeIds.includes(user.id) ? "active" : ""}`}
-                        type="button"
-                        onClick={() => toggleAssignee(user.id)}
-                        title={user.name}
-                      >
-                        <span style={{ backgroundColor: user.color }}>
-                          {user.initials}
-                        </span>
-                        <small>{user.name.split(" ")[0]}</small>
-                      </button>
-                    ))}
-                </div>
-                <button className="primary-button" type="submit">
-                  <Plus size={18} />
-                  <span>დამახსოვრება</span>
-                </button>
-              </form>
-            ) : null}
-
             <div className="task-list">
-              {(showCreateTask ? visibleActiveTasks : recentTasks).map((task) => {
+              {recentTasks.map((task) => {
                 const device = deviceMap.get(task.deviceId);
                 const firstUser = userMap.get(task.assigneeIds[0]);
-                const displayTitle = withoutDeviceCodes(task.title, [device?.code]);
-                const displayIssue = withoutDeviceCodes(task.issue, [device?.code]);
+                const displayTitle = withoutDeviceCodes(task.title, [
+                  device?.code,
+                ]);
+                const displayIssue = withoutDeviceCodes(task.issue, [
+                  device?.code,
+                ]);
                 return (
-                  <article
+                  <Link
                     key={task.id}
-                    className={`task-card priority-${task.priority}`}
+                    className={`task-card task-card-link priority-${task.priority}`}
+                    href={`/tasks/${task.id}`}
                     style={{ borderInlineStartColor: firstUser?.color }}
                   >
                     <div className="task-card-top">
@@ -873,20 +780,184 @@ export function Dashboard({
                         <CalendarDays size={14} />
                         {task.dueDate}
                       </span>
-                      <Link href={`/tasks/${task.id}`}>დეტალურად</Link>
+                      <span className="task-card-detail">დეტალურად</span>
                     </footer>
-                  </article>
+                  </Link>
                 );
               })}
             </div>
-            {!showCreateTask ? (
-              <Link className="rail-link" href="/tasks">
-                ყველა ტასკის ნახვა
-              </Link>
-            ) : null}
+            <Link className="rail-link" href="/tasks">
+              ყველა ტასკის ნახვა
+            </Link>
           </div>
         </aside>
       </div>
+
+      {showCreateTask ? (
+        <div
+          className="quick-task-modal-backdrop"
+          role="presentation"
+          onClick={() => setShowCreateTask(false)}
+        >
+          <section
+            className="quick-task-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="quick-task-modal-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header>
+              <div>
+                <p className="eyebrow">ტასკი</p>
+                <h2 id="quick-task-modal-title">ახალი ტასკი</h2>
+              </div>
+              <button className="primary-button" type="submit">
+                <Plus size={18} />
+                <span>დამახსოვრება</span>
+              </button>
+              <button
+                className="icon-button"
+                type="button"
+                onClick={() => setShowCreateTask(false)}
+                aria-label="დახურვა"
+              >
+                <X size={18} />
+              </button>
+            </header>
+
+            <form className="quick-task-form" onSubmit={createTask}>
+              <label>
+                <span>X-Station</span>
+                <select
+                  value={form.deviceId}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      deviceId: event.target.value,
+                    }))
+                  }
+                  required
+                >
+                  {activeDevices.map((device) => (
+                    <option key={device.id} value={device.id}>
+                      {device.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>სათაური</span>
+                <input
+                  value={form.title}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      title: event.target.value,
+                    }))
+                  }
+                  placeholder="ტასკის სათაური"
+                  required
+                />
+              </label>
+              <label>
+                <span>საკითხი</span>
+                <textarea
+                  value={form.issue}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      issue: event.target.value,
+                    }))
+                  }
+                  placeholder="რა საკითხის მოსაგვარებლად მიდიან"
+                  rows={4}
+                  required
+                />
+              </label>
+              <label>
+                <span>ტელეფონი</span>
+                <input
+                  value={form.phone}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      phone: event.target.value,
+                    }))
+                  }
+                  placeholder="ტელეფონი"
+                  inputMode="tel"
+                />
+              </label>
+              <div className="form-row">
+                <label>
+                  <span>პრიორიტეტი</span>
+                  <select
+                    value={form.priority}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        priority: event.target.value as TaskPriority,
+                      }))
+                    }
+                  >
+                    {Object.entries(priorityLabels).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>ვადა</span>
+                  <input
+                    type="date"
+                    value={form.dueDate}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        dueDate: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+              </div>
+              <div className="task-tag-picker">
+                <span>ტეგები</span>
+                <div className="row-tags">
+                  {taskTagCatalog.map((tagName) => (
+                    <button
+                      key={tagName}
+                      type="button"
+                      className={`tag-toggle compact ${form.tags.includes(tagName) ? "active" : ""}`}
+                      onClick={() => toggleFormTag(tagName)}
+                    >
+                      {tagName}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="assignee-picker">
+                {users
+                  .filter((user) => user.role !== "viewer")
+                  .map((user) => (
+                    <button
+                      key={user.id}
+                      className={`avatar-choice ${form.assigneeIds.includes(user.id) ? "active" : ""}`}
+                      type="button"
+                      onClick={() => toggleAssignee(user.id)}
+                      title={user.name}
+                    >
+                      <span style={{ backgroundColor: user.color }}>
+                        {user.initials}
+                      </span>
+                      <small>{user.name.split(" ")[0]}</small>
+                    </button>
+                  ))}
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }

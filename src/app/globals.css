@@ -1381,6 +1381,22 @@ button.pin-shell {
   font-weight: 850;
 }
 
+.device-popover-tags,
+.device-tags-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.device-popover-tags .tag-toggle,
+.device-tags-list .tag-toggle {
+  display: inline-flex;
+  margin-top: 0;
+  padding-right: 9px;
+  color: var(--brand-dark);
+}
+
 .device-popover small {
   margin-top: 8px;
   color: var(--brand-dark);
@@ -1489,9 +1505,24 @@ button.pin-shell {
 .task-rail {
   display: flex;
   flex-direction: column;
-  max-height: 650px;
+  height: min(760px, calc(100vh - 238px));
+  min-height: 520px;
   padding: 14px;
   overflow: hidden;
+}
+
+.task-rail-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 14px;
+  overflow-y: auto;
+  padding-right: 3px;
+}
+
+.task-rail-scroll .task-list {
+  margin-top: 0;
+  overflow: visible;
+  padding-right: 0;
 }
 
 .rail-header,
@@ -1542,15 +1573,60 @@ button.pin-shell {
 
 .admin-form input,
 .admin-form select,
-.admin-form textarea {
+.admin-form textarea,
+.quick-task-form input,
+.quick-task-form select,
+.quick-task-form textarea {
   width: 100%;
   min-width: 0;
 }
 
 .quick-task-form {
-  margin-top: 14px;
-  padding-bottom: 14px;
+  margin: 0;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.quick-task-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10010;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 16, 28, 0.5);
+  padding: 18px;
+}
+
+.quick-task-modal {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(620px, 100%);
+  max-height: min(760px, calc(100vh - 36px));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.quick-task-modal header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
   border-bottom: 1px solid var(--line);
+  padding: 16px;
+}
+
+.quick-task-modal h2 {
+  margin: 2px 0 0;
+  font-size: 20px;
+  line-height: 1.22;
+}
+
+.quick-task-modal .assignee-picker {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .form-row {
@@ -1615,6 +1691,22 @@ button.pin-shell {
   padding: 12px;
 }
 
+.task-card-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  transition:
+    border-color 0.14s ease,
+    box-shadow 0.14s ease,
+    transform 0.14s ease;
+}
+
+.task-card-link:hover {
+  border-color: rgba(37, 99, 235, 0.35);
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.09);
+  transform: translateY(-1px);
+}
+
 .task-card h3 {
   margin: 9px 0 6px;
   font-size: 15px;
@@ -1637,6 +1729,7 @@ button.pin-shell {
 }
 
 .task-card footer a,
+.task-card-detail,
 .rail-link,
 .inline-link,
 .table-title-link {
@@ -1645,6 +1738,7 @@ button.pin-shell {
 }
 
 .task-card footer a:hover,
+.task-card-link:hover .task-card-detail,
 .rail-link:hover,
 .inline-link:hover,
 .table-title-link:hover {
@@ -1749,6 +1843,37 @@ button.pin-shell {
 
 .stat-surface strong {
   font-size: 22px;
+}
+
+.device-tags-editor {
+  align-content: start;
+}
+
+.device-tags-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.device-tags-edit-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.device-tag-create {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.device-tag-create input {
+  min-width: 0;
+}
+
+.device-tags-empty {
+  color: var(--muted);
+  font-size: 15px;
 }
 
 .back-link {
@@ -3234,6 +3359,8 @@ button.monitor-count-pill {
   }
 
   .task-rail {
+    height: min(680px, calc(100vh - 190px));
+    min-height: 420px;
     max-height: none;
   }
 
@@ -3446,6 +3573,10 @@ button.monitor-count-pill {
     grid-template-columns: 1fr;
   }
 
+  .quick-task-modal .assignee-picker {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .problem-report-form .form-row,
   .user-create-form .form-row {
     grid-template-columns: 1fr;
@@ -3501,6 +3632,24 @@ button.monitor-count-pill {
   .map-surface,
   .map-canvas {
     min-height: 430px;
+  }
+
+  .task-rail {
+    height: min(560px, calc(100vh - 116px));
+    min-height: 360px;
+  }
+
+  .quick-task-modal-backdrop {
+    padding: 10px;
+  }
+
+  .quick-task-form,
+  .quick-task-modal header {
+    padding: 12px;
+  }
+
+  .quick-task-modal .assignee-picker {
+    grid-template-columns: 1fr;
   }
 
   .device-popover {

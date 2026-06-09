@@ -518,6 +518,15 @@ function MapDeviceMarker({
           </button>
           <strong>{device.name}</strong>
           <span className="device-region">რაიონი: {device.region}</span>
+          {device.tags.length ? (
+            <div className="device-popover-tags" aria-label="X-Station ტეგები">
+              {device.tags.map((tagName) => (
+                <span key={tagName} className="tag-toggle compact active">
+                  {tagName}
+                </span>
+              ))}
+            </div>
+          ) : null}
           <small>
             Lat {location.lat.toFixed(6)} · Lng {location.lng.toFixed(6)}
           </small>

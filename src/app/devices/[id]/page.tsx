@@ -2,7 +2,6 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import {
-  Activity,
   AlertTriangle,
   CalendarClock,
   CheckCircle2,
@@ -14,11 +13,14 @@ import {
   Wifi,
   WifiOff,
 } from "lucide-react";
+import { DeviceTagsEditor } from "@/components/devices/device-tags-editor";
 import { AppShell } from "@/components/layout/app-shell";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
+import { tagCatalog } from "@/lib/catalog";
 import { withoutDeviceCodes } from "@/lib/display";
 import { getFirstAllowedPath } from "@/lib/navigation";
-import { getDeviceById, getTasks, getUsers } from "@/lib/repositories";
+import { getDevices, getTasks, getUsers } from "@/lib/repositories";
+import { mergeTags } from "@/lib/tags";
 import type { ProblemRecord, TaskStatus } from "@/lib/types";
 
 const problemLabels: Record<ProblemRecord["status"], string> = {
@@ -47,16 +49,22 @@ export default async function DeviceDetailsPage({
     redirect(homePath);
   }
 
-  const [device, tasks, users] = await Promise.all([
-    getDeviceById(id),
+  const [devices, tasks, users] = await Promise.all([
+    getDevices(),
     getTasks(),
     getUsers(),
   ]);
+  const device = devices.find((item) => item.id === id);
 
   if (!device) {
     notFound();
   }
 
+  const canEditDevice = hasPermission(user, "devices.edit");
+  const availableDeviceTags = mergeTags(
+    [...tagCatalog],
+    devices.flatMap((item) => item.tags),
+  );
   const deviceTasks = tasks.filter((task) => task.deviceId === device.id);
   const userMap = new Map(users.map((user) => [user.id, user]));
   const offlineEvents = device.statusEvents.filter(
@@ -101,11 +109,11 @@ export default async function DeviceDetailsPage({
           <span>ასოცირებული</span>
           <strong>{device.associatedDevices.length}</strong>
         </div>
-        <div className="surface stat-surface">
-          <Activity size={20} />
-          <span>ტეგები</span>
-          <strong>{device.tags.length}</strong>
-        </div>
+        <DeviceTagsEditor
+          device={device}
+          availableTags={availableDeviceTags}
+          canEdit={canEditDevice}
+        />
       </section>
 
       <section className="content-grid two">
@@ -145,9 +153,10 @@ export default async function DeviceDetailsPage({
                 const displayIssue = withoutDeviceCodes(task.issue, [device.code]);
 
                 return (
-                  <article
+                  <Link
                     key={task.id}
-                    className={`task-card priority-${task.priority}`}
+                    className={`task-card task-card-link priority-${task.priority}`}
+                    href={`/tasks/${task.id}`}
                   >
                     <div className="task-card-top">
                       <div className="avatar-stack">
@@ -179,7 +188,7 @@ export default async function DeviceDetailsPage({
                         ))}
                       </div>
                     ) : null}
-                  </article>
+                  </Link>
                 );
               })
             ) : (
