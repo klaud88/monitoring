@@ -1,8 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
-import { normalizeTaskTags } from "@/lib/catalog";
-import { createTask, getTasks } from "@/lib/repositories";
+import { filterRegisteredTaskTags } from "@/lib/catalog";
+import { createTask, getTaskTagNames, getTasks, getUsers } from "@/lib/repositories";
+import { filterAssignableTaskUserIds } from "@/lib/task-assignees";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
 
 const taskStatuses: TaskStatus[] = ["planned", "in_progress", "blocked", "done"];
@@ -26,15 +27,20 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
   const title = String(body?.title || "").trim();
   const issue = String(body?.issue || "").trim();
+  const comment = String(body?.comment || "").trim();
   const phone = String(body?.phone || "").trim();
   const deviceId = String(body?.deviceId || "");
   const dueDate = String(body?.dueDate || "");
   const status = taskStatuses.includes(body?.status) ? body.status : "planned";
   const priority = priorities.includes(body?.priority) ? body.priority : "normal";
-  const assigneeIds = Array.isArray(body?.assigneeIds)
+  const requestedAssigneeIds = Array.isArray(body?.assigneeIds)
     ? body.assigneeIds.map(String).filter(Boolean)
     : [];
-  const tags = normalizeTaskTags(body?.tags);
+  const assigneeIds = filterAssignableTaskUserIds(
+    requestedAssigneeIds,
+    await getUsers(),
+  );
+  const tags = filterRegisteredTaskTags(body?.tags, await getTaskTagNames());
 
   if (!title || !issue || !deviceId || !dueDate) {
     return NextResponse.json({ message: "Missing required task fields" }, { status: 400 });
@@ -43,6 +49,7 @@ export async function POST(request: NextRequest) {
   const task = await createTask({
     title,
     issue,
+    comment,
     phone,
     deviceId,
     assigneeIds,

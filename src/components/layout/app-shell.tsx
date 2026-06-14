@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import {
-  Activity,
   AlertCircle,
   BarChart3,
   ClipboardList,
@@ -18,6 +17,7 @@ import {
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { getFirstAllowedPath } from "@/lib/navigation";
 import type { PermissionKey } from "@/lib/types";
+import { AgencyLogo } from "./agency-logo";
 import { OfflineMonitorNotifications } from "./offline-monitor-notifications";
 import { ThemeToggle } from "./theme-toggle";
 
@@ -38,13 +38,13 @@ const navItems: NavItem[] = [
   },
   {
     href: "/problem-reports",
-    label: "პრობლემების რეგისტრაცია",
+    label: "განაცხადები",
     permission: "problem_reports.view",
     icon: AlertCircle,
   },
   {
     href: "/devices/regions",
-    label: "X-Stations/რაიონები",
+    label: "X-Stations",
     permission: ["devices.view", "regions.view"],
     icon: MonitorCog,
   },
@@ -95,14 +95,12 @@ export async function AppShell({
     <div className="app-shell">
       <header className="topbar">
         <div className="topbar-main">
-          <Link href={homeHref} className="brand" aria-label="BioStar2 Status Ops">
-            <span className="brand-mark">
-              <Activity size={20} strokeWidth={2.4} />
-            </span>
-            <span>
-              <strong>BioStar2 Ops</strong>
-              <small>სტატუსები და X-Stations</small>
-            </span>
+          <Link
+            href={homeHref}
+            className="brand"
+            aria-label="თბილისის საბავშვო ბაგა-ბაღების მართვის სააგენტო"
+          >
+            <AgencyLogo className="agency-logo agency-logo-header" />
           </Link>
 
           <details className="mobile-menu">

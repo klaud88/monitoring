@@ -18,10 +18,14 @@ import {
   X,
 } from "lucide-react";
 import { GoogleTbilisiMap } from "@/components/dashboard/google-tbilisi-map";
-import { regions, taskTagCatalog } from "@/lib/catalog";
+import { TaskTagPicker } from "@/components/tasks/task-tag-picker";
+import { regions } from "@/lib/catalog";
 import { recordAudit } from "@/lib/client-audit";
+import { findDeviceByName, sortDevicesByName } from "@/lib/device-options";
 import { withoutDeviceCodes } from "@/lib/display";
 import { clampLatLng, type LatLng } from "@/lib/geo";
+import { mergeTags } from "@/lib/tags";
+import { getAssignableTaskUsers } from "@/lib/task-assignees";
 import type {
   AppUser,
   Device,
@@ -34,8 +38,11 @@ import type {
 type DashboardProps = {
   initialDevices: Device[];
   initialTasks: Task[];
+  initialTags: string[];
   users: AppUser[];
   canEditDeviceLocations: boolean;
+  canCreateTaskTags: boolean;
+  canDeleteTaskTags: boolean;
 };
 
 type NewTaskForm = {
@@ -43,6 +50,7 @@ type NewTaskForm = {
   issue: string;
   phone: string;
   deviceId: string;
+  deviceQuery: string;
   assigneeIds: string[];
   priority: TaskPriority;
   tags: string[];
@@ -68,15 +76,28 @@ const today = new Date().toISOString().slice(0, 10);
 export function Dashboard({
   initialDevices,
   initialTasks,
+  initialTags,
   users,
   canEditDeviceLocations,
+  canCreateTaskTags,
+  canDeleteTaskTags,
 }: DashboardProps) {
   const initialActiveDeviceId =
     initialDevices.find((device) => !device.isExcluded)?.id ||
     initialDevices[0]?.id ||
     "";
+  const initialActiveDevice = initialDevices.find(
+    (device) => device.id === initialActiveDeviceId,
+  );
+  const initialAssignableUsers = getAssignableTaskUsers(users);
   const [devices, setDevices] = useState(initialDevices);
   const [tasks, setTasks] = useState(initialTasks);
+  const [availableTags, setAvailableTags] = useState(() =>
+    mergeTags(
+      initialTags,
+      initialTasks.flatMap((task) => task.tags),
+    ),
+  );
   const [deviceLocations, setDeviceLocations] = useState<
     Record<string, LatLng>
   >(() => createDefaultDeviceLocations(initialDevices));
@@ -92,6 +113,7 @@ export function Dashboard({
   const [locationSaveError, setLocationSaveError] = useState("");
   const [refreshingDevices, setRefreshingDevices] = useState(false);
   const [refreshError, setRefreshError] = useState("");
+  const [taskSaveError, setTaskSaveError] = useState("");
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
   const [activeAssignment, setActiveAssignment] = useState<{
     deviceId: string;
@@ -103,7 +125,8 @@ export function Dashboard({
     issue: "",
     phone: "",
     deviceId: initialActiveDeviceId,
-    assigneeIds: users[1] ? [users[1].id] : [],
+    deviceQuery: initialActiveDevice?.name ?? "",
+    assigneeIds: initialAssignableUsers[0] ? [initialAssignableUsers[0].id] : [],
     priority: "normal",
     tags: [],
     dueDate: today,
@@ -120,6 +143,14 @@ export function Dashboard({
   const activeDevices = useMemo(
     () => devices.filter((device) => !device.isExcluded),
     [devices],
+  );
+  const sortedActiveDevices = useMemo(
+    () => sortDevicesByName(activeDevices),
+    [activeDevices],
+  );
+  const assignableUsers = useMemo(
+    () => getAssignableTaskUsers(users),
+    [users],
   );
   const activeDeviceIds = useMemo(
     () => new Set(activeDevices.map((device) => device.id)),
@@ -370,15 +401,77 @@ export function Dashboard({
     }));
   }
 
+  async function createAvailableTag(tagName: string) {
+    if (!canCreateTaskTags) {
+      return false;
+    }
+
+    setTaskSaveError("");
+    const response = await fetch("/api/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: tagName }),
+    }).catch(() => null);
+
+    if (!response?.ok) {
+      setTaskSaveError("ტეგის დამატება ვერ მოხერხდა.");
+      return false;
+    }
+
+    const data = (await response.json()) as {
+      tag?: string;
+      tags?: string[];
+    };
+    setAvailableTags((current) =>
+      mergeTags(data.tags ?? current, data.tag ? [data.tag] : [tagName]),
+    );
+    return true;
+  }
+
+  async function removeAvailableTag(tagName: string) {
+    if (!canDeleteTaskTags) {
+      return false;
+    }
+
+    setTaskSaveError("");
+    const response = await fetch("/api/tags", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: tagName }),
+    }).catch(() => null);
+
+    if (!response?.ok) {
+      setTaskSaveError("ტეგის წაშლა ვერ მოხერხდა.");
+      return false;
+    }
+
+    const data = (await response.json()) as { tags?: string[] };
+    setAvailableTags(
+      (current) => data.tags ?? current.filter((tag) => tag !== tagName),
+    );
+    setSelectedTags((current) => current.filter((tag) => tag !== tagName));
+    setForm((current) => ({
+      ...current,
+      tags: current.tags.filter((tag) => tag !== tagName),
+    }));
+    setTasks((current) =>
+      current.map((task) => ({
+        ...task,
+        tags: task.tags.filter((tag) => tag !== tagName),
+      })),
+    );
+    return true;
+  }
+
   async function createTask(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (
-      !form.title.trim() ||
-      !form.issue.trim() ||
-      !form.deviceId ||
-      !form.assigneeIds.length
-    ) {
+    if (!form.deviceId) {
+      setTaskSaveError("დავაისი აირჩიეთ ჩამონათვალიდან.");
+      return;
+    }
+
+    if (!form.title.trim() || !form.issue.trim() || !form.assigneeIds.length) {
       return;
     }
 
@@ -397,11 +490,13 @@ export function Dashboard({
     };
 
     setTasks((current) => [optimisticTask, ...current]);
+    setTaskSaveError("");
     setForm({
       title: "",
       issue: "",
       phone: "",
       deviceId: form.deviceId,
+      deviceQuery: form.deviceQuery,
       assigneeIds: form.assigneeIds,
       priority: "normal",
       tags: [],
@@ -513,7 +608,6 @@ export function Dashboard({
         <div>
           <p className="eyebrow">თბილისის რუკა</p>
           <h1>X-Station სტატუსები</h1>
-          <p>დაგეგმილი ვიზიტები და მიმდინარე ტასკები ერთ ხედში.</p>
         </div>
         <div className="metric-strip">
           <button
@@ -632,7 +726,7 @@ export function Dashboard({
             onChange={(event) => updateUserFilter(event.target.value)}
           >
             <option value="all">ყველა მომხმარებელი</option>
-            {users.map((user) => (
+            {assignableUsers.map((user) => (
               <option key={user.id} value={user.id}>
                 {user.name}
               </option>
@@ -665,7 +759,7 @@ export function Dashboard({
       </section>
 
       <section className="tag-filter" aria-label="დავალების ტეგები">
-        {taskTagCatalog.map((tagName) => (
+        {availableTags.map((tagName) => (
           <button
             key={tagName}
             className={`tag-toggle ${selectedTags.includes(tagName) ? "active" : ""}`}
@@ -715,7 +809,10 @@ export function Dashboard({
             <button
               className="primary-button"
               type="button"
-              onClick={() => setShowCreateTask(true)}
+              onClick={() => {
+                setTaskSaveError("");
+                setShowCreateTask(true);
+              }}
             >
               <Plus size={17} />
               <span>დამატება</span>
@@ -811,7 +908,11 @@ export function Dashboard({
                 <p className="eyebrow">ტასკი</p>
                 <h2 id="quick-task-modal-title">ახალი ტასკი</h2>
               </div>
-              <button className="primary-button" type="submit">
+              <button
+                className="primary-button"
+                type="submit"
+                form="quick-task-form"
+              >
                 <Plus size={18} />
                 <span>დამახსოვრება</span>
               </button>
@@ -825,25 +926,38 @@ export function Dashboard({
               </button>
             </header>
 
-            <form className="quick-task-form" onSubmit={createTask}>
+            <form
+              id="quick-task-form"
+              className="quick-task-form"
+              onSubmit={createTask}
+            >
+              {taskSaveError ? (
+                <p className="form-error">{taskSaveError}</p>
+              ) : null}
               <label>
                 <span>X-Station</span>
-                <select
-                  value={form.deviceId}
-                  onChange={(event) =>
+                <input
+                  list="quick-task-device-options"
+                  value={form.deviceQuery}
+                  onChange={(event) => {
+                    const deviceQuery = event.target.value;
+                    const selectedDevice = findDeviceByName(
+                      sortedActiveDevices,
+                      deviceQuery,
+                    );
                     setForm((current) => ({
                       ...current,
-                      deviceId: event.target.value,
-                    }))
-                  }
+                      deviceQuery,
+                      deviceId: selectedDevice?.id ?? "",
+                    }));
+                  }}
                   required
-                >
-                  {activeDevices.map((device) => (
-                    <option key={device.id} value={device.id}>
-                      {device.name}
-                    </option>
+                />
+                <datalist id="quick-task-device-options">
+                  {sortedActiveDevices.map((device) => (
+                    <option key={device.id} value={device.name} />
                   ))}
-                </select>
+                </datalist>
               </label>
               <label>
                 <span>სათაური</span>
@@ -921,38 +1035,30 @@ export function Dashboard({
                   />
                 </label>
               </div>
-              <div className="task-tag-picker">
-                <span>ტეგები</span>
-                <div className="row-tags">
-                  {taskTagCatalog.map((tagName) => (
-                    <button
-                      key={tagName}
-                      type="button"
-                      className={`tag-toggle compact ${form.tags.includes(tagName) ? "active" : ""}`}
-                      onClick={() => toggleFormTag(tagName)}
-                    >
-                      {tagName}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <TaskTagPicker
+                availableTags={availableTags}
+                selectedTags={form.tags}
+                canCreateTags={canCreateTaskTags}
+                canDeleteTags={canDeleteTaskTags}
+                onToggle={toggleFormTag}
+                onCreateTag={createAvailableTag}
+                onDeleteTag={removeAvailableTag}
+              />
               <div className="assignee-picker">
-                {users
-                  .filter((user) => user.role !== "viewer")
-                  .map((user) => (
-                    <button
-                      key={user.id}
-                      className={`avatar-choice ${form.assigneeIds.includes(user.id) ? "active" : ""}`}
-                      type="button"
-                      onClick={() => toggleAssignee(user.id)}
-                      title={user.name}
-                    >
-                      <span style={{ backgroundColor: user.color }}>
-                        {user.initials}
-                      </span>
-                      <small>{user.name.split(" ")[0]}</small>
-                    </button>
-                  ))}
+                {assignableUsers.map((user) => (
+                  <button
+                    key={user.id}
+                    className={`avatar-choice ${form.assigneeIds.includes(user.id) ? "active" : ""}`}
+                    type="button"
+                    onClick={() => toggleAssignee(user.id)}
+                    title={user.name}
+                  >
+                    <span style={{ backgroundColor: user.color }}>
+                      {user.initials}
+                    </span>
+                    <small>{user.name.split(" ")[0]}</small>
+                  </button>
+                ))}
               </div>
             </form>
           </section>

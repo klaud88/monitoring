@@ -4,7 +4,12 @@ import { AppShell } from "@/components/layout/app-shell";
 import { TasksManager } from "@/components/tasks/tasks-manager";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { getFirstAllowedPath } from "@/lib/navigation";
-import { getDevices, getTasks, getUsers } from "@/lib/repositories";
+import {
+  getDevices,
+  getTaskTagNames,
+  getTasks,
+  getUsers,
+} from "@/lib/repositories";
 
 export default async function TasksPage({
   searchParams,
@@ -18,7 +23,12 @@ export default async function TasksPage({
     redirect(getFirstAllowedPath(user));
   }
 
-  const [devices, tasks, users] = await Promise.all([getDevices(), getTasks(), getUsers()]);
+  const [devices, tasks, users, taskTags] = await Promise.all([
+    getDevices(),
+    getTasks(),
+    getUsers(),
+    getTaskTagNames(),
+  ]);
   const resolvedSearchParams = await searchParams;
   const editParam = resolvedSearchParams?.edit;
   const initialEditTaskId = Array.isArray(editParam) ? editParam[0] : editParam;
@@ -29,11 +39,14 @@ export default async function TasksPage({
         initialTasks={tasks}
         devices={devices}
         users={users}
+        initialTags={taskTags}
         initialEditTaskId={initialEditTaskId}
         permissions={{
           create: hasPermission(user, "tasks.create"),
           edit: hasPermission(user, "tasks.edit"),
           delete: hasPermission(user, "tasks.delete"),
+          createTags: hasPermission(user, "tasks.tag_create"),
+          deleteTags: hasPermission(user, "tasks.tag_delete"),
         }}
       />
     </AppShell>

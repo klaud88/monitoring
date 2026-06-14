@@ -1,8 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
-import { normalizeTaskTags } from "@/lib/catalog";
-import { deleteTask, getTasks, updateTask } from "@/lib/repositories";
+import { filterRegisteredTaskTags } from "@/lib/catalog";
+import {
+  deleteTask,
+  getTaskTagNames,
+  getTasks,
+  getUsers,
+  updateTask,
+} from "@/lib/repositories";
+import { filterAssignableTaskUserIds } from "@/lib/task-assignees";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
 
 const taskStatuses: TaskStatus[] = ["planned", "in_progress", "blocked", "done"];
@@ -39,6 +46,10 @@ export async function PATCH(
     body?.title === undefined ? existingTask.title : String(body.title).trim();
   const issue =
     body?.issue === undefined ? existingTask.issue : String(body.issue).trim();
+  const comment =
+    body?.comment === undefined
+      ? (existingTask.comment ?? "")
+      : String(body.comment).trim();
   const phone =
     body?.phone === undefined
       ? (existingTask.phone ?? "")
@@ -52,12 +63,15 @@ export async function PATCH(
       ? existingTask.dueDate
       : String(body.dueDate).trim();
   const assigneeIds = Array.isArray(body?.assigneeIds)
-    ? body.assigneeIds.map(String).filter(Boolean)
+    ? filterAssignableTaskUserIds(
+        body.assigneeIds.map(String).filter(Boolean),
+        await getUsers(),
+      )
     : existingTask.assigneeIds;
   const tags =
     body?.tags === undefined
       ? existingTask.tags
-      : normalizeTaskTags(body.tags);
+      : filterRegisteredTaskTags(body.tags, await getTaskTagNames());
 
   if (!title || !issue || !deviceId || !dueDate) {
     return NextResponse.json({ message: "Missing required task fields" }, { status: 400 });
@@ -66,6 +80,7 @@ export async function PATCH(
   const task = await updateTask(id, {
     title,
     issue,
+    comment,
     phone,
     deviceId,
     assigneeIds,

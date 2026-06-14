@@ -22,6 +22,8 @@ const permissionActions = new Set<PermissionAction>([
   "delete",
   "assign",
   "tag",
+  "tag_create",
+  "tag_delete",
   "status",
 ]);
 

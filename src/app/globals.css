@@ -80,6 +80,16 @@
   box-sizing: border-box;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
 html {
   min-width: 320px;
   background: var(--bg);
@@ -163,8 +173,8 @@ textarea:focus {
   right: 0;
   z-index: 10000;
   display: grid;
-  gap: 10px;
-  padding: 10px 22px 12px;
+  gap: 5px;
+  padding: 10px 18px 12px;
   border-bottom: 1px solid var(--line);
   background: var(--topbar-bg);
   backdrop-filter: blur(16px) saturate(1.15);
@@ -184,6 +194,23 @@ textarea:focus {
   align-items: center;
   gap: 10px;
   min-width: 0;
+}
+
+.agency-logo {
+  display: block;
+  flex: 0 0 auto;
+  height: auto;
+  object-fit: contain;
+}
+
+.agency-logo-header {
+  width: 120px;
+  max-width: min(42vw, 156px);
+}
+
+.agency-logo-login {
+  width: min(250px, 100%);
+  margin-bottom: 22px;
 }
 
 .brand strong,
@@ -219,13 +246,15 @@ textarea:focus {
 
 .main-menu {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  justify-content: flex-start;
-  gap: 8px;
+  justify-content: center;
+  gap: 6px 8px;
   min-width: 0;
-  overflow: visible;
-  padding: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 5px;
+  scrollbar-width: thin;
   /* border: 1px solid var(--nav-border); */
   /* border-radius: 8px; */
   /* background: linear-gradient(135deg, var(--nav-bg), #182a42); */
@@ -283,8 +312,10 @@ textarea:focus {
 }
 
 .menu-link {
+  width: auto;
+  min-width: 0;
   flex: 0 0 auto;
-  padding: 5px;
+  padding: 5px 8px;
   border-color: rgba(255, 255, 255, 0.12);
   /* background: var(--nav-link-bg); */
   background: #2c4a73;
@@ -299,6 +330,20 @@ textarea:focus {
     box-shadow 0.14s ease;
 }
 
+.main-menu .menu-link {
+  justify-content: flex-start;
+}
+
+.main-menu .menu-link svg {
+  flex: 0 0 auto;
+}
+
+.main-menu .menu-link span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .menu-link:hover {
   color: var(--text);
   background: var(--nav-link-hover);
@@ -311,8 +356,13 @@ textarea:focus {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  flex-wrap: nowrap;
   gap: 8px;
   min-width: 0;
+}
+
+.account-actions > * {
+  flex: 0 0 auto;
 }
 
 .theme-toggle {
@@ -2296,6 +2346,57 @@ button.pin-shell {
   font-size: 13px;
 }
 
+.tag-chip-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.tag-chip-control .tag-toggle {
+  min-width: 0;
+}
+
+.tag-delete-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border: 1px solid rgba(220, 38, 38, 0.22);
+  border-radius: 8px;
+  background: rgba(220, 38, 38, 0.08);
+  color: var(--red);
+  transition:
+    transform 0.14s ease,
+    border-color 0.14s ease,
+    background-color 0.14s ease;
+}
+
+.tag-delete-button:hover:not(:disabled) {
+  border-color: rgba(220, 38, 38, 0.42);
+  background: rgba(220, 38, 38, 0.14);
+  transform: translateY(-1px);
+}
+
+.tag-delete-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.task-tag-create {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.task-tag-create input {
+  width: 100%;
+  min-width: 0;
+}
+
 .task-tags {
   display: flex;
   flex-wrap: wrap;
@@ -2386,6 +2487,12 @@ button.pin-shell {
   line-height: 1.35;
 }
 
+.task-comment-text,
+p.task-comment-text {
+  color: var(--red);
+  font-weight: 750;
+}
+
 .priority-label.urgent {
   background: rgba(220, 38, 38, 0.1);
   color: var(--red);
@@ -2426,8 +2533,19 @@ button.pin-shell {
 }
 
 .task-edit-issue,
+.task-edit-comment,
 .task-assignee-edit {
   grid-column: span 3;
+}
+
+.task-comment-textarea {
+  color: var(--red);
+  font-weight: 750;
+}
+
+.task-comment-detail {
+  display: grid;
+  gap: 10px;
 }
 
 .task-row-actions {
@@ -3334,15 +3452,33 @@ button.monitor-count-pill {
 
 @media (max-width: 1180px) {
   .app-shell {
-    padding-top: 156px;
+    padding-top: 124px;
   }
 
   .topbar {
     padding: 10px 14px 12px;
   }
 
+  .topbar-main {
+    gap: 10px;
+  }
+
+  .main-menu {
+    gap: 6px;
+  }
+
+  .main-menu .menu-link {
+    padding: 5px 6px;
+    font-size: 12px;
+  }
+
+  .profile-copy strong,
+  .profile-copy small {
+    max-width: 108px;
+  }
+
   .account-actions {
-    justify-content: flex-start;
+    justify-content: flex-end;
   }
 
   .dashboard-grid,
@@ -3397,7 +3533,9 @@ button.monitor-count-pill {
   }
 
   .topbar-main {
+    display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 8px;
   }
 
@@ -3416,6 +3554,11 @@ button.monitor-count-pill {
   .brand-mark {
     width: 34px;
     height: 34px;
+  }
+
+  .agency-logo-header {
+    width: 92px;
+    max-width: 28vw;
   }
 
   .main-menu {
@@ -3471,6 +3614,10 @@ button.monitor-count-pill {
 
   .profile-button {
     padding: 4px;
+  }
+
+  .profile-button > svg {
+    display: none;
   }
 
   .icon-button {
@@ -3583,6 +3730,7 @@ button.monitor-count-pill {
   }
 
   .task-edit-issue,
+  .task-edit-comment,
   .task-assignee-edit {
     grid-column: auto;
   }
@@ -3618,6 +3766,11 @@ button.monitor-count-pill {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .agency-logo-header {
+    width: 68px;
+    max-width: 22vw;
   }
 
   .avatar {

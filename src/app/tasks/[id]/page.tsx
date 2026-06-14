@@ -7,6 +7,7 @@ import {
   ClipboardList,
   Edit3,
   MapPin,
+  MessageSquare,
   Phone,
   ShieldAlert,
   Tags,
@@ -145,6 +146,16 @@ export default async function TaskDetailsPage({
             <span>ტელეფონი</span>
             <strong>{task.phone}</strong>
           </div>
+        </section>
+      ) : null}
+
+      {task.comment ? (
+        <section className="surface task-comment-detail">
+          <div className="section-title">
+            <h2>კომენტარი</h2>
+            <MessageSquare size={20} />
+          </div>
+          <p className="task-comment-text">{task.comment}</p>
         </section>
       ) : null}
 

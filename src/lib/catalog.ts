@@ -25,14 +25,28 @@ export const taskTagCatalog = [
   "კამერების ლუპი",
 ] as const;
 
-const taskTagSet = new Set<string>(taskTagCatalog);
+export const MAX_TASK_TAG_LENGTH = 120;
+
+export function normalizeTaskTagName(value: unknown) {
+  const tagName = String(value ?? "")
+    .trim()
+    .replace(/\s+/g, " ");
+
+  return tagName && tagName.length <= MAX_TASK_TAG_LENGTH ? tagName : "";
+}
 
 export function normalizeTaskTags(value: unknown) {
-  const tags = readTagArray(value);
-
-  return [...new Set(tags.map((tag) => tag.trim()))].filter((tag) =>
-    taskTagSet.has(tag),
+  return [...new Set(readTagArray(value).map(normalizeTaskTagName))].filter(
+    Boolean,
   );
+}
+
+export function filterRegisteredTaskTags(
+  value: unknown,
+  registeredTags: string[],
+) {
+  const registered = new Set(registeredTags.map(normalizeTaskTagName));
+  return normalizeTaskTags(value).filter((tag) => registered.has(tag));
 }
 
 function readTagArray(value: unknown): string[] {

@@ -24,11 +24,22 @@ const defaultActions: { key: PermissionAction; label: string }[] = [
   { key: "delete", label: "წაშლა" },
 ];
 
+const tagRegistryActions: { key: PermissionAction; label: string }[] = [
+  { key: "tag_create", label: "ახალი ტეგი" },
+  { key: "tag_delete", label: "ტეგის წაშლა" },
+];
+
+const taskActions: { key: PermissionAction; label: string }[] = [
+  ...defaultActions,
+  ...tagRegistryActions,
+];
+
 const problemReportActions: { key: PermissionAction; label: string }[] = [
   ...defaultActions,
   { key: "assign", label: "მომხმარებლები" },
   { key: "tag", label: "ტეგები" },
   { key: "status", label: "სტატუსები" },
+  ...tagRegistryActions,
 ];
 
 const pages: {
@@ -39,10 +50,10 @@ const pages: {
   { key: "dashboard", label: "რუკა" },
   { key: "devices", label: "X-Stations" },
   { key: "regions", label: "რაიონები" },
-  { key: "tasks", label: "ტასკები" },
+  { key: "tasks", label: "ტასკები", actions: taskActions },
   {
     key: "problem_reports",
-    label: "პრობლემების რეგისტრაცია",
+    label: "განაცხადები",
     actions: problemReportActions,
   },
   { key: "offline_records", label: "Offline აღრიცხვა" },
@@ -120,7 +131,10 @@ export function PermissionsManager({
         <div>
           <p className="eyebrow">ადმინისტრირება</p>
           <h1>როლების უფლებები</h1>
-          <p>უფლებები ენიჭება როლს და ავტომატურად ვრცელდება ამ როლის ყველა მომხმარებელზე.</p>
+          <p>
+            უფლებები ენიჭება როლს და ავტომატურად ვრცელდება ამ როლის ყველა
+            მომხმარებელზე.
+          </p>
         </div>
         <div className="metric-strip">
           <div className="metric">
@@ -169,7 +183,13 @@ export function PermissionsManager({
             <h2>{selectedRole?.label}</h2>
             <button className="ghost-button" type="button" disabled>
               <Save size={16} />
-              <span>{saving ? "ინახება..." : canEdit ? "ავტოშენახვა" : "მხოლოდ ნახვა"}</span>
+              <span>
+                {saving
+                  ? "ინახება..."
+                  : canEdit
+                    ? "ავტოშენახვა"
+                    : "მხოლოდ ნახვა"}
+              </span>
             </button>
           </div>
 
@@ -189,7 +209,8 @@ export function PermissionsManager({
                   <strong>{page.label}</strong>
                   <div className="permission-action-list">
                     {actions.map((action) => {
-                      const permission = `${page.key}.${action.key}` as PermissionKey;
+                      const permission =
+                        `${page.key}.${action.key}` as PermissionKey;
                       const enabled = selectedPermissions.includes(permission);
                       return (
                         <button
@@ -210,7 +231,9 @@ export function PermissionsManager({
                       );
                     })}
                   </div>
-                  <span className={`visibility-pill ${canView ? "visible" : "hidden"}`}>
+                  <span
+                    className={`visibility-pill ${canView ? "visible" : "hidden"}`}
+                  >
                     {canView ? <Eye size={15} /> : <EyeOff size={15} />}
                     {canView ? "ჩანს" : "დამალულია"}
                   </span>

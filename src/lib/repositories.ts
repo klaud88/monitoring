@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import bcrypt from "bcryptjs";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
@@ -19,7 +20,12 @@ import type {
   Task,
   TaskStatus,
 } from "./types";
-import { normalizeTaskTags, regions as fallbackRegionNames } from "./catalog";
+import {
+  normalizeTaskTagName,
+  normalizeTaskTags,
+  regions as fallbackRegionNames,
+  taskTagCatalog,
+} from "./catalog";
 import { queryRows, withConnection } from "./db";
 import { TBILISI_BOUNDS, clampLatLng, type LatLng } from "./geo";
 
@@ -44,6 +50,15 @@ type RoleRow = {
 
 type RoleIdRow = RowDataPacket & {
   id: string;
+};
+
+type TaskTagRow = {
+  name: string;
+};
+
+type TaggedJsonRow = RowDataPacket & {
+  id: string;
+  tags: unknown;
 };
 
 type RegionRow = {
@@ -128,22 +143,22 @@ const PROBLEM_REPORT_PERMISSIONS: {
 }[] = [
   {
     code: "problem_reports.view",
-    label: "პრობლემების რეგისტრაცია: ნახვა",
+    label: "განაცხადები: ნახვა",
     roles: ["admin", "dispatcher", GARDEN_ROLE_NAME],
   },
   {
     code: "problem_reports.create",
-    label: "პრობლემების რეგისტრაცია: დამატება",
+    label: "განაცხადები: დამატება",
     roles: ["admin", "dispatcher", GARDEN_ROLE_NAME],
   },
   {
     code: "problem_reports.edit",
-    label: "პრობლემების რეგისტრაცია: რედაქტირება",
+    label: "განაცხადები: რედაქტირება",
     roles: ["admin", "dispatcher"],
   },
   {
     code: "problem_reports.delete",
-    label: "პრობლემების რეგისტრაცია: წაშლა",
+    label: "განაცხადები: წაშლა",
     roles: ["admin"],
   },
   {
@@ -162,15 +177,47 @@ const PROBLEM_REPORT_PERMISSIONS: {
     roles: ["admin", "dispatcher"],
   },
 ];
+const TASK_TAG_PERMISSIONS: {
+  code: PermissionKey;
+  label: string;
+  roles: string[];
+}[] = [
+  {
+    code: "tasks.tag_create",
+    label: "ტასკები: ახალი ტეგის დამატება",
+    roles: ["admin", "dispatcher"],
+  },
+  {
+    code: "tasks.tag_delete",
+    label: "ტასკები: ტეგის წაშლა",
+    roles: ["admin"],
+  },
+  {
+    code: "problem_reports.tag_create",
+    label: "განაცხადები: ახალი ტეგის დამატება",
+    roles: ["admin", "dispatcher"],
+  },
+  {
+    code: "problem_reports.tag_delete",
+    label: "განაცხადები: ტეგის წაშლა",
+    roles: ["admin"],
+  },
+];
+const ACCESS_PERMISSIONS = [
+  ...PROBLEM_REPORT_PERMISSIONS,
+  ...TASK_TAG_PERMISSIONS,
+];
 let lastBiostarSyncAt = 0;
 let biostarSyncPromise: Promise<{ synced: number; syncedAt: string }> | null =
   null;
 let operationalSchemaPromise: Promise<void> | null = null;
+let fallbackTaskTagNames: string[] = [...taskTagCatalog];
 
 type TaskRow = {
   id: string;
   title: string;
   issue: string;
+  comment_text: string | null;
   phone: string | null;
   device_id: string;
   status: TaskStatus;
@@ -229,8 +276,11 @@ const makeId = (prefix: string) =>
   `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 
 const makeStableId = (prefix: string, value: string) => {
-  const normalized = Buffer.from(value).toString("hex").slice(0, 36);
-  return `${prefix}-${normalized || Date.now().toString(16)}`;
+  const normalized = createHash("sha256")
+    .update(value)
+    .digest("hex")
+    .slice(0, 32);
+  return `${prefix}-${normalized}`;
 };
 
 export const normalizeDeviceGroupCode = (value?: string | null) => {
@@ -477,8 +527,15 @@ async function ensureOperationalSchema() {
         connection,
         taskColumns,
         "tasks",
+        "comment_text",
+        "comment_text text null after issue",
+      );
+      await addColumnIfMissing(
+        connection,
+        taskColumns,
+        "tasks",
         "phone",
-        "phone varchar(80) null after issue",
+        "phone varchar(80) null after comment_text",
       );
       await addColumnIfMissing(
         connection,
@@ -625,6 +682,7 @@ async function ensureOperationalSchema() {
           index fk_problem_report_assignees_user (user_id)
         )
       `);
+      await ensureTaskTagCatalog(connection);
       await ensureProblemReportAccess(connection);
       await ensureGardenUsersForDevices(connection);
     })
@@ -740,7 +798,7 @@ async function ensureProblemReportAccess(connection: PoolConnection) {
     [makeStableId("role", GARDEN_ROLE_NAME), GARDEN_ROLE_NAME, GARDEN_ROLE_LABEL],
   );
 
-  for (const permission of PROBLEM_REPORT_PERMISSIONS) {
+  for (const permission of ACCESS_PERMISSIONS) {
     const [pageKey, actionKey] = permission.code.split(".");
     await connection.query<ResultSetHeader>(
       `
@@ -772,6 +830,40 @@ async function ensureProblemReportAccess(connection: PoolConnection) {
         [permission.code, permission.roles],
       );
     }
+  }
+}
+
+async function ensureTaskTagCatalog(connection: PoolConnection) {
+  await connection.query(`
+    create table if not exists task_tags (
+      id varchar(64) primary key,
+      name varchar(120) not null unique,
+      created_at timestamp not null default current_timestamp
+    )
+  `);
+
+  const tagNames = new Set<string>(
+    taskTagCatalog.map(normalizeTaskTagName).filter(Boolean),
+  );
+
+  for (const tableName of ["tasks", "problem_reports"] as const) {
+    const [rows] = await connection.query<TaggedJsonRow[]>(
+      `select id, tags from ${tableName} where tags is not null`,
+    );
+    for (const row of rows) {
+      normalizeTaskTags(row.tags).forEach((tagName) => tagNames.add(tagName));
+    }
+  }
+
+  for (const tagName of tagNames) {
+    await connection.query<ResultSetHeader>(
+      `
+        insert into task_tags (id, name)
+        values (?, ?)
+        on duplicate key update name = values(name)
+      `,
+      [makeStableId("tasktag", tagName), tagName],
+    );
   }
 }
 
@@ -1169,12 +1261,16 @@ const fallbackRoles: AppRole[] = [
       "tasks.create",
       "tasks.edit",
       "tasks.delete",
+      "tasks.tag_create",
+      "tasks.tag_delete",
       "problem_reports.view",
       "problem_reports.create",
       "problem_reports.edit",
       "problem_reports.delete",
       "problem_reports.assign",
       "problem_reports.tag",
+      "problem_reports.tag_create",
+      "problem_reports.tag_delete",
       "problem_reports.status",
       "regions.view",
       "regions.create",
@@ -1210,11 +1306,13 @@ const fallbackRoles: AppRole[] = [
       "tasks.view",
       "tasks.create",
       "tasks.edit",
+      "tasks.tag_create",
       "problem_reports.view",
       "problem_reports.create",
       "problem_reports.edit",
       "problem_reports.assign",
       "problem_reports.tag",
+      "problem_reports.tag_create",
       "problem_reports.status",
       "regions.view",
       "offline_records.view",
@@ -1263,6 +1361,8 @@ const fallbackRoles: AppRole[] = [
 ];
 
 export async function getRoles(): Promise<AppRole[]> {
+  await ensureOperationalSchema();
+
   const rows = await queryRows<RoleRow>(
     `
       select
@@ -1454,6 +1554,89 @@ export async function getRegions(): Promise<Region[]> {
   }));
 }
 
+export async function getTaskTagNames(): Promise<string[]> {
+  if (isBuildTime()) {
+    return [...taskTagCatalog];
+  }
+
+  await ensureOperationalSchema();
+
+  const rows = await queryRows<TaskTagRow>(
+    "select name from task_tags order by name",
+  );
+
+  if (!rows) {
+    return [...fallbackTaskTagNames];
+  }
+
+  return rows.map((row) => row.name);
+}
+
+export async function createTaskTag(name: string) {
+  const tagName = normalizeTaskTagName(name);
+  if (!tagName) {
+    return null;
+  }
+
+  await ensureOperationalSchema();
+
+  const created = await withConnection(async (connection) => {
+    await connection.query<ResultSetHeader>(
+      `
+        insert into task_tags (id, name)
+        values (?, ?)
+        on duplicate key update name = values(name)
+      `,
+      [makeStableId("tasktag", tagName), tagName],
+    );
+
+    return tagName;
+  });
+
+  if (created !== null) {
+    return created;
+  }
+
+  fallbackTaskTagNames = [
+    ...new Set([...fallbackTaskTagNames, tagName].map(normalizeTaskTagName)),
+  ].filter(Boolean);
+  return tagName;
+}
+
+export async function deleteTaskTag(name: string) {
+  const tagName = normalizeTaskTagName(name);
+  if (!tagName) {
+    return false;
+  }
+
+  await ensureOperationalSchema();
+
+  const deleted = await withConnection(async (connection) => {
+    await connection.beginTransaction();
+    try {
+      const [result] = await connection.query<ResultSetHeader>(
+        "delete from task_tags where name = ?",
+        [tagName],
+      );
+
+      await removeTaskTagReferences(connection, tagName);
+      await connection.commit();
+      return result.affectedRows > 0;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    }
+  });
+
+  if (deleted !== null) {
+    return deleted;
+  }
+
+  const hadTag = fallbackTaskTagNames.includes(tagName);
+  fallbackTaskTagNames = fallbackTaskTagNames.filter((tag) => tag !== tagName);
+  return hadTag;
+}
+
 export async function createRegion(input: {
   name: string;
   color: string;
@@ -1564,6 +1747,30 @@ async function replaceDeviceTags(
       `,
       [deviceId, uniqueTags],
     );
+  }
+}
+
+async function removeTaskTagReferences(
+  connection: PoolConnection,
+  tagName: string,
+) {
+  for (const tableName of ["tasks", "problem_reports"] as const) {
+    const [rows] = await connection.query<TaggedJsonRow[]>(
+      `select id, tags from ${tableName} where tags is not null`,
+    );
+
+    for (const row of rows) {
+      const tags = normalizeTaskTags(row.tags);
+      const nextTags = tags.filter((tag) => tag !== tagName);
+      if (nextTags.length === tags.length) {
+        continue;
+      }
+
+      await connection.query<ResultSetHeader>(
+        `update ${tableName} set tags = cast(? as json) where id = ?`,
+        [JSON.stringify(nextTags), row.id],
+      );
+    }
   }
 }
 
@@ -2275,6 +2482,7 @@ export async function getTasks(): Promise<Task[]> {
         t.id,
         t.title,
         t.issue,
+        t.comment_text,
         t.phone,
         t.device_id,
         t.status,
@@ -2308,6 +2516,7 @@ export async function getTasks(): Promise<Task[]> {
     id: row.id,
     title: row.title,
     issue: row.issue,
+    comment: row.comment_text ?? undefined,
     phone: row.phone ?? undefined,
     deviceId: row.device_id,
     status: row.status,
@@ -2339,13 +2548,14 @@ export async function createTask(
     try {
       await connection.query<ResultSetHeader>(
         `
-          insert into tasks (id, title, issue, phone, device_id, status, priority, tags, starts_at, due_date)
-          values (?, ?, ?, ?, ?, ?, ?, cast(? as json), ?, ?)
+          insert into tasks (id, title, issue, comment_text, phone, device_id, status, priority, tags, starts_at, due_date)
+          values (?, ?, ?, ?, ?, ?, ?, ?, cast(? as json), ?, ?)
         `,
         [
           task.id,
           task.title,
           task.issue,
+          task.comment?.trim() || null,
           task.phone ?? null,
           task.deviceId,
           task.status,
@@ -2393,6 +2603,7 @@ export async function updateTask(
           set
             title = ?,
             issue = ?,
+            comment_text = ?,
             phone = ?,
             device_id = ?,
             status = ?,
@@ -2405,6 +2616,7 @@ export async function updateTask(
         [
           input.title,
           input.issue,
+          input.comment?.trim() || null,
           input.phone ?? null,
           input.deviceId,
           input.status,
@@ -2851,11 +3063,12 @@ async function upsertTaskForProblemReport(
   await connection.query<ResultSetHeader>(
     `
       insert into tasks
-        (id, title, issue, phone, device_id, status, priority, tags, due_date, created_by)
-      values (?, ?, ?, ?, ?, ?, ?, cast(? as json), ?, ?)
+        (id, title, issue, comment_text, phone, device_id, status, priority, tags, due_date, created_by)
+      values (?, ?, ?, ?, ?, ?, ?, ?, cast(? as json), ?, ?)
       on duplicate key update
         title = values(title),
         issue = values(issue),
+        comment_text = values(comment_text),
         phone = values(phone),
         device_id = values(device_id),
         status = values(status),
@@ -2867,6 +3080,7 @@ async function upsertTaskForProblemReport(
       input.taskId,
       input.title,
       input.issue,
+      input.comment?.trim() || null,
       input.phone ?? null,
       input.deviceId,
       input.status,

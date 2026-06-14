@@ -13,12 +13,13 @@ import {
   Plus,
   Save,
   Search,
-  Tag,
   Trash2,
   UserRound,
   X,
 } from "lucide-react";
-import { taskTagCatalog } from "@/lib/catalog";
+import { TaskTagPicker } from "@/components/tasks/task-tag-picker";
+import { mergeTags } from "@/lib/tags";
+import { getAssignableTaskUsers } from "@/lib/task-assignees";
 import type {
   AppUser,
   Device,
@@ -33,6 +34,8 @@ type ProblemReportPermissions = {
   delete: boolean;
   assignUsers: boolean;
   manageTags: boolean;
+  createTags: boolean;
+  deleteTags: boolean;
   manageStatus: boolean;
 };
 
@@ -40,6 +43,7 @@ type Props = {
   initialReports: ProblemReport[];
   devices: Device[];
   users: AppUser[];
+  initialTags: string[];
   permissions: ProblemReportPermissions;
 };
 
@@ -81,9 +85,16 @@ export function ProblemReportsManager({
   initialReports,
   devices,
   users,
+  initialTags,
   permissions,
 }: Props) {
   const [reports, setReports] = useState(initialReports);
+  const [availableTags, setAvailableTags] = useState(() =>
+    mergeTags(
+      initialTags,
+      initialReports.flatMap((report) => report.tags),
+    ),
+  );
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all");
   const [deviceFilter, setDeviceFilter] = useState("all");
@@ -113,6 +124,10 @@ export function ProblemReportsManager({
     [devices],
   );
   const gardenOptions = useMemo(() => buildGardenOptions(devices), [devices]);
+  const assignableUsers = useMemo(
+    () => getAssignableTaskUsers(users),
+    [users],
+  );
   const userMap = useMemo(
     () => new Map(users.map((user) => [user.id, user])),
     [users],
@@ -127,7 +142,9 @@ export function ProblemReportsManager({
         deviceFilter === "all" ||
         report.deviceGroupCode === deviceFilter ||
         (device ? getGardenCode(device) === deviceFilter : false);
-      const gardenName = device ? getGardenDisplayName(device) : report.deviceGroupCode;
+      const gardenName = device
+        ? getGardenDisplayName(device)
+        : report.deviceGroupCode;
       const matchesQuery =
         !normalized ||
         report.title.toLowerCase().includes(normalized) ||
@@ -142,7 +159,12 @@ export function ProblemReportsManager({
 
   async function createReport(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!permissions.create || !draft.deviceId || !draft.title.trim() || !draft.issue.trim()) {
+    if (
+      !permissions.create ||
+      !draft.deviceId ||
+      !draft.title.trim() ||
+      !draft.issue.trim()
+    ) {
       return;
     }
 
@@ -258,6 +280,72 @@ export function ProblemReportsManager({
     );
   }
 
+  async function createAvailableTag(tagName: string) {
+    if (!permissions.createTags) {
+      return false;
+    }
+
+    setError("");
+    const response = await fetch("/api/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: tagName }),
+    }).catch(() => null);
+
+    if (!response?.ok) {
+      setError("ტეგის დამატება ვერ მოხერხდა.");
+      return false;
+    }
+
+    const data = (await response.json()) as {
+      tag?: string;
+      tags?: string[];
+    };
+    setAvailableTags((current) =>
+      mergeTags(data.tags ?? current, data.tag ? [data.tag] : [tagName]),
+    );
+    return true;
+  }
+
+  async function removeAvailableTag(tagName: string) {
+    if (!permissions.deleteTags) {
+      return false;
+    }
+
+    setError("");
+    const response = await fetch("/api/tags", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: tagName }),
+    }).catch(() => null);
+
+    if (!response?.ok) {
+      setError("ტეგის წაშლა ვერ მოხერხდა.");
+      return false;
+    }
+
+    const data = (await response.json()) as { tags?: string[] };
+    setAvailableTags(
+      (current) => data.tags ?? current.filter((tag) => tag !== tagName),
+    );
+    setDraft((current) => ({
+      ...current,
+      tags: current.tags.filter((tag) => tag !== tagName),
+    }));
+    setEditDraft((current) =>
+      current
+        ? { ...current, tags: current.tags.filter((tag) => tag !== tagName) }
+        : current,
+    );
+    setReports((current) =>
+      current.map((report) => ({
+        ...report,
+        tags: report.tags.filter((tag) => tag !== tagName),
+      })),
+    );
+    return true;
+  }
+
   function toggleDraftAssignee(userId: string) {
     setDraft((current) => ({
       ...current,
@@ -280,9 +368,12 @@ export function ProblemReportsManager({
     <div className="problem-reports-page">
       <section className="page-header">
         <div>
-          <p className="eyebrow">პრობლემების რეგისტრაცია</p>
+          <p className="eyebrow">განაცხადები</p>
           <h1>დარეგისტრირებული პრობლემები</h1>
-          <p>ბაღები აფიქსირებენ პრობლემებს, დისპეტჩერი კი ანაწილებს მომხმარებლებს, ტეგებს და სტატუსს.</p>
+          <p>
+            ბაღები აფიქსირებენ პრობლემებს, დისპეტჩერი კი ანაწილებს
+            მომხმარებლებს, ტეგებს და სტატუსს.
+          </p>
         </div>
         <div className="metric-strip">
           <div className="metric">
@@ -292,7 +383,9 @@ export function ProblemReportsManager({
           </div>
           <div className="metric">
             <CheckCircle2 size={18} />
-            <span>{reports.filter((report) => report.status === "done").length}</span>
+            <span>
+              {reports.filter((report) => report.status === "done").length}
+            </span>
             <small>დასრულდა</small>
           </div>
           <div className="metric">
@@ -307,7 +400,10 @@ export function ProblemReportsManager({
 
       <section className="content-grid problem-report-grid">
         {permissions.create ? (
-          <form className="surface admin-form problem-report-form" onSubmit={createReport}>
+          <form
+            className="surface admin-form problem-report-form"
+            onSubmit={createReport}
+          >
             <div className="section-title">
               <h2>ახალი პრობლემა</h2>
               <Plus size={20} />
@@ -316,12 +412,15 @@ export function ProblemReportsManager({
               draft={draft}
               devices={devices}
               gardenOptions={gardenOptions}
+              availableTags={availableTags}
               permissions={permissions}
-              users={users}
+              users={assignableUsers}
               onChange={(updater) =>
                 setDraft((current) => updater(current) ?? current)
               }
               onToggleTag={toggleDraftTag}
+              onCreateTag={createAvailableTag}
+              onDeleteTag={removeAvailableTag}
               onToggleAssignee={toggleDraftAssignee}
               mode="create"
             />
@@ -331,7 +430,9 @@ export function ProblemReportsManager({
             </button>
           </form>
         ) : (
-          <section className="surface empty-state">რეგისტრაციის უფლება არ გაქვთ.</section>
+          <section className="surface empty-state">
+            რეგისტრაციის უფლება არ გაქვთ.
+          </section>
         )}
 
         <section className="surface problem-report-list">
@@ -394,10 +495,13 @@ export function ProblemReportsManager({
                     draft={editDraft}
                     devices={devices}
                     gardenOptions={gardenOptions}
+                    availableTags={availableTags}
                     permissions={permissions}
-                    users={users}
+                    users={assignableUsers}
                     onChange={setEditDraft}
                     onToggleTag={toggleEditTag}
+                    onCreateTag={createAvailableTag}
+                    onDeleteTag={removeAvailableTag}
                     onToggleAssignee={toggleEditAssignee}
                     mode="edit"
                   />
@@ -436,7 +540,9 @@ export function ProblemReportsManager({
                   >
                     <span className="device-name-inline">
                       <MapPin size={15} />
-                      {device ? getGardenDisplayName(device) : "ბაღი ვერ მოიძებნა"}
+                      {device
+                        ? getGardenDisplayName(device)
+                        : "ბაღი ვერ მოიძებნა"}
                     </span>
                   </Link>
                   <div className="problem-summary-cell">
@@ -513,22 +619,28 @@ function ReportFields({
   draft,
   devices,
   gardenOptions,
+  availableTags,
   permissions,
   users,
   onChange,
   onToggleTag,
+  onCreateTag,
+  onDeleteTag,
   onToggleAssignee,
   mode,
 }: {
   draft: ReportDraft;
   devices: Device[];
   gardenOptions: GardenOption[];
+  availableTags: string[];
   permissions: ProblemReportPermissions;
   users: AppUser[];
   onChange: (
     updater: (current: ReportDraft | null) => ReportDraft | null,
   ) => void;
   onToggleTag: (tagName: string) => void;
+  onCreateTag: (tagName: string) => Promise<boolean> | boolean;
+  onDeleteTag: (tagName: string) => Promise<boolean> | boolean;
   onToggleAssignee: (userId: string) => void;
   mode: "create" | "edit";
 }) {
@@ -537,7 +649,9 @@ function ReportFields({
     onChange((current) => (current ? { ...current, ...patch } : current));
   };
   const selectedDevice = devices.find((device) => device.id === draft.deviceId);
-  const selectedGardenCode = selectedDevice ? getGardenCode(selectedDevice) : "";
+  const selectedGardenCode = selectedDevice
+    ? getGardenCode(selectedDevice)
+    : "";
   const selectedGardenOption = gardenOptions.find(
     (garden) => garden.code === selectedGardenCode,
   );
@@ -609,21 +723,21 @@ function ReportFields({
             </label>
           ) : null}
           {permissions.manageStatus ? (
-          <label>
-            <span>სტატუსი</span>
-            <select
-              value={draft.status}
-              onChange={(event) =>
-                update({ status: event.target.value as TaskStatus })
-              }
-            >
-              {Object.entries(statusLabels).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
+            <label>
+              <span>სტატუსი</span>
+              <select
+                value={draft.status}
+                onChange={(event) =>
+                  update({ status: event.target.value as TaskStatus })
+                }
+              >
+                {Object.entries(statusLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
           ) : null}
         </div>
       ) : null}
@@ -638,40 +752,31 @@ function ReportFields({
         />
       </label>
       {permissions.manageTags ? (
-        <div className="task-tag-picker">
-          <span>ტეგები</span>
-          <div className="row-tags">
-            {taskTagCatalog.map((tagName) => (
-              <button
-                key={tagName}
-                type="button"
-                className={`tag-toggle compact ${draft.tags.includes(tagName) ? "active" : ""}`}
-                onClick={() => onToggleTag(tagName)}
-              >
-                <Tag size={13} />
-                {tagName}
-              </button>
-            ))}
-          </div>
-        </div>
+        <TaskTagPicker
+          availableTags={availableTags}
+          selectedTags={draft.tags}
+          canCreateTags={permissions.createTags}
+          canDeleteTags={permissions.deleteTags}
+          onToggle={onToggleTag}
+          onCreateTag={onCreateTag}
+          onDeleteTag={onDeleteTag}
+        />
       ) : null}
       {permissions.assignUsers ? (
         <div className="task-assignee-edit">
           <span>მომხმარებლები</span>
           <div className="row-tags">
-            {users
-              .filter((user) => user.role !== "viewer" && user.role !== "garden")
-              .map((user) => (
-                <button
-                  key={user.id}
-                  type="button"
-                  className={`tag-toggle compact ${draft.assigneeIds.includes(user.id) ? "active" : ""}`}
-                  onClick={() => onToggleAssignee(user.id)}
-                >
-                  <UserRound size={13} />
-                  {user.name}
-                </button>
-              ))}
+            {users.map((user) => (
+              <button
+                key={user.id}
+                type="button"
+                className={`tag-toggle compact ${draft.assigneeIds.includes(user.id) ? "active" : ""}`}
+                onClick={() => onToggleAssignee(user.id)}
+              >
+                <UserRound size={13} />
+                {user.name}
+              </button>
+            ))}
           </div>
         </div>
       ) : null}
@@ -762,7 +867,9 @@ function toggleListValue(values: string[], value: string) {
     : [...values, value];
 }
 
-function getIssueIndicatorState(report: Pick<ProblemReport, "status" | "dueDate">) {
+function getIssueIndicatorState(
+  report: Pick<ProblemReport, "status" | "dueDate">,
+) {
   if (report.status === "done") {
     return "done";
   }

@@ -1,5 +1,6 @@
-import { Activity, ShieldCheck, Wifi } from "lucide-react";
+import { ShieldCheck, Wifi } from "lucide-react";
 import { LoginForm } from "@/components/auth/login-form";
+import { AgencyLogo } from "@/components/layout/agency-logo";
 
 type LoginPageProps = {
   searchParams?: Promise<{
@@ -14,10 +15,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     <main className="login-page">
       <section className="login-panel" aria-label="ავტორიზაცია">
         <div className="login-copy">
-          <div className="brand-mark large">
-            <Activity size={28} strokeWidth={2.4} />
-          </div>
-          <h1>BioStar2 Ops</h1>
+          <AgencyLogo className="agency-logo agency-logo-login" />
+          <h1 className="sr-only">თბილისის საბავშვო ბაგა-ბაღების მართვის სააგენტო</h1>
           <p>დავაისების სტატუსები, ტასკები, უფლებები და audit log ერთ სამუშაო სივრცეში.</p>
           <div className="login-badges">
             <span>

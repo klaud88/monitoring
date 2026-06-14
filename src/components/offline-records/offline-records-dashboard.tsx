@@ -274,11 +274,7 @@ export function OfflineRecordsDashboard({
       <section className="page-header">
         <div>
           <p className="eyebrow">Offline აღრიცხვა</p>
-          <h1>09:00 X-Station snapshot-ები</h1>
-          <p>
-            დღიური ჩამონათვალი იმ X-Station-ებისთვის, რომლებიც 09:00-ზე offline
-            იყვნენ.
-          </p>
+          <h1>09:00 მყოფი OFFLINE მოწყობილობები</h1>
         </div>
         <div className="metric-strip">
           <div className="metric">

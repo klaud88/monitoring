@@ -18,9 +18,12 @@ import {
   UserRound,
   X,
 } from "lucide-react";
-import { taskTagCatalog } from "@/lib/catalog";
+import { TaskTagPicker } from "@/components/tasks/task-tag-picker";
 import { recordAudit } from "@/lib/client-audit";
+import { findDeviceByName, sortDevicesByName } from "@/lib/device-options";
 import { withoutDeviceCodes } from "@/lib/display";
+import { mergeTags } from "@/lib/tags";
+import { getAssignableTaskUsers } from "@/lib/task-assignees";
 import type {
   AppUser,
   Device,
@@ -33,6 +36,7 @@ type Props = {
   initialTasks: Task[];
   devices: Device[];
   users: AppUser[];
+  initialTags: string[];
   initialEditTaskId?: string;
   permissions: TaskPermissions;
 };
@@ -41,11 +45,14 @@ type TaskPermissions = {
   create: boolean;
   edit: boolean;
   delete: boolean;
+  createTags: boolean;
+  deleteTags: boolean;
 };
 
 type TaskDraft = {
   title: string;
   issue: string;
+  comment: string;
   phone: string;
   deviceId: string;
   assigneeIds: string[];
@@ -73,10 +80,22 @@ export function TasksManager({
   initialTasks,
   devices,
   users,
+  initialTags,
   initialEditTaskId,
   permissions,
 }: Props) {
   const [tasks, setTasks] = useState(initialTasks);
+  const [availableTags, setAvailableTags] = useState(() =>
+    mergeTags(
+      initialTags,
+      initialTasks.flatMap((task) => task.tags),
+    ),
+  );
+  const sortedDevices = useMemo(() => sortDevicesByName(devices), [devices]);
+  const assignableUsers = useMemo(
+    () => getAssignableTaskUsers(users),
+    [users],
+  );
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all");
   const [userFilter, setUserFilter] = useState("all");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -86,17 +105,17 @@ export function TasksManager({
   const [savingTaskId, setSavingTaskId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const initialEditHandledRef = useRef<string | null>(null);
-  const [draft, setDraft] = useState({
+  const [draft, setDraft] = useState(() => ({
     title: "",
     issue: "",
     phone: "",
-    deviceId: devices[0]?.id || "",
-    assigneeId:
-      users.find((user) => user.role !== "viewer")?.id || users[0]?.id || "",
+    deviceId: sortedDevices[0]?.id || "",
+    deviceQuery: sortedDevices[0]?.name || "",
+    assigneeId: assignableUsers[0]?.id || "",
     priority: "normal" as TaskPriority,
     tags: [] as string[],
     dueDate: new Date().toISOString().slice(0, 10),
-  });
+  }));
 
   const deviceMap = useMemo(
     () => new Map(devices.map((device) => [device.id, device])),
@@ -166,6 +185,11 @@ export function TasksManager({
   async function createTask(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!permissions.create) {
+      return;
+    }
+
+    if (!draft.deviceId) {
+      setError("დავაისი აირჩიეთ ჩამონათვალიდან.");
       return;
     }
 
@@ -261,6 +285,73 @@ export function TasksManager({
     setSelectedTags((current) => toggleListValue(current, tagName));
   }
 
+  async function createAvailableTag(tagName: string) {
+    if (!permissions.createTags) {
+      return false;
+    }
+
+    setError("");
+    const response = await fetch("/api/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: tagName }),
+    }).catch(() => null);
+
+    if (!response?.ok) {
+      setError("ტეგის დამატება ვერ მოხერხდა.");
+      return false;
+    }
+
+    const data = (await response.json()) as {
+      tag?: string;
+      tags?: string[];
+    };
+    setAvailableTags((current) =>
+      mergeTags(data.tags ?? current, data.tag ? [data.tag] : [tagName]),
+    );
+    return true;
+  }
+
+  async function removeAvailableTag(tagName: string) {
+    if (!permissions.deleteTags) {
+      return false;
+    }
+
+    setError("");
+    const response = await fetch("/api/tags", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: tagName }),
+    }).catch(() => null);
+
+    if (!response?.ok) {
+      setError("ტეგის წაშლა ვერ მოხერხდა.");
+      return false;
+    }
+
+    const data = (await response.json()) as { tags?: string[] };
+    setAvailableTags((current) =>
+      data.tags ?? current.filter((tag) => tag !== tagName),
+    );
+    setSelectedTags((current) => current.filter((tag) => tag !== tagName));
+    setDraft((current) => ({
+      ...current,
+      tags: current.tags.filter((tag) => tag !== tagName),
+    }));
+    setEditDraft((current) =>
+      current
+        ? { ...current, tags: current.tags.filter((tag) => tag !== tagName) }
+        : current,
+    );
+    setTasks((current) =>
+      current.map((task) => ({
+        ...task,
+        tags: task.tags.filter((tag) => tag !== tagName),
+      })),
+    );
+    return true;
+  }
+
   function toggleEditAssignee(userId: string) {
     setEditDraft((current) =>
       current
@@ -283,6 +374,7 @@ export function TasksManager({
       ...editDraft,
       title: editDraft.title.trim(),
       issue: editDraft.issue.trim(),
+      comment: editDraft.comment.trim(),
       phone: editDraft.phone.trim(),
     };
 
@@ -384,21 +476,28 @@ export function TasksManager({
             </div>
             <label>
               <span>დავაისი</span>
-              <select
-                value={draft.deviceId}
-                onChange={(event) =>
+              <input
+                list="new-task-device-options"
+                value={draft.deviceQuery}
+                onChange={(event) => {
+                  const deviceQuery = event.target.value;
+                  const selectedDevice = findDeviceByName(
+                    sortedDevices,
+                    deviceQuery,
+                  );
                   setDraft((current) => ({
                     ...current,
-                    deviceId: event.target.value,
-                  }))
-                }
-              >
-                {devices.map((device) => (
-                  <option key={device.id} value={device.id}>
-                    {device.name}
-                  </option>
+                    deviceQuery,
+                    deviceId: selectedDevice?.id ?? "",
+                  }));
+                }}
+                required
+              />
+              <datalist id="new-task-device-options">
+                {sortedDevices.map((device) => (
+                  <option key={device.id} value={device.name} />
                 ))}
-              </select>
+              </datalist>
             </label>
             <label>
               <span>სათაური</span>
@@ -451,7 +550,7 @@ export function TasksManager({
                   }))
                 }
               >
-                {users.map((user) => (
+                {assignableUsers.map((user) => (
                   <option key={user.id} value={user.id}>
                     {user.name}
                   </option>
@@ -491,7 +590,15 @@ export function TasksManager({
                 />
               </label>
             </div>
-            <TaskTagPicker selectedTags={draft.tags} onToggle={toggleDraftTag} />
+            <TaskTagPicker
+              availableTags={availableTags}
+              selectedTags={draft.tags}
+              canCreateTags={permissions.createTags}
+              canDeleteTags={permissions.deleteTags}
+              onToggle={toggleDraftTag}
+              onCreateTag={createAvailableTag}
+              onDeleteTag={removeAvailableTag}
+            />
             <button className="primary-button" type="submit">
               <Plus size={18} />
               <span>დამატება</span>
@@ -534,7 +641,7 @@ export function TasksManager({
                 onChange={(event) => setUserFilter(event.target.value)}
               >
                 <option value="all">ყველა მომხმარებელი</option>
-                {users.map((user) => (
+                {assignableUsers.map((user) => (
                   <option key={user.id} value={user.id}>
                     {user.name}
                   </option>
@@ -543,7 +650,7 @@ export function TasksManager({
             </label>
           </div>
           <section className="tag-filter task-tag-filter" aria-label="დავალების ტეგები">
-            {taskTagCatalog.map((tagName) => (
+            {availableTags.map((tagName) => (
               <button
                 key={tagName}
                 className={`tag-toggle ${selectedTags.includes(tagName) ? "active" : ""}`}
@@ -590,7 +697,7 @@ export function TasksManager({
                           )
                         }
                       >
-                        {devices.map((item) => (
+                        {sortedDevices.map((item) => (
                           <option key={item.id} value={item.id}>
                             {item.name}
                           </option>
@@ -696,10 +803,25 @@ export function TasksManager({
                         rows={3}
                       />
                     </label>
+                    <label className="task-edit-comment">
+                      <span>კომენტარი</span>
+                      <textarea
+                        className="task-comment-textarea"
+                        value={editDraft.comment}
+                        onChange={(event) =>
+                          setEditDraft((current) =>
+                            current
+                              ? { ...current, comment: event.target.value }
+                              : current,
+                          )
+                        }
+                        rows={3}
+                      />
+                    </label>
                     <div className="task-assignee-edit">
                       <span>მომხმარებლები</span>
                       <div className="row-tags">
-                        {users.map((user) => (
+                        {assignableUsers.map((user) => (
                           <button
                             key={user.id}
                             type="button"
@@ -711,21 +833,16 @@ export function TasksManager({
                         ))}
                       </div>
                     </div>
-                    <div className="task-assignee-edit">
-                      <span>ტეგები</span>
-                      <div className="row-tags">
-                        {taskTagCatalog.map((tagName) => (
-                          <button
-                            key={tagName}
-                            type="button"
-                            className={`tag-toggle compact ${editDraft.tags.includes(tagName) ? "active" : ""}`}
-                            onClick={() => toggleEditTag(tagName)}
-                          >
-                            {tagName}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
+                    <TaskTagPicker
+                      className="task-assignee-edit"
+                      availableTags={availableTags}
+                      selectedTags={editDraft.tags}
+                      canCreateTags={permissions.createTags}
+                      canDeleteTags={permissions.deleteTags}
+                      onToggle={toggleEditTag}
+                      onCreateTag={createAvailableTag}
+                      onDeleteTag={removeAvailableTag}
+                    />
                   </div>
                   <div className="row-actions">
                     <button
@@ -779,6 +896,9 @@ export function TasksManager({
                   >
                     <strong className="table-title-link">{displayTitle}</strong>
                     <p>{displayIssue}</p>
+                    {task.comment ? (
+                      <p className="task-comment-text">{task.comment}</p>
+                    ) : null}
                     <TaskTagList tags={task.tags} />
                     <small className={`priority-label ${task.priority}`}>
                       {priorityLabels[task.priority]}
@@ -857,32 +977,6 @@ export function TasksManager({
   );
 }
 
-function TaskTagPicker({
-  selectedTags,
-  onToggle,
-}: {
-  selectedTags: string[];
-  onToggle: (tagName: string) => void;
-}) {
-  return (
-    <div className="task-tag-picker">
-      <span>ტეგები</span>
-      <div className="row-tags">
-        {taskTagCatalog.map((tagName) => (
-          <button
-            key={tagName}
-            type="button"
-            className={`tag-toggle compact ${selectedTags.includes(tagName) ? "active" : ""}`}
-            onClick={() => onToggle(tagName)}
-          >
-            {tagName}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function TaskTagList({ tags }: { tags: string[] }) {
   if (!tags.length) {
     return null;
@@ -903,6 +997,7 @@ function createEditDraft(task: Task, deviceCode?: string): TaskDraft {
   return {
     title: withoutDeviceCodes(task.title, [deviceCode]),
     issue: withoutDeviceCodes(task.issue, [deviceCode]),
+    comment: task.comment ?? "",
     phone: task.phone ?? "",
     deviceId: task.deviceId,
     assigneeIds: task.assigneeIds,

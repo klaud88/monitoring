@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const response = NextResponse.redirect(new URL("/login", request.url));
+  const response = NextResponse.redirect(new URL("/login", request.url), 303);
   response.cookies.set(SESSION_COOKIE, "", {
     httpOnly: true,
     sameSite: "lax",

@@ -22,6 +22,8 @@ export type PermissionAction =
   | "delete"
   | "assign"
   | "tag"
+  | "tag_create"
+  | "tag_delete"
   | "status";
 export type PermissionKey = `${PageKey}.${PermissionAction}`;
 
@@ -75,6 +77,7 @@ export type Task = {
   id: string;
   title: string;
   issue: string;
+  comment?: string;
   phone?: string;
   deviceId: string;
   assigneeIds: string[];

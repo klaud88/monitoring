@@ -1,13 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
-import { normalizeTaskTags } from "@/lib/catalog";
+import { filterRegisteredTaskTags } from "@/lib/catalog";
 import {
   deleteProblemReport,
   getProblemReportById,
+  getTaskTagNames,
+  getUsers,
   normalizeDeviceGroupCode,
   updateProblemReport,
 } from "@/lib/repositories";
+import { filterAssignableTaskUserIds } from "@/lib/task-assignees";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
 
 const taskStatuses: TaskStatus[] = ["planned", "in_progress", "blocked", "done"];
@@ -62,9 +65,14 @@ export async function PATCH(
     : existing.dueDate;
   const assigneeIds =
     canAssign && Array.isArray(body?.assigneeIds)
-      ? body.assigneeIds.map(String).filter(Boolean)
+      ? filterAssignableTaskUserIds(
+          body.assigneeIds.map(String).filter(Boolean),
+          await getUsers(),
+        )
       : existing.assigneeIds;
-  const tags = canTag ? normalizeTaskTags(body?.tags) : existing.tags;
+  const tags = canTag
+    ? filterRegisteredTaskTags(body?.tags, await getTaskTagNames())
+    : existing.tags;
 
   if (!title || !issue || !deviceId || !dueDate) {
     return NextResponse.json(

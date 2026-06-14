@@ -8,6 +8,7 @@ import {
   getDevices,
   getDeviceGroupCode,
   getProblemReports,
+  getTaskTagNames,
   getUsers,
   normalizeDeviceGroupCode,
 } from "@/lib/repositories";
@@ -22,10 +23,11 @@ export default async function ProblemReportsPage() {
   const deviceGroupCode =
     user?.role === "garden" ? normalizeDeviceGroupCode(user.deviceGroupCode) : "";
   const canAssignUsers = hasPermission(user, "problem_reports.assign");
-  const [devices, reports, users] = await Promise.all([
+  const [devices, reports, users, taskTags] = await Promise.all([
     getDevices(),
     getProblemReports({ deviceGroupCode }),
     canAssignUsers ? getUsers() : Promise.resolve([]),
+    getTaskTagNames(),
   ]);
   const visibleDevices = deviceGroupCode
     ? devices.filter(
@@ -39,12 +41,15 @@ export default async function ProblemReportsPage() {
         initialReports={reports}
         devices={visibleDevices}
         users={users}
+        initialTags={taskTags}
         permissions={{
           create: hasPermission(user, "problem_reports.create"),
           edit: hasPermission(user, "problem_reports.edit"),
           delete: hasPermission(user, "problem_reports.delete"),
           assignUsers: canAssignUsers,
           manageTags: hasPermission(user, "problem_reports.tag"),
+          createTags: hasPermission(user, "problem_reports.tag_create"),
+          deleteTags: hasPermission(user, "problem_reports.tag_delete"),
           manageStatus: hasPermission(user, "problem_reports.status"),
         }}
       />

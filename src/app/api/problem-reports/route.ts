@@ -1,12 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
-import { normalizeTaskTags } from "@/lib/catalog";
+import { filterRegisteredTaskTags } from "@/lib/catalog";
 import {
   createProblemReport,
+  getTaskTagNames,
   getProblemReports,
+  getUsers,
   normalizeDeviceGroupCode,
 } from "@/lib/repositories";
+import { filterAssignableTaskUserIds } from "@/lib/task-assignees";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
 
 const taskStatuses: TaskStatus[] = ["planned", "in_progress", "blocked", "done"];
@@ -49,12 +52,16 @@ export async function POST(request: NextRequest) {
       ? body.status
       : "planned";
   const tags = hasPermission(user, "problem_reports.tag")
-    ? normalizeTaskTags(body?.tags)
+    ? filterRegisteredTaskTags(body?.tags, await getTaskTagNames())
     : [];
-  const assigneeIds =
+  const requestedAssigneeIds =
     hasPermission(user, "problem_reports.assign") && Array.isArray(body?.assigneeIds)
       ? body.assigneeIds.map(String).filter(Boolean)
       : [];
+  const assigneeIds = filterAssignableTaskUserIds(
+    requestedAssigneeIds,
+    await getUsers(),
+  );
 
   if (!title || !issue || !deviceId || !dueDate) {
     return NextResponse.json(
