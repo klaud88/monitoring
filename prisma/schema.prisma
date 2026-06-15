@@ -82,6 +82,7 @@ model devices {
   monitored_devices  monitored_devices?
   monitored_device_offline_periods monitored_device_offline_periods[]
   offline_snapshot_devices offline_snapshot_devices[]
+  form_one_records  form_one_records[]
   problem_reports    problem_reports[]
   regions            regions?             @relation(fields: [region_id], references: [id], onUpdate: NoAction, map: "fk_devices_region")
   status_events      status_events[]
@@ -248,6 +249,25 @@ model problem_reports {
   @@index([device_group_code], map: "idx_problem_reports_device_group")
 }
 
+model form_one_records {
+  id                String   @id @db.VarChar(64)
+  device_id         String   @db.VarChar(64)
+  device_group_code String   @db.VarChar(80)
+  garden_label      String   @db.VarChar(180)
+  phone             String?  @db.VarChar(80)
+  submitted_date    DateTime @db.Date
+  items             Json
+  created_by        String?  @db.VarChar(64)
+  created_at        DateTime @default(now()) @db.Timestamp(0)
+  updated_at        DateTime @default(now()) @updatedAt @db.Timestamp(0)
+  devices           devices  @relation(fields: [device_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_form_one_records_device")
+  users             users?   @relation(fields: [created_by], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_form_one_records_created_by")
+
+  @@index([device_group_code], map: "idx_form_one_records_device_group")
+  @@index([device_id], map: "fk_form_one_records_device")
+  @@index([created_by], map: "fk_form_one_records_created_by")
+}
+
 model tasks {
   id             String           @id @db.VarChar(64)
   title          String           @db.VarChar(220)
@@ -286,6 +306,7 @@ model users {
   updated_at     DateTime         @default(now()) @db.Timestamp(0)
   audit_logs     audit_logs[]
   device_issues  device_issues[]
+  form_one_records form_one_records[]
   problem_report_assignees problem_report_assignees[]
   problem_reports problem_reports[]
   task_assignees task_assignees[]

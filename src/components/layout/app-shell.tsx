@@ -5,6 +5,7 @@ import {
   BarChart3,
   ClipboardList,
   DoorOpen,
+  FileText,
   LogOut,
   MapPinned,
   Menu,
@@ -41,6 +42,12 @@ const navItems: NavItem[] = [
     label: "განაცხადები",
     permission: "problem_reports.view",
     icon: AlertCircle,
+  },
+  {
+    href: "/formaerti",
+    label: "ფორმაერთი",
+    permission: "form_one.view",
+    icon: FileText,
   },
   {
     href: "/devices/regions",

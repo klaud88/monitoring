@@ -18,6 +18,7 @@ import {
   UserRound,
   X,
 } from "lucide-react";
+import { useConfirmDialog } from "@/components/common/confirm-dialog";
 import { TaskTagPicker } from "@/components/tasks/task-tag-picker";
 import { recordAudit } from "@/lib/client-audit";
 import { findDeviceByName, sortDevicesByName } from "@/lib/device-options";
@@ -104,6 +105,7 @@ export function TasksManager({
   const [editDraft, setEditDraft] = useState<TaskDraft | null>(null);
   const [savingTaskId, setSavingTaskId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const { confirm, confirmationDialog } = useConfirmDialog();
   const initialEditHandledRef = useRef<string | null>(null);
   const [draft, setDraft] = useState(() => ({
     title: "",
@@ -423,7 +425,7 @@ export function TasksManager({
       return;
     }
 
-    const confirmed = window.confirm("წავშალო ეს დავალება?");
+    const confirmed = await confirm();
     if (!confirmed) {
       return;
     }
@@ -445,6 +447,7 @@ export function TasksManager({
 
   return (
     <div className="tasks-page">
+      {confirmationDialog}
       <section className="page-header">
         <div>
           <p className="eyebrow">ტასკების მართვა</p>
@@ -469,7 +472,7 @@ export function TasksManager({
 
       <section className="content-grid task-admin-grid">
         {permissions.create ? (
-          <form className="surface admin-form" onSubmit={createTask}>
+          <form className="surface admin-form task-create-form" onSubmit={createTask}>
             <div className="section-title">
               <h2>ახალი ტასკი</h2>
               <Plus size={20} />

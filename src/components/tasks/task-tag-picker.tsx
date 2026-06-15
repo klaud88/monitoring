@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Plus, Tag, Trash2 } from "lucide-react";
+import { useConfirmDialog } from "@/components/common/confirm-dialog";
 
 type Props = {
   availableTags: string[];
@@ -27,6 +28,7 @@ export function TaskTagPicker({
   const [newTagName, setNewTagName] = useState("");
   const [saving, setSaving] = useState(false);
   const [deletingTag, setDeletingTag] = useState("");
+  const { confirm, confirmationDialog } = useConfirmDialog();
 
   async function createTag() {
     if (!canCreateTags || saving) {
@@ -71,7 +73,9 @@ export function TaskTagPicker({
       return;
     }
 
-    const confirmed = window.confirm(`წავშალო ტეგი "${tagName}"?`);
+    const confirmed = await confirm({
+      message: `ნამდვილად გსურთ "${tagName}" ტეგის წაშლა?`,
+    });
     if (!confirmed) {
       return;
     }
@@ -83,6 +87,7 @@ export function TaskTagPicker({
 
   return (
     <div className={`task-tag-picker ${className ?? ""}`.trim()}>
+      {confirmationDialog}
       <span>ტეგები</span>
       <div className="row-tags">
         {availableTags.map((tagName) => (

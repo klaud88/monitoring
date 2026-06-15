@@ -17,6 +17,7 @@ import {
   UserRound,
   X,
 } from "lucide-react";
+import { useConfirmDialog } from "@/components/common/confirm-dialog";
 import { TaskTagPicker } from "@/components/tasks/task-tag-picker";
 import { mergeTags } from "@/lib/tags";
 import { getAssignableTaskUsers } from "@/lib/task-assignees";
@@ -102,6 +103,7 @@ export function ProblemReportsManager({
   const [editDraft, setEditDraft] = useState<ReportDraft | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const { confirm, confirmationDialog } = useConfirmDialog();
   const [draft, setDraft] = useState<ReportDraft>({
     deviceId: devices[0]?.id || "",
     title: "",
@@ -245,7 +247,7 @@ export function ProblemReportsManager({
       return;
     }
 
-    const confirmed = window.confirm("წავშალო დარეგისტრირებული პრობლემა?");
+    const confirmed = await confirm();
     if (!confirmed) {
       return;
     }
@@ -366,6 +368,7 @@ export function ProblemReportsManager({
 
   return (
     <div className="problem-reports-page">
+      {confirmationDialog}
       <section className="page-header">
         <div>
           <p className="eyebrow">განაცხადები</p>

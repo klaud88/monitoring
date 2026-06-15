@@ -2,13 +2,17 @@ import { createHash } from "crypto";
 import bcrypt from "bcryptjs";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
+import { Prisma } from "@/generated/prisma/client";
 import { fetchBiostarDevices, hasBiostarConfig } from "./biostar";
 import { mockDevices, mockTasks, mockUsers } from "./mock-data";
+import { prisma } from "./prisma";
 import type {
   AppUser,
   AppRole,
   Device,
   DeviceStatus,
+  FormOneRecord,
+  FormOneRecordItem,
   MonitoredDevice,
   MonitoredOfflinePeriod,
   OfflineSnapshot,
@@ -21,6 +25,7 @@ import type {
   TaskStatus,
 } from "./types";
 import {
+  tagCatalog,
   normalizeTaskTagName,
   normalizeTaskTags,
   regions as fallbackRegionNames,
@@ -177,6 +182,27 @@ const PROBLEM_REPORT_PERMISSIONS: {
     roles: ["admin", "dispatcher"],
   },
 ];
+const FORM_ONE_PERMISSIONS: {
+  code: PermissionKey;
+  label: string;
+  roles: string[];
+}[] = [
+  {
+    code: "form_one.view",
+    label: "ფორმა ერთი: ნახვა",
+    roles: ["admin", "dispatcher", GARDEN_ROLE_NAME],
+  },
+  {
+    code: "form_one.edit",
+    label: "ფორმა ერთი: რედაქტირება",
+    roles: ["admin", "dispatcher"],
+  },
+  {
+    code: "form_one.delete",
+    label: "ფორმა ერთი: წაშლა",
+    roles: ["admin"],
+  },
+];
 const TASK_TAG_PERMISSIONS: {
   code: PermissionKey;
   label: string;
@@ -205,6 +231,7 @@ const TASK_TAG_PERMISSIONS: {
 ];
 const ACCESS_PERMISSIONS = [
   ...PROBLEM_REPORT_PERMISSIONS,
+  ...FORM_ONE_PERMISSIONS,
   ...TASK_TAG_PERMISSIONS,
 ];
 let lastBiostarSyncAt = 0;
@@ -212,6 +239,7 @@ let biostarSyncPromise: Promise<{ synced: number; syncedAt: string }> | null =
   null;
 let operationalSchemaPromise: Promise<void> | null = null;
 let fallbackTaskTagNames: string[] = [...taskTagCatalog];
+let fallbackDeviceTagNames: string[] = [...tagCatalog];
 
 type TaskRow = {
   id: string;
@@ -680,6 +708,25 @@ async function ensureOperationalSchema() {
           constraint fk_problem_report_assignees_report foreign key (problem_report_id) references problem_reports(id) on delete cascade,
           constraint fk_problem_report_assignees_user foreign key (user_id) references users(id) on delete cascade,
           index fk_problem_report_assignees_user (user_id)
+        )
+      `);
+      await connection.query(`
+        create table if not exists form_one_records (
+          id varchar(64) primary key,
+          device_id varchar(64) not null,
+          device_group_code varchar(80) not null,
+          garden_label varchar(180) not null,
+          phone varchar(80) null,
+          submitted_date date not null,
+          items json not null,
+          created_by varchar(64) null,
+          created_at timestamp not null default current_timestamp,
+          updated_at timestamp not null default current_timestamp on update current_timestamp,
+          constraint fk_form_one_records_device foreign key (device_id) references devices(id) on delete cascade,
+          constraint fk_form_one_records_created_by foreign key (created_by) references users(id) on delete set null,
+          index idx_form_one_records_device_group (device_group_code),
+          index fk_form_one_records_device (device_id),
+          index fk_form_one_records_created_by (created_by)
         )
       `);
       await ensureTaskTagCatalog(connection);
@@ -1272,6 +1319,9 @@ const fallbackRoles: AppRole[] = [
       "problem_reports.tag_create",
       "problem_reports.tag_delete",
       "problem_reports.status",
+      "form_one.view",
+      "form_one.edit",
+      "form_one.delete",
       "regions.view",
       "regions.create",
       "regions.edit",
@@ -1314,6 +1364,8 @@ const fallbackRoles: AppRole[] = [
       "problem_reports.tag",
       "problem_reports.tag_create",
       "problem_reports.status",
+      "form_one.view",
+      "form_one.edit",
       "regions.view",
       "offline_records.view",
       "offline_records.create",
@@ -1332,6 +1384,7 @@ const fallbackRoles: AppRole[] = [
       "tasks.view",
       "tasks.edit",
       "problem_reports.view",
+      "form_one.view",
       "regions.view",
       "offline_records.view",
       "offline_records.edit",
@@ -1347,6 +1400,7 @@ const fallbackRoles: AppRole[] = [
       "devices.view",
       "tasks.view",
       "problem_reports.view",
+      "form_one.view",
       "regions.view",
       "offline_records.view",
       "analytics.view",
@@ -1356,7 +1410,7 @@ const fallbackRoles: AppRole[] = [
     id: "role-garden",
     name: GARDEN_ROLE_NAME,
     label: GARDEN_ROLE_LABEL,
-    permissions: ["problem_reports.view", "problem_reports.create"],
+    permissions: ["problem_reports.view", "problem_reports.create", "form_one.view"],
   },
 ];
 
@@ -1570,6 +1624,111 @@ export async function getTaskTagNames(): Promise<string[]> {
   }
 
   return rows.map((row) => row.name);
+}
+
+export async function getDeviceTagNames(): Promise<string[]> {
+  if (isBuildTime()) {
+    return [
+      ...new Set([
+        ...fallbackDeviceTagNames,
+        ...mockDevices.flatMap((device) => device.tags),
+      ]),
+    ].sort((a, b) => a.localeCompare(b, "ka"));
+  }
+
+  await ensureOperationalSchema();
+
+  const rows = await queryRows<TaskTagRow>(
+    "select name from tags order by name",
+  );
+
+  if (!rows) {
+    return [
+      ...new Set([
+        ...fallbackDeviceTagNames,
+        ...mockDevices.flatMap((device) => device.tags),
+      ]),
+    ].sort((a, b) => a.localeCompare(b, "ka"));
+  }
+
+  return rows.map((row) => row.name);
+}
+
+export async function createDeviceTag(name: string) {
+  const tagName = normalizeTaskTagName(name);
+  if (!tagName) {
+    return null;
+  }
+
+  await ensureOperationalSchema();
+
+  const created = await withConnection(async (connection) => {
+    await connection.query<ResultSetHeader>(
+      `
+        insert into tags (id, name, color)
+        values (?, ?, ?)
+        on duplicate key update name = values(name)
+      `,
+      [makeStableId("tag", tagName), tagName, "#64748b"],
+    );
+
+    return tagName;
+  });
+
+  if (created !== null) {
+    return created;
+  }
+
+  fallbackDeviceTagNames = [
+    ...new Set([...fallbackDeviceTagNames, tagName].map(normalizeTaskTagName)),
+  ].filter(Boolean);
+  return tagName;
+}
+
+export async function deleteDeviceTag(name: string) {
+  const tagName = normalizeTaskTagName(name);
+  if (!tagName) {
+    return false;
+  }
+
+  await ensureOperationalSchema();
+
+  const deleted = await withConnection(async (connection) => {
+    await connection.beginTransaction();
+    try {
+      await connection.query<ResultSetHeader>(
+        `
+          delete dt
+          from device_tags dt
+          join tags t on t.id = dt.tag_id
+          where t.name = ?
+        `,
+        [tagName],
+      );
+      await connection.query<ResultSetHeader>(
+        "delete from tags where name = ?",
+        [tagName],
+      );
+
+      await connection.commit();
+      return true;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    }
+  });
+
+  if (deleted !== null) {
+    return deleted;
+  }
+
+  fallbackDeviceTagNames = fallbackDeviceTagNames.filter(
+    (tag) => tag !== tagName,
+  );
+  mockDevices.forEach((device) => {
+    device.tags = device.tags.filter((tag) => tag !== tagName);
+  });
+  return true;
 }
 
 export async function createTaskTag(name: string) {
@@ -2987,6 +3146,189 @@ export async function deleteProblemReport(id: string) {
   return deleted ?? false;
 }
 
+export async function getFormOneRecords({
+  deviceGroupCode,
+}: {
+  deviceGroupCode?: string;
+} = {}): Promise<FormOneRecord[]> {
+  if (isBuildTime()) {
+    return [];
+  }
+
+  await ensureOperationalSchema();
+
+  const normalizedGroup = normalizeDeviceGroupCode(deviceGroupCode);
+  const rows = await prisma.form_one_records.findMany({
+    orderBy: { created_at: "desc" },
+    where: normalizedGroup ? { device_group_code: normalizedGroup } : undefined,
+  });
+
+  return rows.map(mapPrismaFormOneRecord);
+}
+
+export async function getFormOneRecordById(id: string) {
+  if (isBuildTime()) {
+    return null;
+  }
+
+  await ensureOperationalSchema();
+
+  const record = await prisma.form_one_records.findUnique({
+    where: { id },
+  });
+  return record ? mapPrismaFormOneRecord(record) : null;
+}
+
+export async function createFormOneRecord(
+  input: {
+    deviceId: string;
+    gardenLabel: string;
+    phone?: string;
+    submittedDate: string;
+    items: FormOneRecordItem[];
+  },
+  options: { createdBy?: string; allowedDeviceGroupCode?: string } = {},
+): Promise<FormOneRecord | null> {
+  if (isBuildTime()) {
+    return null;
+  }
+
+  await ensureOperationalSchema();
+
+  const recordId = makeId("formone");
+  const items = normalizeFormOneRecordItems(input.items);
+  const submittedDate = normalizeDateInput(input.submittedDate);
+  if (!items.length) {
+    return null;
+  }
+
+  return prisma.$transaction(async (transaction) => {
+    const device = await transaction.devices.findUnique({
+      select: { code: true, id: true, name: true },
+      where: { id: input.deviceId },
+    });
+    if (!device) {
+      return null;
+    }
+
+    const deviceGroupCode = getDeviceGroupCode(device);
+    const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
+    if (allowedGroup && deviceGroupCode !== allowedGroup) {
+      return null;
+    }
+
+    const record = await transaction.form_one_records.create({
+      data: {
+        id: recordId,
+        device_id: input.deviceId,
+        device_group_code: deviceGroupCode,
+        garden_label: input.gardenLabel || device.name || deviceGroupCode,
+        phone: input.phone || null,
+        submitted_date: toPrismaDateOnly(submittedDate),
+        items: items as unknown as Prisma.InputJsonValue,
+        created_by: options.createdBy ?? null,
+      },
+    });
+
+    return mapPrismaFormOneRecord(record);
+  });
+}
+
+export async function updateFormOneRecord(
+  id: string,
+  input: {
+    deviceId: string;
+    gardenLabel: string;
+    phone?: string;
+    submittedDate: string;
+    items: FormOneRecordItem[];
+  },
+  options: { allowedDeviceGroupCode?: string } = {},
+): Promise<FormOneRecord | null> {
+  if (isBuildTime()) {
+    return null;
+  }
+
+  await ensureOperationalSchema();
+
+  const items = normalizeFormOneRecordItems(input.items);
+  const submittedDate = normalizeDateInput(input.submittedDate);
+  if (!items.length) {
+    return null;
+  }
+
+  return prisma.$transaction(async (transaction) => {
+    const existing = await transaction.form_one_records.findUnique({
+      select: { device_group_code: true },
+      where: { id },
+    });
+    if (!existing) {
+      return null;
+    }
+
+    const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
+    if (allowedGroup && existing.device_group_code !== allowedGroup) {
+      return null;
+    }
+
+    const device = await transaction.devices.findUnique({
+      select: { code: true, id: true, name: true },
+      where: { id: input.deviceId },
+    });
+    if (!device) {
+      return null;
+    }
+
+    const deviceGroupCode = getDeviceGroupCode(device);
+    if (allowedGroup && deviceGroupCode !== allowedGroup) {
+      return null;
+    }
+
+    const record = await transaction.form_one_records.update({
+      data: {
+        device_id: input.deviceId,
+        device_group_code: deviceGroupCode,
+        garden_label: input.gardenLabel || device.name || deviceGroupCode,
+        phone: input.phone || null,
+        submitted_date: toPrismaDateOnly(submittedDate),
+        items: items as unknown as Prisma.InputJsonValue,
+      },
+      where: { id },
+    });
+
+    return mapPrismaFormOneRecord(record);
+  });
+}
+
+export async function deleteFormOneRecord(
+  id: string,
+  options: { allowedDeviceGroupCode?: string } = {},
+) {
+  if (isBuildTime()) {
+    return false;
+  }
+
+  await ensureOperationalSchema();
+
+  return prisma.$transaction(async (transaction) => {
+    const existing = await transaction.form_one_records.findUnique({
+      select: { device_group_code: true },
+      where: { id },
+    });
+    if (!existing) {
+      return false;
+    }
+
+    const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
+    if (allowedGroup && existing.device_group_code !== allowedGroup) {
+      return false;
+    }
+
+    await transaction.form_one_records.delete({ where: { id } });
+    return true;
+  });
+}
+
 function mapProblemReportRow(row: ProblemReportRow): ProblemReport {
   return {
     id: row.id,
@@ -3005,6 +3347,85 @@ function mapProblemReportRow(row: ProblemReportRow): ProblemReport {
     createdAt: toDateTimeString(row.created_at),
     updatedAt: toDateTimeString(row.updated_at),
   };
+}
+
+function mapPrismaFormOneRecord(row: {
+  id: string;
+  device_id: string;
+  device_group_code: string;
+  garden_label: string;
+  phone: string | null;
+  submitted_date: Date;
+  items: unknown;
+  created_by: string | null;
+  created_at: Date;
+  updated_at: Date;
+}): FormOneRecord {
+  return {
+    id: row.id,
+    deviceId: row.device_id,
+    deviceGroupCode: row.device_group_code,
+    gardenLabel: row.garden_label,
+    phone: row.phone ?? undefined,
+    submittedDate: toDateString(row.submitted_date),
+    items: normalizeFormOneRecordItems(row.items),
+    createdBy: row.created_by ?? undefined,
+    createdAt: toDateTimeString(row.created_at),
+    updatedAt: toDateTimeString(row.updated_at),
+  };
+}
+
+function normalizeFormOneRecordItems(items: unknown): FormOneRecordItem[] {
+  const parsedItems = parseJsonArray(items);
+  return parsedItems
+    .map((item) => {
+      const value =
+        typeof item === "object" && item !== null
+          ? (item as Record<string, unknown>)
+          : {};
+      const serviceLabel = String(value.serviceLabel || "").trim();
+      const customServiceLabel = String(value.customServiceLabel || "").trim();
+
+      return {
+        modelId: String(value.modelId || "").trim(),
+        modelLabel: String(value.modelLabel || "").trim(),
+        serviceId: String(value.serviceId || "").trim(),
+        serviceLabel: serviceLabel || customServiceLabel,
+        customServiceLabel: customServiceLabel || undefined,
+        quantity: Math.max(1, Number(value.quantity) || 1),
+      };
+    })
+    .filter((item) => item.modelLabel && item.serviceLabel);
+}
+
+function parseJsonArray(value: unknown): unknown[] {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (typeof value !== "string") {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function normalizeDateInput(value: string) {
+  const normalized = value.trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(normalized)
+    ? normalized
+    : getTbilisiDateKey();
+}
+
+function toPrismaDateOnly(value: string) {
+  const normalized = normalizeDateInput(value);
+  const [year, month, day] = normalized.split("-").map(Number);
+  return new Date(year, month - 1, day);
 }
 
 function normalizeUserIds(userIds: string[]) {

@@ -9,6 +9,7 @@ export type PageKey =
   | "devices"
   | "tasks"
   | "problem_reports"
+  | "form_one"
   | "regions"
   | "offline_records"
   | "users"
@@ -103,6 +104,28 @@ export type ProblemReport = {
   tags: string[];
   assigneeIds: string[];
   dueDate: string;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type FormOneRecordItem = {
+  modelId: string;
+  modelLabel: string;
+  serviceId: string;
+  serviceLabel: string;
+  customServiceLabel?: string;
+  quantity: number;
+};
+
+export type FormOneRecord = {
+  id: string;
+  deviceId: string;
+  deviceGroupCode: string;
+  gardenLabel: string;
+  phone?: string;
+  submittedDate: string;
+  items: FormOneRecordItem[];
   createdBy?: string;
   createdAt: string;
   updatedAt: string;

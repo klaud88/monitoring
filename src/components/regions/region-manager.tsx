@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Edit3,
   MapPinned,
@@ -13,9 +13,9 @@ import {
   ToggleRight,
   X,
 } from "lucide-react";
-import { tagCatalog } from "@/lib/catalog";
+import { useConfirmDialog } from "@/components/common/confirm-dialog";
 import { TBILISI_CENTER, clampLatLng } from "@/lib/geo";
-import { mergeTags, TAG_STORAGE_KEY } from "@/lib/tags";
+import { mergeTags } from "@/lib/tags";
 import type { Device, DeviceStatus, Region } from "@/lib/types";
 
 type DeviceDraft = {
@@ -32,6 +32,8 @@ type RegionPermissions = {
   createDevice: boolean;
   editDevice: boolean;
   deleteDevice: boolean;
+  createTags: boolean;
+  deleteTags: boolean;
   createRegion: boolean;
   editRegion: boolean;
   deleteRegion: boolean;
@@ -49,10 +51,12 @@ const unassignedRegion = "დაუნაწილებელი";
 export function RegionManager({
   initialDevices,
   initialRegions,
+  initialTags,
   permissions,
 }: {
   initialDevices: Device[];
   initialRegions: Region[];
+  initialTags: string[];
   permissions: RegionPermissions;
 }) {
   const [devices, setDevices] = useState(initialDevices);
@@ -62,7 +66,7 @@ export function RegionManager({
   const [regionFilter, setRegionFilter] = useState("all");
   const [availableTags, setAvailableTags] = useState<string[]>(() =>
     mergeTags(
-      [...tagCatalog],
+      initialTags,
       initialDevices.flatMap((device) => device.tags),
     ),
   );
@@ -89,6 +93,7 @@ export function RegionManager({
   const [deviceEdit, setDeviceEdit] = useState<DeviceDraft | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const { confirm, confirmationDialog } = useConfirmDialog();
 
   const regionNames = regions.map((region) => region.name);
 
@@ -104,19 +109,6 @@ export function RegionManager({
       )
       .sort((a, b) => compareDevices(a, b, deviceSort));
   }, [devices, deviceSort, query, regionFilter]);
-
-  useEffect(() => {
-    const storedTags = JSON.parse(
-      window.localStorage.getItem(TAG_STORAGE_KEY) || "[]",
-    );
-    if (Array.isArray(storedTags)) {
-      setAvailableTags((current) => mergeTags(current, storedTags.map(String)));
-    }
-  }, []);
-
-  function persistTags(tags: string[]) {
-    window.localStorage.setItem(TAG_STORAGE_KEY, JSON.stringify(tags));
-  }
 
   function toggleDraftTag(tagName: string) {
     setDraft((current) => ({
@@ -136,19 +128,99 @@ export function RegionManager({
     );
   }
 
-  function createTag(event: React.FormEvent<HTMLFormElement>) {
+  async function createTag(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
-    const tagName = newTagName.trim();
-    if (!tagName || availableTags.includes(tagName)) {
+    const created = await createAvailableTag(newTagName);
+    if (created) {
       setNewTagName("");
-      return;
+    }
+  }
+
+  async function createAvailableTag(tagName: string) {
+    if (!permissions.createTags) {
+      return null;
     }
 
-    const nextTags = mergeTags(availableTags, [tagName]);
-    setAvailableTags(nextTags);
-    persistTags(nextTags);
-    setNewTagName("");
+    const normalizedTag = tagName.trim().replace(/\s+/g, " ");
+    if (!normalizedTag) {
+      return null;
+    }
+
+    if (availableTags.includes(normalizedTag)) {
+      return normalizedTag;
+    }
+
+    setSaving(true);
+    setError("");
+    const response = await fetch("/api/device-tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: normalizedTag }),
+    }).catch(() => null);
+    setSaving(false);
+
+    if (!response?.ok) {
+      setError("ტეგის დამატება ვერ მოხერხდა.");
+      return null;
+    }
+
+    const data = (await response.json()) as {
+      tag?: string;
+      tags?: string[];
+    };
+    const createdTag = data.tag ?? normalizedTag;
+    setAvailableTags((current) =>
+      mergeTags(data.tags ?? current, [createdTag]),
+    );
+    return createdTag;
+  }
+
+  async function removeAvailableTag(tagName: string) {
+    if (!permissions.deleteTags) {
+      return false;
+    }
+
+    const confirmed = await confirm({
+      message: `ნამდვილად გსურთ "${tagName}" ტეგის წაშლა? ტეგი ყველა X-Station-იდან მოიხსნება.`,
+    });
+    if (!confirmed) {
+      return false;
+    }
+
+    setSaving(true);
+    setError("");
+    const response = await fetch("/api/device-tags", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: tagName }),
+    }).catch(() => null);
+    setSaving(false);
+
+    if (!response?.ok) {
+      setError("ტეგის წაშლა ვერ მოხერხდა.");
+      return false;
+    }
+
+    const data = (await response.json()) as { tags?: string[] };
+    setAvailableTags((current) =>
+      data.tags ?? current.filter((tag) => tag !== tagName),
+    );
+    setDevices((current) =>
+      current.map((device) => ({
+        ...device,
+        tags: device.tags.filter((tag) => tag !== tagName),
+      })),
+    );
+    setDraft((current) => ({
+      ...current,
+      tags: current.tags.filter((tag) => tag !== tagName),
+    }));
+    setDeviceEdit((current) =>
+      current
+        ? { ...current, tags: current.tags.filter((tag) => tag !== tagName) }
+        : current,
+    );
+    return true;
   }
 
   async function createRegion(event: React.FormEvent<HTMLFormElement>) {
@@ -246,9 +318,10 @@ export function RegionManager({
       return;
     }
 
-    const confirmed = window.confirm(
-      "წავშალო რაიონი? ამ რაიონზე მიბმული X-Station-ები დარჩებიან რაიონის გარეშე.",
-    );
+    const confirmed = await confirm({
+      message:
+        "ნამდვილად გსურთ აღნიშნულის წაშლა? ამ რაიონზე მიბმული X-Station-ები დარჩებიან რაიონის გარეშე.",
+    });
     if (!confirmed) {
       return;
     }
@@ -408,7 +481,7 @@ export function RegionManager({
       return;
     }
 
-    const confirmed = window.confirm("წავშალო ეს X-Station?");
+    const confirmed = await confirm();
     if (!confirmed) {
       return;
     }
@@ -435,6 +508,7 @@ export function RegionManager({
 
   return (
     <div className="regions-page">
+      {confirmationDialog}
       <section className="page-header">
         <div>
           <p className="eyebrow">X-Stations</p>
@@ -600,6 +674,10 @@ export function RegionManager({
                 regionNames={regionNames}
                 availableTags={availableTags}
                 toggleTag={toggleDraftTag}
+                canCreateTags={permissions.createTags}
+                canDeleteTags={permissions.deleteTags}
+                onCreateTag={createAvailableTag}
+                onDeleteTag={removeAvailableTag}
               />
               <button className="primary-button" type="submit" disabled={saving}>
                 <Plus size={18} />
@@ -649,20 +727,23 @@ export function RegionManager({
             </label>
           </div>
 
-          <form className="tag-create-form" onSubmit={createTag}>
-            <div className="search-field">
-              <Tags size={18} />
-              <input
-                value={newTagName}
-                onChange={(event) => setNewTagName(event.target.value)}
-                placeholder="ახალი ტეგი"
-              />
-            </div>
-            <button className="primary-button" type="submit">
-              <Plus size={18} />
-              <span>ტეგის დამატება</span>
-            </button>
-          </form>
+          {permissions.createTags ? (
+            <form className="tag-create-form" onSubmit={createTag}>
+              <div className="search-field">
+                <Tags size={18} />
+                <input
+                  value={newTagName}
+                  onChange={(event) => setNewTagName(event.target.value)}
+                  placeholder="ახალი ტეგი"
+                  maxLength={120}
+                />
+              </div>
+              <button className="primary-button" type="submit" disabled={saving}>
+                <Plus size={18} />
+                <span>ტეგის დამატება</span>
+              </button>
+            </form>
+          ) : null}
 
           <div className="region-device-list">
             {filteredDevices.map((device) =>
@@ -678,6 +759,10 @@ export function RegionManager({
                     regionNames={regionNames}
                     availableTags={availableTags}
                     toggleTag={toggleEditTag}
+                    canCreateTags={permissions.createTags}
+                    canDeleteTags={permissions.deleteTags}
+                    onCreateTag={createAvailableTag}
+                    onDeleteTag={removeAvailableTag}
                   />
                   <div className="row-actions">
                     <button
@@ -785,13 +870,70 @@ function DeviceDraftFields({
   regionNames,
   availableTags,
   toggleTag,
+  canCreateTags,
+  canDeleteTags,
+  onCreateTag,
+  onDeleteTag,
 }: {
   draft: DeviceDraft;
   onChange: (partial: Partial<DeviceDraft>) => void;
   regionNames: string[];
   availableTags: string[];
   toggleTag: (tagName: string) => void;
+  canCreateTags: boolean;
+  canDeleteTags: boolean;
+  onCreateTag: (tagName: string) => Promise<string | null> | string | null;
+  onDeleteTag: (tagName: string) => Promise<boolean> | boolean;
 }) {
+  const [newTagName, setNewTagName] = useState("");
+  const [savingTag, setSavingTag] = useState(false);
+  const [deletingTag, setDeletingTag] = useState("");
+
+  async function createAndAttachTag() {
+    if (!canCreateTags || savingTag) {
+      return;
+    }
+
+    const tagName = newTagName.trim().replace(/\s+/g, " ");
+    if (!tagName) {
+      return;
+    }
+
+    const existingTag = availableTags.find((tag) => tag === tagName);
+    if (existingTag) {
+      onChange({ tags: mergeTags(draft.tags, [existingTag]) });
+      setNewTagName("");
+      return;
+    }
+
+    setSavingTag(true);
+    const createdTag = await onCreateTag(tagName);
+    setSavingTag(false);
+    if (createdTag) {
+      onChange({ tags: mergeTags(draft.tags, [createdTag]) });
+      setNewTagName("");
+    }
+  }
+
+  function submitNewTagOnEnter(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Enter") {
+      return;
+    }
+
+    event.preventDefault();
+    void createAndAttachTag();
+  }
+
+  async function deleteTag(tagName: string) {
+    if (!canDeleteTags || deletingTag) {
+      return;
+    }
+
+    setDeletingTag(tagName);
+    await onDeleteTag(tagName);
+    setDeletingTag("");
+  }
+
   return (
     <>
       <label>
@@ -858,15 +1000,60 @@ function DeviceDraftFields({
       </div>
       <div className="row-tags">
         {availableTags.map((tagName) => (
-          <button
-            key={tagName}
-            type="button"
-            className={`tag-toggle compact ${draft.tags.includes(tagName) ? "active" : ""}`}
-            onClick={() => toggleTag(tagName)}
-          >
-            {tagName}
-          </button>
+          <span key={tagName} className="tag-chip-control">
+            <button
+              type="button"
+              className={`tag-toggle compact ${draft.tags.includes(tagName) ? "active" : ""}`}
+              onClick={() => toggleTag(tagName)}
+            >
+              {tagName}
+            </button>
+            {canDeleteTags ? (
+              <button
+                type="button"
+                className="tag-delete-button"
+                onClick={() => deleteTag(tagName)}
+                disabled={Boolean(deletingTag)}
+                aria-label={`${tagName} ტეგის წაშლა`}
+                title="ტეგის წაშლა"
+              >
+                <Trash2 size={12} />
+              </button>
+            ) : null}
+          </span>
         ))}
+      </div>
+      <div className="device-tag-edit-actions">
+        {draft.tags.length ? (
+          <button
+            className="ghost-button"
+            type="button"
+            onClick={() => onChange({ tags: [] })}
+          >
+            <X size={15} />
+            <span>ყველა ტეგის მოხსნა</span>
+          </button>
+        ) : null}
+        {canCreateTags ? (
+          <div className="device-tag-create">
+            <input
+              value={newTagName}
+              onChange={(event) => setNewTagName(event.target.value)}
+              onKeyDown={submitNewTagOnEnter}
+              placeholder="ახალი ტეგი"
+              maxLength={120}
+            />
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={() => void createAndAttachTag()}
+              disabled={savingTag}
+            >
+              <Plus size={15} />
+              <span>{savingTag ? "ემატება..." : "დამატება"}</span>
+            </button>
+          </div>
+        ) : null}
       </div>
     </>
   );

@@ -13,6 +13,7 @@ import {
   Users,
   X,
 } from "lucide-react";
+import { useConfirmDialog } from "@/components/common/confirm-dialog";
 import type { SessionUser } from "@/lib/types";
 
 const roleLabels: Record<string, string> = {
@@ -61,6 +62,7 @@ export function UsersManager({
   const [editDraft, setEditDraft] = useState<UserDraft>(emptyDraft);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const { confirm, confirmationDialog } = useConfirmDialog();
 
   const filteredUsers = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -154,7 +156,7 @@ export function UsersManager({
       return;
     }
 
-    const confirmed = window.confirm("წავშალო ეს მომხმარებელი?");
+    const confirmed = await confirm();
     if (!confirmed) {
       return;
     }
@@ -176,6 +178,7 @@ export function UsersManager({
 
   return (
     <div className="users-page">
+      {confirmationDialog}
       <section className="page-header">
         <div>
           <p className="eyebrow">ადმინისტრირება</p>

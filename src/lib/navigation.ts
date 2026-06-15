@@ -9,6 +9,7 @@ export const protectedRoutes: ProtectedRoute[] = [
   { path: "/dashboard", permissions: ["dashboard.view"] },
   { path: "/tasks", permissions: ["tasks.view"] },
   { path: "/problem-reports", permissions: ["problem_reports.view"] },
+  { path: "/formaerti", permissions: ["form_one.view"] },
   { path: "/devices/regions", permissions: ["devices.view", "regions.view"] },
   { path: "/devices", permissions: ["devices.view", "dashboard.view"] },
   { path: "/offline-records", permissions: ["offline_records.view"] },

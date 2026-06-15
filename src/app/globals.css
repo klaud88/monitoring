@@ -769,6 +769,10 @@ textarea:focus {
   opacity: 0.7;
 }
 
+.primary-button.danger {
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+}
+
 .ghost-button {
   border-color: var(--line);
   background: var(--surface);
@@ -799,6 +803,45 @@ textarea:focus {
 
 .page-error {
   margin-bottom: 14px;
+}
+
+.confirm-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 23, 42, 0.42);
+  padding: 16px;
+}
+
+.confirm-dialog {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-strong);
+  padding: 18px;
+}
+
+.confirm-dialog h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.confirm-dialog p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.confirm-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
 }
 
 .page-header {
@@ -1921,6 +1964,11 @@ button.pin-shell {
   min-width: 0;
 }
 
+.device-tag-edit-actions {
+  display: grid;
+  gap: 8px;
+}
+
 .device-tags-empty {
   color: var(--muted);
   font-size: 15px;
@@ -2087,6 +2135,12 @@ button.pin-shell {
 
 .task-admin-grid {
   grid-template-columns: minmax(300px, 0.55fr) minmax(0, 1.45fr);
+  align-items: start;
+}
+
+.task-create-form {
+  align-self: start;
+  align-content: start;
 }
 
 .problem-report-grid {
@@ -2262,6 +2316,308 @@ button.pin-shell {
   margin: 0;
   color: var(--muted);
   line-height: 1.35;
+}
+
+.form-one-page {
+  display: grid;
+  gap: 16px;
+}
+
+.form-one-surface {
+  display: grid;
+  gap: 16px;
+  overflow: hidden;
+}
+
+.form-one-fields {
+  display: grid;
+  grid-template-columns:
+    minmax(220px, 1.1fr) minmax(180px, 0.7fr)
+    minmax(170px, 0.5fr);
+  gap: 12px;
+}
+
+.form-one-fields label {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.form-one-fields label > span {
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.form-one-fields input,
+.form-one-fields select {
+  min-width: 0;
+}
+
+.form-one-fields input[readonly] {
+  cursor: default;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.form-one-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.form-one-meta span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  padding: 5px 9px;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.form-one-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.form-one-table {
+  width: 100%;
+  min-width: 1060px;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.form-one-table th,
+.form-one-table td {
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 10px;
+  vertical-align: top;
+}
+
+.form-one-table th:last-child,
+.form-one-table td:last-child {
+  border-right: 0;
+}
+
+.form-one-table thead th {
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  text-align: left;
+}
+
+.form-one-table thead th:first-child,
+.form-one-number-cell {
+  width: 54px;
+  text-align: center;
+}
+
+.form-one-table thead th:last-child,
+.form-one-quantity-cell {
+  width: 116px;
+}
+
+.form-one-model-group:last-child tr:last-child td {
+  border-bottom: 0;
+}
+
+.form-one-number-cell {
+  color: var(--text);
+  font-weight: 900;
+}
+
+.form-one-model-cell {
+  width: 28%;
+  background: var(--surface-soft);
+}
+
+.form-one-model-cell select,
+.form-one-service-cell select,
+.form-one-service-cell input {
+  min-height: 42px;
+  background: var(--surface);
+}
+
+.form-one-service-cell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+}
+
+.form-one-service-inputs {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.form-one-service-actions {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.form-one-add-service {
+  min-height: 40px;
+  white-space: nowrap;
+}
+
+.form-one-quantity-cell input {
+  min-width: 76px;
+  text-align: center;
+  font-weight: 850;
+}
+
+.form-one-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.form-one-row-actions .ghost-button,
+.form-one-add-model,
+.form-one-add-service {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+.form-one-row-actions .icon-button,
+.form-one-service-cell .icon-button {
+  width: 40px;
+  flex: 0 0 40px;
+  min-height: 40px;
+  box-shadow: none;
+}
+
+.form-one-row-actions button:disabled,
+.form-one-service-cell button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  transform: none;
+}
+
+.form-one-add-model {
+  justify-self: start;
+}
+
+.form-one-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+}
+
+.form-one-actions .primary-button,
+.form-one-actions .ghost-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+.form-one-history {
+  display: grid;
+  gap: 14px;
+}
+
+.form-one-record-list {
+  display: grid;
+  gap: 12px;
+}
+
+.form-one-record {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 14px;
+}
+
+.form-one-record-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.form-one-record-head strong {
+  overflow-wrap: anywhere;
+}
+
+.form-one-record-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 7px;
+}
+
+.form-one-record-meta span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  border-radius: 8px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.form-one-record-items {
+  display: grid;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.form-one-record-item {
+  display: grid;
+  grid-template-columns: 54px minmax(180px, 0.8fr) minmax(320px, 1.4fr) 86px;
+  min-width: 760px;
+  border-bottom: 1px solid var(--line);
+}
+
+.form-one-record-item:last-child {
+  border-bottom: 0;
+}
+
+.form-one-record-item.head {
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.form-one-record-item > * {
+  min-width: 0;
+  border-right: 1px solid var(--line);
+  padding: 9px 10px;
+  overflow-wrap: anywhere;
+}
+
+.form-one-record-item > *:last-child {
+  border-right: 0;
+  text-align: center;
+  font-weight: 900;
+}
+
+.form-one-record-item > *:first-child {
+  text-align: center;
+  font-weight: 900;
 }
 
 .phone-inline {
@@ -3725,7 +4081,8 @@ button.monitor-count-pill {
   }
 
   .problem-report-form .form-row,
-  .user-create-form .form-row {
+  .user-create-form .form-row,
+  .form-one-fields {
     grid-template-columns: 1fr;
   }
 

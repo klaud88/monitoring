@@ -42,6 +42,12 @@ const problemReportActions: { key: PermissionAction; label: string }[] = [
   ...tagRegistryActions,
 ];
 
+const formOneActions: { key: PermissionAction; label: string }[] = [
+  { key: "view", label: "ნახვა" },
+  { key: "edit", label: "რედაქტირება" },
+  { key: "delete", label: "წაშლა" },
+];
+
 const pages: {
   key: PageKey;
   label: string;
@@ -55,6 +61,11 @@ const pages: {
     key: "problem_reports",
     label: "განაცხადები",
     actions: problemReportActions,
+  },
+  {
+    key: "form_one",
+    label: "ფორმა ერთი",
+    actions: formOneActions,
   },
   { key: "offline_records", label: "Offline აღრიცხვა" },
   { key: "users", label: "მომხმარებლები" },
