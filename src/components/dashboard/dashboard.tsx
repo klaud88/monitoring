@@ -105,6 +105,8 @@ export function Dashboard({
   const [statusFilter, setStatusFilter] = useState<DeviceStatus | "all">("all");
   const [userFilter, setUserFilter] = useState("all");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [selectedDeviceTags, setSelectedDeviceTags] = useState<string[]>([]);
+  const [deviceTagQuery, setDeviceTagQuery] = useState("");
   const [query, setQuery] = useState("");
   const [showCreateTask, setShowCreateTask] = useState(false);
   const [showOfflineDevices, setShowOfflineDevices] = useState(false);
@@ -155,6 +157,17 @@ export function Dashboard({
   const activeDeviceIds = useMemo(
     () => new Set(activeDevices.map((device) => device.id)),
     [activeDevices],
+  );
+  const deviceTagOptions = useMemo(
+    () => mergeTags(activeDevices.flatMap((device) => device.tags)),
+    [activeDevices],
+  );
+  const availableDeviceTagOptions = useMemo(
+    () =>
+      deviceTagOptions.filter(
+        (tagName) => !selectedDeviceTags.includes(tagName),
+      ),
+    [deviceTagOptions, selectedDeviceTags],
   );
 
   const refreshDevices = useCallback(
@@ -306,6 +319,9 @@ export function Dashboard({
         userFilter === "all" ||
         deviceTasks.some((task) => task.assigneeIds.includes(userFilter));
       const matchesTags = selectedTags.length === 0 || deviceTasks.length > 0;
+      const matchesDeviceTags =
+        selectedDeviceTags.length === 0 ||
+        selectedDeviceTags.every((tagName) => device.tags.includes(tagName));
       const matchesQuery =
         !normalized || device.name.toLowerCase().includes(normalized);
 
@@ -314,6 +330,7 @@ export function Dashboard({
         matchesStatus &&
         matchesUser &&
         matchesTags &&
+        matchesDeviceTags &&
         matchesQuery
       );
     });
@@ -321,6 +338,7 @@ export function Dashboard({
     activeDevices,
     query,
     regionFilter,
+    selectedDeviceTags,
     selectedTags,
     statusFilter,
     tasksByDevice,
@@ -352,6 +370,42 @@ export function Dashboard({
     });
   }
 
+  function addDeviceTagFilter() {
+    const normalized = deviceTagQuery.trim().replace(/\s+/g, " ");
+    if (!normalized) {
+      return;
+    }
+
+    const selectedTag = deviceTagOptions.find(
+      (tagName) => tagName.toLowerCase() === normalized.toLowerCase(),
+    );
+    if (!selectedTag) {
+      return;
+    }
+
+    setSelectedDeviceTags((current) => {
+      if (current.includes(selectedTag)) {
+        return current;
+      }
+      const next = [...current, selectedTag];
+      recordAudit("dashboard.filter", "device_tag", selectedTag, {
+        selectedDeviceTags: next,
+      });
+      return next;
+    });
+    setDeviceTagQuery("");
+  }
+
+  function removeDeviceTagFilter(tagName: string) {
+    setSelectedDeviceTags((current) => {
+      const next = current.filter((tag) => tag !== tagName);
+      recordAudit("dashboard.filter", "device_tag", tagName, {
+        selectedDeviceTags: next,
+      });
+      return next;
+    });
+  }
+
   function updateRegionFilter(value: string) {
     setRegionFilter(value);
     recordAudit("dashboard.filter", "region", value);
@@ -367,6 +421,8 @@ export function Dashboard({
     setStatusFilter("all");
     setUserFilter("all");
     setSelectedTags([]);
+    setSelectedDeviceTags([]);
+    setDeviceTagQuery("");
     setQuery("");
     recordAudit("dashboard.filter_reset", "dashboard");
   }
@@ -733,6 +789,59 @@ export function Dashboard({
             ))}
           </select>
         </label>
+
+        {deviceTagOptions.length ? (
+          <div className="device-tag-filter-control">
+            <div className="search-field device-tag-search-field">
+              <Tag size={17} />
+              <input
+                list="dashboard-device-tag-options"
+                value={deviceTagQuery}
+                onChange={(event) => setDeviceTagQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    addDeviceTagFilter();
+                  }
+                }}
+                placeholder="X-Station ტეგით ძიება"
+              />
+              <datalist id="dashboard-device-tag-options">
+                {availableDeviceTagOptions.map((tagName) => (
+                  <option key={tagName} value={tagName} />
+                ))}
+              </datalist>
+              <button
+                className="ghost-button compact-add-button"
+                type="button"
+                onClick={addDeviceTagFilter}
+                disabled={!deviceTagQuery.trim()}
+              >
+                <Plus size={15} />
+                <span>დამატება</span>
+              </button>
+            </div>
+            {selectedDeviceTags.length ? (
+              <div
+                className="selected-device-tag-filter"
+                aria-label="არჩეული X-Station ტეგები"
+              >
+                {selectedDeviceTags.map((tagName) => (
+                  <button
+                    key={tagName}
+                    className="tag-toggle active"
+                    type="button"
+                    onClick={() => removeDeviceTagFilter(tagName)}
+                  >
+                    <Tag size={14} />
+                    <span>{tagName}</span>
+                    <X size={13} />
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         <button className="ghost-button" type="button" onClick={resetFilters}>
           <RotateCcw size={16} />

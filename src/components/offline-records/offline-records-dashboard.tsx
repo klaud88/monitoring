@@ -10,10 +10,12 @@ import {
   Filter,
   RefreshCw,
   Search,
+  Trash2,
   WifiOff,
   X,
   XCircle,
 } from "lucide-react";
+import { useConfirmDialog } from "@/components/common/confirm-dialog";
 import { recordAudit } from "@/lib/client-audit";
 import type {
   Device,
@@ -50,9 +52,8 @@ export function OfflineRecordsDashboard({
   const [query, setQuery] = useState("");
   const [deviceSort, setDeviceSort] = useState<DeviceSortMode>("offline");
   const [historyDeviceId, setHistoryDeviceId] = useState<string | null>(null);
-  const [busyAction, setBusyAction] = useState<
-    "capture" | "monitor" | "stop" | null
-  >(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const { confirm, confirmationDialog } = useConfirmDialog();
 
   const deviceMap = useMemo(
     () => new Map(devices.map((device) => [device.id, device])),
@@ -269,6 +270,37 @@ export function OfflineRecordsDashboard({
     });
   }
 
+  async function removeFrequencyDevice(deviceId: string) {
+    const device = deviceMap.get(deviceId);
+    const confirmed = await confirm({
+      message: `ნამდვილად გსურთ "${device?.name ?? deviceId}" X-Station-ის სიხშირიდან წაშლა?`,
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    const actionKey = `frequency-remove-${deviceId}`;
+    setBusyAction(actionKey);
+    const response = await fetch("/api/offline-records/frequency", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deviceId, action: "remove" }),
+    }).catch(() => null);
+    setBusyAction(null);
+
+    if (!response?.ok) {
+      return;
+    }
+
+    const payload = (await response.json()) as {
+      snapshots?: OfflineSnapshot[];
+    };
+    if (payload.snapshots) {
+      setSnapshots(payload.snapshots);
+    }
+    recordAudit("offline_frequency.remove", "device", deviceId);
+  }
+
   return (
     <div className="offline-records-page">
       <section className="page-header">
@@ -449,9 +481,26 @@ export function OfflineRecordsDashboard({
                   key={device.deviceId}
                   className={`rank-row ${thresholdDeviceIds.has(device.deviceId) ? "critical" : ""}`}
                 >
-                  <div>
-                    <strong>{device.label}</strong>
-                    <span>{device.count} დღე offline</span>
+                  <div className="rank-row-head">
+                    <div>
+                      <strong>{device.label}</strong>
+                      <span>{device.count} დღე offline</span>
+                    </div>
+                    <div className="rank-row-actions">
+                      <button
+                        className="icon-button danger"
+                        type="button"
+                        onClick={() => removeFrequencyDevice(device.deviceId)}
+                        disabled={
+                          busyAction ===
+                          `frequency-remove-${device.deviceId}`
+                        }
+                        aria-label={`${device.label} სიხშირიდან წაშლა`}
+                        title="სიხშირიდან წაშლა"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
                   </div>
                   <div
                     className="rank-bar"
@@ -519,6 +568,7 @@ export function OfflineRecordsDashboard({
           onClose={() => setHistoryDeviceId(null)}
         />
       ) : null}
+      {confirmationDialog}
     </div>
   );
 }

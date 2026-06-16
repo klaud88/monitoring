@@ -1023,6 +1023,38 @@ textarea:focus {
   border-top: 1px solid var(--line);
 }
 
+.device-tag-filter-control {
+  display: grid;
+  flex: 1 1 360px;
+  gap: 8px;
+  min-width: 300px;
+}
+
+.device-tag-search-field {
+  min-width: 0;
+}
+
+.device-tag-search-field input {
+  min-width: 120px;
+}
+
+.compact-add-button {
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.selected-device-tag-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.region-device-tag-filter {
+  margin-top: 12px;
+  margin-bottom: 12px;
+}
+
 .search-field {
   min-width: 260px;
   flex: 1 1 260px;
@@ -3373,6 +3405,29 @@ progress::-webkit-progress-value {
   display: block;
 }
 
+.rank-row-head {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.rank-row-head > div:first-child {
+  min-width: 0;
+}
+
+.rank-row-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.rank-row-actions .icon-button {
+  width: 32px;
+  min-height: 32px;
+  box-shadow: none;
+}
+
 .rank-row span {
   color: var(--muted);
   margin-top: 3px;
@@ -4036,6 +4091,18 @@ button.monitor-count-pill {
   .search-field,
   .select-control {
     min-width: 0;
+  }
+
+  .device-tag-filter-control {
+    min-width: 0;
+  }
+
+  .rank-row-head {
+    align-items: stretch;
+  }
+
+  .rank-row-actions {
+    justify-content: flex-end;
   }
 
   .map-surface,

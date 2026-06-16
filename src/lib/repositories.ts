@@ -2290,6 +2290,29 @@ export async function getOfflineSnapshots(fromDate?: string, toDate?: string) {
   }));
 }
 
+export async function clearOfflineFrequencyForDevice(deviceId: string) {
+  if (isBuildTime()) {
+    return false;
+  }
+
+  const normalizedDeviceId = deviceId.trim();
+  if (!normalizedDeviceId) {
+    return false;
+  }
+
+  await ensureOperationalSchema();
+
+  const deleted = await withConnection(async (connection) => {
+    const [result] = await connection.query<ResultSetHeader>(
+      "delete from offline_snapshot_devices where device_id = ?",
+      [normalizedDeviceId],
+    );
+    return result.affectedRows > 0;
+  });
+
+  return deleted ?? false;
+}
+
 export async function getMonitoredDevices({
   includeInactive = false,
 }: {

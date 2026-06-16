@@ -64,6 +64,7 @@ export function RegionManager({
   const [query, setQuery] = useState("");
   const [deviceSort, setDeviceSort] = useState<DeviceSortMode>("az");
   const [regionFilter, setRegionFilter] = useState("all");
+  const [selectedFilterTags, setSelectedFilterTags] = useState<string[]>([]);
   const [availableTags, setAvailableTags] = useState<string[]>(() =>
     mergeTags(
       initialTags,
@@ -101,14 +102,24 @@ export function RegionManager({
     const normalized = query.trim().toLowerCase();
     return devices
       .filter(
-        (device) =>
-          (regionFilter === "all" || device.region === regionFilter) &&
-          (!normalized ||
+        (device) => {
+          const matchesRegion =
+            regionFilter === "all" || device.region === regionFilter;
+          const matchesQuery =
+            !normalized ||
             device.name.toLowerCase().includes(normalized) ||
-            device.region.toLowerCase().includes(normalized)),
+            device.region.toLowerCase().includes(normalized);
+          const matchesTags =
+            selectedFilterTags.length === 0 ||
+            selectedFilterTags.every((tagName) =>
+              device.tags.includes(tagName),
+            );
+
+          return matchesRegion && matchesQuery && matchesTags;
+        },
       )
       .sort((a, b) => compareDevices(a, b, deviceSort));
-  }, [devices, deviceSort, query, regionFilter]);
+  }, [devices, deviceSort, query, regionFilter, selectedFilterTags]);
 
   function toggleDraftTag(tagName: string) {
     setDraft((current) => ({
@@ -126,6 +137,10 @@ export function RegionManager({
           }
         : current,
     );
+  }
+
+  function toggleFilterTag(tagName: string) {
+    setSelectedFilterTags((current) => toggleListValue(current, tagName));
   }
 
   async function createTag(event: React.FormEvent<HTMLFormElement>) {
@@ -204,6 +219,9 @@ export function RegionManager({
     const data = (await response.json()) as { tags?: string[] };
     setAvailableTags((current) =>
       data.tags ?? current.filter((tag) => tag !== tagName),
+    );
+    setSelectedFilterTags((current) =>
+      current.filter((tag) => tag !== tagName),
     );
     setDevices((current) =>
       current.map((device) => ({
@@ -726,6 +744,35 @@ export function RegionManager({
               </select>
             </label>
           </div>
+
+          {availableTags.length ? (
+            <section
+              className="tag-filter region-device-tag-filter"
+              aria-label="X-Station ტეგების ფილტრი"
+            >
+              {availableTags.map((tagName) => (
+                <button
+                  key={tagName}
+                  className={`tag-toggle ${selectedFilterTags.includes(tagName) ? "active" : ""}`}
+                  type="button"
+                  onClick={() => toggleFilterTag(tagName)}
+                >
+                  <Tags size={14} />
+                  <span>{tagName}</span>
+                </button>
+              ))}
+              {selectedFilterTags.length ? (
+                <button
+                  className="ghost-button"
+                  type="button"
+                  onClick={() => setSelectedFilterTags([])}
+                >
+                  <X size={16} />
+                  <span>გასუფთავება</span>
+                </button>
+              ) : null}
+            </section>
+          ) : null}
 
           {permissions.createTags ? (
             <form className="tag-create-form" onSubmit={createTag}>
