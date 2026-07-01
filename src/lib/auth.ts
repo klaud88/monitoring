@@ -6,10 +6,12 @@ import type { AppUser, PermissionKey, SessionUser } from "./types";
 
 export { SESSION_COOKIE };
 
-const fallbackSecret = "development-only-secret-change-before-production";
-
 function getSecret() {
-  return new TextEncoder().encode(process.env.AUTH_SECRET || fallbackSecret);
+  const secret = process.env.AUTH_SECRET;
+  if (!secret) {
+    throw new Error("AUTH_SECRET environment variable is not set.");
+  }
+  return new TextEncoder().encode(secret);
 }
 
 export function sanitizeUser(user: AppUser): SessionUser {
@@ -21,7 +23,8 @@ export function sanitizeUser(user: AppUser): SessionUser {
     initials: user.initials,
     color: user.color,
     permissions: user.permissions,
-    deviceGroupCode: user.deviceGroupCode
+    deviceGroupCode: user.deviceGroupCode,
+    mustChangePassword: user.mustChangePassword,
   };
 }
 
@@ -33,7 +36,8 @@ export async function createSessionToken(user: AppUser | SessionUser) {
     initials: user.initials,
     color: user.color,
     permissions: user.permissions,
-    deviceGroupCode: user.deviceGroupCode
+    deviceGroupCode: user.deviceGroupCode,
+    mustChangePassword: user.mustChangePassword ?? false,
   })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(user.id)
@@ -53,22 +57,12 @@ export async function verifySessionToken(token?: string): Promise<SessionUser | 
       return null;
     }
 
-    const sessionUser = {
-      id: payload.sub,
-      name: String(payload.name),
-      email: String(payload.email),
-      role: String(payload.role),
-      initials: String(payload.initials || "?"),
-      color: String(payload.color || "#2563eb"),
-      permissions: Array.isArray(payload.permissions)
-        ? (payload.permissions as PermissionKey[])
-        : [],
-      deviceGroupCode: payload.deviceGroupCode
-        ? String(payload.deviceGroupCode)
-        : undefined
-    };
+    const dbUser = await getUserById(payload.sub).catch(() => null);
+    if (!dbUser) {
+      return null;
+    }
 
-    return (await getUserById(sessionUser.id).catch(() => null)) ?? sessionUser;
+    return dbUser;
   } catch {
     return null;
   }
@@ -77,10 +71,6 @@ export async function verifySessionToken(token?: string): Promise<SessionUser | 
 export async function verifyPassword(password: string, storedHash?: string) {
   if (!storedHash) {
     return false;
-  }
-
-  if (storedHash.startsWith("dev:")) {
-    return process.env.NODE_ENV !== "production" && password === storedHash.slice(4);
   }
 
   return bcrypt.compare(password, storedHash);

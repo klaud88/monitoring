@@ -22,6 +22,19 @@ export type PermissionAction =
   | "edit"
   | "delete"
   | "assign"
+  | "approve"
+  | "comment_edit"
+  | "completion_request"
+  | "completion_response"
+  | "due_date_edit"
+  | "garden_edit"
+  | "model_add"
+  | "model_edit"
+  | "phone_edit"
+  | "quantity_edit"
+  | "service_add"
+  | "service_delete"
+  | "service_edit"
   | "tag"
   | "tag_create"
   | "tag_delete"
@@ -38,6 +51,7 @@ export type AppUser = {
   permissions: PermissionKey[];
   deviceGroupCode?: string;
   passwordHash?: string;
+  mustChangePassword?: boolean;
 };
 
 export type ProblemRecord = {
@@ -118,6 +132,23 @@ export type FormOneRecordItem = {
   quantity: number;
 };
 
+export type FormOneStatus = "in_progress" | "completion_requested" | "completed";
+
+export type FormOneDueDateEntry = {
+  id: string;
+  date: string;
+  changedAt: string;
+  changedBy?: string;
+};
+
+export type FormOneRejectionComment = {
+  id: string;
+  comment: string;
+  sentAt?: string;
+  rejectedAt: string;
+  rejectedBy?: string;
+};
+
 export type FormOneRecord = {
   id: string;
   deviceId: string;
@@ -125,10 +156,31 @@ export type FormOneRecord = {
   gardenLabel: string;
   phone?: string;
   submittedDate: string;
+  dueDate?: string;
+  dueDates: FormOneDueDateEntry[];
+  dueDateChangeCount: number;
+  status: FormOneStatus;
+  completionRequestedAt?: string;
+  completionRequestedBy?: string;
+  completedAt?: string;
+  completedBy?: string;
+  rejectionComments: FormOneRejectionComment[];
   items: FormOneRecordItem[];
   createdBy?: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type FormOneNotificationType = "completion_request" | "rejection";
+
+export type FormOneNotification = {
+  id: string;
+  recordId: string;
+  type: FormOneNotificationType;
+  comment?: string;
+  readAt?: string;
+  createdAt: string;
+  record: FormOneRecord;
 };
 
 export type AuditLog = {

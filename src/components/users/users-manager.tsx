@@ -14,9 +14,17 @@ import {
   X,
 } from "lucide-react";
 import { useConfirmDialog } from "@/components/common/confirm-dialog";
-import type { SessionUser } from "@/lib/types";
+import type { AppRole, SessionUser } from "@/lib/types";
 
-const roleLabels: Record<string, string> = {
+const fallbackRoleOptions: AppRole[] = [
+  { id: "role-admin", name: "admin", label: "ადმინისტრატორი", permissions: [] },
+  { id: "role-dispatcher", name: "dispatcher", label: "დისპეტჩერი", permissions: [] },
+  { id: "role-technician", name: "technician", label: "ტექნიკოსი", permissions: [] },
+  { id: "role-viewer", name: "viewer", label: "მხოლოდ ნახვა", permissions: [] },
+  { id: "role-garden", name: "garden", label: "ბაღი", permissions: [] },
+];
+
+const legacyRoleLabels: Record<string, string> = {
   admin: "ადმინისტრატორი",
   dispatcher: "დისპეტჩერი",
   technician: "ტექნიკოსი",
@@ -39,27 +47,47 @@ type UserDraft = {
   password: string;
 };
 
-const emptyDraft: UserDraft = {
-  name: "",
-  email: "",
-  role: "technician",
-  initials: "",
-  color: "#2563eb",
-  password: "",
-};
+function buildEmptyDraft(role: string): UserDraft {
+  return {
+    name: "",
+    email: "",
+    role,
+    initials: "",
+    color: "#2563eb",
+    password: "",
+  };
+}
 
 export function UsersManager({
   initialUsers,
+  roles,
   permissions,
 }: {
   initialUsers: SessionUser[];
+  roles: AppRole[];
   permissions: UserPermissions;
 }) {
+  const roleOptions = roles.length ? roles : fallbackRoleOptions;
+  const defaultRole =
+    roleOptions.find((role) => role.name === "technician")?.name ??
+    roleOptions[0]?.name ??
+    "technician";
+  const emptyDraft = useMemo(() => buildEmptyDraft(defaultRole), [defaultRole]);
+  const roleLabels = useMemo(() => {
+    const labels = new Map<string, string>();
+    roleOptions.forEach((role) => labels.set(role.name, role.label));
+    Object.entries(legacyRoleLabels).forEach(([name, label]) => {
+      if (!labels.has(name)) {
+        labels.set(name, label);
+      }
+    });
+    return labels;
+  }, [roleOptions]);
   const [users, setUsers] = useState(initialUsers);
   const [query, setQuery] = useState("");
-  const [draft, setDraft] = useState<UserDraft>(emptyDraft);
+  const [draft, setDraft] = useState<UserDraft>(() => buildEmptyDraft(defaultRole));
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState<UserDraft>(emptyDraft);
+  const [editDraft, setEditDraft] = useState<UserDraft>(() => buildEmptyDraft(defaultRole));
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const { confirm, confirmationDialog } = useConfirmDialog();
@@ -237,6 +265,7 @@ export function UsersManager({
                   onChange={(role) =>
                     setDraft((current) => ({ ...current, role }))
                   }
+                  roles={roleOptions}
                 />
               </label>
               <label>
@@ -330,6 +359,7 @@ export function UsersManager({
                       onChange={(role) =>
                         setEditDraft((current) => ({ ...current, role }))
                       }
+                      roles={roleOptions}
                     />
                     <input
                       value={editDraft.initials}
@@ -397,7 +427,7 @@ export function UsersManager({
                   </div>
                   <span className="role-pill">
                     <UserRound size={14} />
-                    {roleLabels[user.role] ?? user.role}
+                    {roleLabels.get(user.role) ?? user.role}
                   </span>
                   <span className="count-pill">{user.permissions.length} უფლება</span>
                   <div className="row-actions">
@@ -437,15 +467,22 @@ export function UsersManager({
 function RoleSelect({
   value,
   onChange,
+  roles,
 }: {
   value: string;
   onChange: (role: string) => void;
+  roles: AppRole[];
 }) {
+  const hasCurrentValue = roles.some((role) => role.name === value);
+
   return (
     <select value={value} onChange={(event) => onChange(event.target.value)}>
-      {Object.entries(roleLabels).map(([role, label]) => (
-        <option key={role} value={role}>
-          {label}
+      {!hasCurrentValue && value ? (
+        <option value={value}>{value}</option>
+      ) : null}
+      {roles.map((role) => (
+        <option key={role.id} value={role.name}>
+          {role.label}
         </option>
       ))}
     </select>

@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const user = await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
-  if (!hasPermission(user, "form_one.view")) {
+  if (!hasPermission(user, "form_one.create")) {
     return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   }
 
@@ -31,8 +31,13 @@ export async function POST(request: NextRequest) {
   const deviceId = String(body?.deviceId || "").trim();
   const gardenLabel = String(body?.gardenLabel || "").trim();
   const phone = String(body?.phone || "").trim();
-  const submittedDate = String(body?.submittedDate || "").trim();
+  const submittedDate = getTbilisiDateKey();
+  const dueDate = String(body?.dueDate || "").trim();
   const items = normalizeApiItems(body?.items);
+
+  if (dueDate && (dueDate.length > 10 || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate))) {
+    return NextResponse.json({ message: "Invalid due date format" }, { status: 400 });
+  }
 
   if (!deviceId || !submittedDate || !items.length) {
     return NextResponse.json(
@@ -47,6 +52,7 @@ export async function POST(request: NextRequest) {
       gardenLabel,
       phone,
       submittedDate,
+      dueDate,
       items,
     },
     {
@@ -102,4 +108,18 @@ function normalizeApiItems(value: unknown): FormOneRecordItem[] {
       };
     })
     .filter((item) => item.modelLabel && item.serviceLabel);
+}
+
+function getTbilisiDateKey(value = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: "Asia/Tbilisi",
+    year: "numeric",
+  }).formatToParts(value);
+
+  const readPart = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "01";
+
+  return `${readPart("year")}-${readPart("month")}-${readPart("day")}`;
 }

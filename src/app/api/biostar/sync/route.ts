@@ -6,10 +6,7 @@ export async function POST(request: NextRequest) {
   const user = await verifySessionToken(
     request.cookies.get(SESSION_COOKIE)?.value,
   );
-  if (
-    !hasPermission(user, "dashboard.view") &&
-    !hasPermission(user, "offline_records.edit")
-  ) {
+  if (!hasPermission(user, "offline_records.edit")) {
     return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   }
 

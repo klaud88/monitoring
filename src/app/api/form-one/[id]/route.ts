@@ -7,14 +7,14 @@ import {
   normalizeDeviceGroupCode,
   updateFormOneRecord,
 } from "@/lib/repositories";
-import type { FormOneRecordItem } from "@/lib/types";
+import type { FormOneRecord, FormOneRecordItem } from "@/lib/types";
 
 export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ id: string }> },
 ) {
   const user = await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
-  if (!hasPermission(user, "form_one.edit")) {
+  if (!hasPermission(user, "form_one.view") || !hasPermission(user, "form_one.edit")) {
     return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   }
 
@@ -31,6 +31,7 @@ export async function PATCH(
   const submittedDate = String(
     body?.submittedDate ?? existing.submittedDate,
   ).trim();
+  const dueDate = String(body?.dueDate ?? existing.dueDate ?? "").trim();
   const items = normalizeApiItems(body?.items ?? existing.items);
 
   if (!deviceId || !submittedDate || !items.length) {
@@ -40,6 +41,18 @@ export async function PATCH(
     );
   }
 
+  const permissionError = getFormOnePatchPermissionError(user, existing, {
+    deviceId,
+    gardenLabel,
+    phone,
+    submittedDate,
+    dueDate,
+    items,
+  });
+  if (permissionError) {
+    return NextResponse.json({ message: permissionError }, { status: 403 });
+  }
+
   const record = await updateFormOneRecord(
     id,
     {
@@ -47,9 +60,13 @@ export async function PATCH(
       gardenLabel,
       phone,
       submittedDate,
+      dueDate,
       items,
     },
-    { allowedDeviceGroupCode: getScopedDeviceGroupCode(user) },
+    {
+      allowedDeviceGroupCode: getScopedDeviceGroupCode(user),
+      updatedBy: user?.id,
+    },
   );
 
   if (!record) {
@@ -144,4 +161,154 @@ function normalizeApiItems(value: unknown): FormOneRecordItem[] {
       };
     })
     .filter((item) => item.modelLabel && item.serviceLabel);
+}
+
+function getFormOnePatchPermissionError(
+  user: Awaited<ReturnType<typeof verifySessionToken>>,
+  existing: FormOneRecord,
+  next: {
+    deviceId: string;
+    gardenLabel: string;
+    phone: string;
+    submittedDate: string;
+    dueDate: string;
+    items: FormOneRecordItem[];
+  },
+) {
+  if (!hasPermission(user, "form_one.edit")) {
+    return "Missing form one edit permission";
+  }
+
+  const gardenChanged =
+    next.deviceId !== existing.deviceId ||
+    next.gardenLabel !== existing.gardenLabel;
+  if (gardenChanged && !hasPermission(user, "form_one.garden_edit")) {
+    return "Missing form one garden edit permission";
+  }
+
+  const phoneChanged = next.phone !== (existing.phone ?? "");
+  if (phoneChanged && !hasPermission(user, "form_one.phone_edit")) {
+    return "Missing form one phone edit permission";
+  }
+
+  const submittedDateChanged = next.submittedDate !== existing.submittedDate;
+  if (submittedDateChanged) {
+    return "Missing form one submitted date edit permission";
+  }
+
+  const dueDateChanged = next.dueDate !== (existing.dueDate ?? "");
+  if (
+    dueDateChanged &&
+    !hasPermission(user, "form_one.due_date_edit")
+  ) {
+    return "Missing form one due date edit permission";
+  }
+
+  const itemChanges = getFormOneItemChanges(existing.items, next.items);
+  if (
+    itemChanges.modelAdd &&
+    !hasPermission(user, "form_one.model_add")
+  ) {
+    return "Missing form one model add permission";
+  }
+  if (
+    itemChanges.modelEdit &&
+    !hasPermission(user, "form_one.model_edit")
+  ) {
+    return "Missing form one model edit permission";
+  }
+  if (
+    itemChanges.serviceAdd &&
+    !hasPermission(user, "form_one.service_add")
+  ) {
+    return "Missing form one service add permission";
+  }
+  if (
+    itemChanges.serviceEdit &&
+    !hasPermission(user, "form_one.service_edit")
+  ) {
+    return "Missing form one service edit permission";
+  }
+  if (
+    itemChanges.serviceDelete &&
+    !hasPermission(user, "form_one.service_delete")
+  ) {
+    return "Missing form one service delete permission";
+  }
+  if (
+    itemChanges.quantity &&
+    !hasPermission(user, "form_one.quantity_edit")
+  ) {
+    return "Missing form one quantity edit permission";
+  }
+
+  return "";
+}
+
+function getFormOneItemChanges(
+  currentItems: FormOneRecordItem[],
+  nextItems: FormOneRecordItem[],
+) {
+  const changes = {
+    modelAdd: false,
+    modelEdit: false,
+    serviceAdd: false,
+    serviceEdit: false,
+    serviceDelete: false,
+    quantity: false,
+  };
+  const currentModelCounts = countItemsByModel(currentItems);
+  const nextModelCounts = countItemsByModel(nextItems);
+
+  for (const [modelKey, nextCount] of nextModelCounts) {
+    const currentCount = currentModelCounts.get(modelKey) ?? 0;
+    if (!currentCount) {
+      changes.modelAdd = true;
+    } else if (nextCount > currentCount) {
+      changes.serviceAdd = true;
+    }
+  }
+
+  for (const [modelKey, currentCount] of currentModelCounts) {
+    if ((nextModelCounts.get(modelKey) ?? 0) < currentCount) {
+      changes.serviceDelete = true;
+    }
+  }
+
+  if (currentItems.length === nextItems.length) {
+    for (let index = 0; index < currentItems.length; index += 1) {
+      const current = currentItems[index];
+      const next = nextItems[index];
+      if (!current || !next) {
+        continue;
+      }
+      if (
+        current.modelId !== next.modelId ||
+        current.modelLabel !== next.modelLabel
+      ) {
+        changes.modelEdit = true;
+      }
+      if (
+        current.serviceId !== next.serviceId ||
+        current.serviceLabel !== next.serviceLabel ||
+        (current.customServiceLabel ?? "") !== (next.customServiceLabel ?? "")
+      ) {
+        changes.serviceEdit = true;
+      }
+      if (current.quantity !== next.quantity) {
+        changes.quantity = true;
+      }
+    }
+  }
+
+  return changes;
+}
+
+function countItemsByModel(items: FormOneRecordItem[]) {
+  const counts = new Map<string, number>();
+  items.forEach((item) => {
+    const key = `${item.modelId}::${item.modelLabel}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  });
+  return counts;
 }

@@ -1,17 +1,22 @@
 "use client";
 
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import {
   CalendarDays,
+  CheckCircle2,
   ClipboardList,
+  Clock3,
   Edit3,
   Hash,
   MapPin,
+  MessageSquare,
   Phone,
   Plus,
   Save,
+  Send,
   Trash2,
   X,
+  XCircle,
 } from "lucide-react";
 import { useConfirmDialog } from "@/components/common/confirm-dialog";
 import type { Device, FormOneRecord, FormOneRecordItem } from "@/lib/types";
@@ -51,7 +56,20 @@ type Props = {
   devices: Device[];
   initialRecords: FormOneRecord[];
   permissions: {
+    commentEdit: boolean;
+    completionRequest: boolean;
+    completionResponse: boolean;
+    create: boolean;
+    dueDateEdit: boolean;
     edit: boolean;
+    gardenEdit: boolean;
+    modelAdd: boolean;
+    modelEdit: boolean;
+    phoneEdit: boolean;
+    quantityEdit: boolean;
+    serviceAdd: boolean;
+    serviceDelete: boolean;
+    serviceEdit: boolean;
     delete: boolean;
   };
   todayLabel: string;
@@ -287,10 +305,12 @@ export function FormOneManager({
   );
   const [phone, setPhone] = useState("");
   const [submittedDate, setSubmittedDate] = useState(todayValue);
+  const [dueDate, setDueDate] = useState("");
   const [modelLines, setModelLines] = useState<ModelLine[]>(() =>
     createInitialModelLines(),
   );
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
+  const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const { confirm, confirmationDialog } = useConfirmDialog();
@@ -312,9 +332,72 @@ export function FormOneManager({
     0,
   );
   const formDateLabel = formatDisplayDate(submittedDate) || todayLabel;
+  const selectedRecord = selectedRecordId
+    ? records.find((record) => record.id === selectedRecordId) ?? null
+    : null;
+  const isEditing = Boolean(editingRecordId);
+  const hasEditableExistingField = hasEditableFormOneFields(permissions);
+  const canEditExistingForm = permissions.edit && hasEditableExistingField;
+  const showForm = permissions.create || isEditing;
+  const canSubmitCurrentForm = isEditing
+    ? canEditExistingForm
+    : permissions.create;
+  const canEditCurrentGarden = isEditing
+    ? permissions.edit && permissions.gardenEdit
+    : permissions.create;
+  const canEditCurrentPhone = isEditing
+    ? permissions.edit && permissions.phoneEdit
+    : permissions.create;
+  const canEditCurrentModel = isEditing
+    ? permissions.edit && permissions.modelEdit
+    : permissions.create;
+  const canAddCurrentModel = isEditing
+    ? permissions.edit && permissions.modelAdd
+    : permissions.create;
+  const canAddCurrentService = isEditing
+    ? permissions.edit && permissions.serviceAdd
+    : permissions.create;
+  const canEditCurrentService =
+    isEditing
+      ? permissions.edit && permissions.serviceEdit
+      : permissions.create;
+  const canDeleteCurrentService = isEditing
+    ? permissions.edit && permissions.serviceDelete
+    : permissions.create;
+  const canEditCurrentQuantity =
+    isEditing
+      ? permissions.edit && permissions.quantityEdit
+      : permissions.create;
+  const canEditCurrentDueDate =
+    isEditing
+      ? permissions.edit && permissions.dueDateEdit
+      : permissions.create;
+  const canChangeEditingDueDate =
+    canEditCurrentDueDate;
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const recordId = params.get("record");
+    if (recordId && records.some((record) => record.id === recordId)) {
+      setSelectedRecordId(recordId);
+    }
+  }, [records]);
 
   async function saveFormOneRecord(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!isEditing && !permissions.create) {
+      setError("ახალი ფორმის დამატების უფლება არ გაქვთ.");
+      return;
+    }
+    if (isEditing && !permissions.edit) {
+      setError("ფორმა ერთის რედაქტირების უფლება არ გაქვთ.");
+      return;
+    }
+    if (isEditing && !hasEditableExistingField) {
+      setError("რედაქტირებისთვის მინიმუმ ერთი ველის უფლება უნდა იყოს ჩართული.");
+      return;
+    }
+
     const items = buildRecordItems(modelLines);
     if (!gardenDeviceId || !items.length) {
       setError("აირჩიეთ ბაღი და შეავსეთ მინიმუმ ერთი მომსახურება.");
@@ -333,6 +416,7 @@ export function FormOneManager({
           gardenLabel: selectedGarden?.label ?? "",
           phone,
           submittedDate,
+          dueDate,
           items,
         }),
       },
@@ -364,12 +448,13 @@ export function FormOneManager({
     setGardenDeviceId(gardenOptions[0]?.deviceId ?? "");
     setPhone("");
     setSubmittedDate(todayValue);
+    setDueDate("");
     setModelLines(createInitialModelLines());
     setError("");
   }
 
   function startEdit(record: FormOneRecord) {
-    if (!permissions.edit) {
+    if (!canEditExistingForm) {
       return;
     }
 
@@ -377,7 +462,9 @@ export function FormOneManager({
     setGardenDeviceId(resolveRecordDeviceId(record, gardenOptions));
     setPhone(record.phone ?? "");
     setSubmittedDate(record.submittedDate);
+    setDueDate(record.dueDate ?? "");
     setModelLines(createModelLinesFromRecord(record));
+    setSelectedRecordId(null);
     setError("");
   }
 
@@ -409,7 +496,118 @@ export function FormOneManager({
     }
   }
 
+  async function requestCompletion(recordId: string) {
+    if (!permissions.completionRequest) {
+      return;
+    }
+
+    const confirmed = await confirm({
+      title: "ფორმა ერთის გაგზავნა",
+      message: "ნამდვილად გინდათ ფორმა ერთის გადაგზავნა დადასტურებაზე?",
+      confirmLabel: "კი",
+      cancelLabel: "არა",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    const response = await fetch(`/api/form-one/${recordId}/completion-request`, {
+      method: "POST",
+    }).catch(() => null);
+    setSaving(false);
+
+    if (!response?.ok) {
+      setError("დასრულებისთვის გადაგზავნა ვერ მოხერხდა.");
+      return;
+    }
+
+    const data = (await response.json()) as { record: FormOneRecord };
+    setRecords((current) =>
+      current.map((record) =>
+        record.id === data.record.id ? data.record : record,
+      ),
+    );
+    setSelectedRecordId(data.record.id);
+  }
+
+  async function respondToCompletion(
+    recordId: string,
+    action: "approve" | "reject",
+    comment: string,
+  ) {
+    if (!permissions.completionResponse) {
+      return false;
+    }
+
+    setSaving(true);
+    setError("");
+    const response = await fetch(
+      `/api/form-one/${recordId}/completion-response`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, comment }),
+      },
+    ).catch(() => null);
+    setSaving(false);
+
+    if (!response?.ok) {
+      setError("მოქმედების შესრულება ვერ მოხერხდა.");
+      return false;
+    }
+
+    const data = (await response.json()) as { record: FormOneRecord };
+    setRecords((current) =>
+      current.map((record) =>
+        record.id === data.record.id ? data.record : record,
+      ),
+    );
+    setSelectedRecordId(null);
+    return true;
+  }
+
+  async function updateRejectionComment(
+    recordId: string,
+    commentId: string,
+    comment: string,
+  ) {
+    if (!permissions.commentEdit) {
+      return false;
+    }
+
+    setSaving(true);
+    setError("");
+    const response = await fetch(
+      `/api/form-one/${recordId}/comments/${commentId}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment }),
+      },
+    ).catch(() => null);
+    setSaving(false);
+
+    if (!response?.ok) {
+      setError("კომენტარის განახლება ვერ მოხერხდა.");
+      return false;
+    }
+
+    const data = (await response.json()) as { record: FormOneRecord };
+    setRecords((current) =>
+      current.map((record) =>
+        record.id === data.record.id ? data.record : record,
+      ),
+    );
+    return true;
+  }
+
   function addModelLine() {
+    if (!canAddCurrentModel) {
+      return;
+    }
+
     setModelLines((current) => [
       ...current,
       {
@@ -428,6 +626,10 @@ export function FormOneManager({
   }
 
   async function removeModelLine(lineId: string) {
+    if (!canDeleteCurrentService) {
+      return;
+    }
+
     const confirmed = await confirm();
     if (!confirmed) {
       return;
@@ -441,6 +643,10 @@ export function FormOneManager({
   }
 
   function updateModel(lineId: string, modelId: string) {
+    if (!canEditCurrentModel) {
+      return;
+    }
+
     const firstServiceId = getDefaultServiceId(modelId);
     setModelLines((current) =>
       current.map((line) =>
@@ -463,6 +669,10 @@ export function FormOneManager({
   }
 
   function addServiceLine(lineId: string) {
+    if (!canAddCurrentService) {
+      return;
+    }
+
     setModelLines((current) =>
       current.map((line) => {
         if (line.id !== lineId) {
@@ -488,6 +698,10 @@ export function FormOneManager({
   }
 
   async function removeServiceLine(lineId: string, serviceLineId: string) {
+    if (!canDeleteCurrentService) {
+      return;
+    }
+
     const confirmed = await confirm();
     if (!confirmed) {
       return;
@@ -514,6 +728,10 @@ export function FormOneManager({
     serviceLineId: string,
     serviceId: string,
   ) {
+    if (!canEditCurrentService) {
+      return;
+    }
+
     setModelLines((current) =>
       current.map((line) =>
         line.id === lineId
@@ -542,6 +760,10 @@ export function FormOneManager({
     serviceLineId: string,
     customServiceLabel: string,
   ) {
+    if (!canEditCurrentService) {
+      return;
+    }
+
     setModelLines((current) =>
       current.map((line) =>
         line.id === lineId
@@ -569,6 +791,10 @@ export function FormOneManager({
     serviceLineId: string,
     quantity: number,
   ) {
+    if (!canEditCurrentQuantity) {
+      return;
+    }
+
     setModelLines((current) =>
       current.map((line) =>
         line.id === lineId
@@ -614,53 +840,79 @@ export function FormOneManager({
 
       {error ? <p className="form-error page-error">{error}</p> : null}
 
-      <form className="surface form-one-surface" onSubmit={saveFormOneRecord}>
-        <div className="form-one-fields">
-          <label>
-            <span>ბაღი</span>
-            <div className="field-with-icon">
-              <MapPin size={17} />
-              <select
-                value={gardenDeviceId}
-                onChange={(event) => setGardenDeviceId(event.target.value)}
-                disabled={!canSelectGarden || !gardenOptions.length}
-              >
-                {gardenOptions.length ? (
-                  gardenOptions.map((garden) => (
-                    <option key={garden.code} value={garden.deviceId}>
-                      {garden.label}
-                    </option>
-                  ))
-                ) : (
-                  <option value="">ბაღი ვერ მოიძებნა</option>
-                )}
-              </select>
-            </div>
-          </label>
-          <label>
-            <span>ტელეფონის ნომერი</span>
-            <div className="field-with-icon">
-              <Phone size={17} />
-              <input
-                value={phone}
-                onChange={(event) => setPhone(event.target.value)}
-                inputMode="tel"
-              />
-            </div>
-          </label>
-          <label>
-            <span>თარიღი</span>
-            <div className="field-with-icon">
-              <CalendarDays size={17} />
-              <input value={formDateLabel} readOnly />
-            </div>
-          </label>
-        </div>
+      {showForm ? (
+        <form
+          className="surface form-one-surface form-one-attention"
+          onSubmit={saveFormOneRecord}
+        >
+          <div className="form-one-fields">
+            <label>
+              <span>ბაღი</span>
+              <div className="field-with-icon">
+                <MapPin size={17} />
+                <select
+                  value={gardenDeviceId}
+                  onChange={(event) => setGardenDeviceId(event.target.value)}
+                  disabled={
+                    !canSelectGarden ||
+                    !gardenOptions.length ||
+                    !canEditCurrentGarden
+                  }
+                >
+                  {gardenOptions.length ? (
+                    gardenOptions.map((garden) => (
+                      <option key={garden.code} value={garden.deviceId}>
+                        {garden.label}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="">ბაღი ვერ მოიძებნა</option>
+                  )}
+                </select>
+              </div>
+            </label>
+            <label>
+              <span>ტელეფონის ნომერი</span>
+              <div className="field-with-icon">
+                <Phone size={17} />
+                <input
+                  value={phone}
+                  onChange={(event) => setPhone(event.target.value)}
+                  inputMode="tel"
+                  disabled={!canEditCurrentPhone}
+                />
+              </div>
+            </label>
+            <label>
+              <span>თარიღი</span>
+              <div className="field-with-icon">
+                <CalendarDays size={17} />
+                <input value={formDateLabel} readOnly />
+              </div>
+            </label>
+            <label>
+              <span>შესრულების თარიღი</span>
+              <div className="field-with-icon">
+                <Clock3 size={17} />
+                <input
+                  type="date"
+                  value={dueDate}
+                  onChange={(event) => setDueDate(event.target.value)}
+                  disabled={!canChangeEditingDueDate}
+                />
+              </div>
+            </label>
+          </div>
 
         <div className="form-one-meta">
-          <span>{selectedGarden?.label ?? "ბაღი ვერ მოიძებნა"}</span>
+          <span>
+            {selectedGarden
+              ? formatGardenLabel(selectedGarden.label)
+              : "ბაღი ვერ მოიძებნა"}
+          </span>
           <span>{phone || "ტელეფონი არ არის მითითებული"}</span>
           <span>{formDateLabel}</span>
+          <span>{dueDate ? formatDisplayDate(dueDate) : "შესრულების თარიღი"}</span>
         </div>
 
         <div className="form-one-table-wrap">
@@ -679,6 +931,11 @@ export function FormOneManager({
                 line={line}
                 lineCount={modelLines.length}
                 startNumber={getLineStartNumber(modelLines, line.id)}
+                canAddService={canAddCurrentService}
+                canDeleteService={canDeleteCurrentService}
+                canEditModel={canEditCurrentModel}
+                canEditService={canEditCurrentService}
+                canEditQuantity={canEditCurrentQuantity}
                 onAddService={() => addServiceLine(line.id)}
                 onRemoveModel={() => removeModelLine(line.id)}
                 onUpdateModel={(modelId) => updateModel(line.id, modelId)}
@@ -707,13 +964,18 @@ export function FormOneManager({
           className="ghost-button form-one-add-model"
           type="button"
           onClick={addModelLine}
+          disabled={!canAddCurrentModel}
         >
           <Plus size={18} />
           <span>მომსახურების დამატება</span>
         </button>
 
         <div className="form-one-actions">
-          <button className="primary-button" type="submit" disabled={saving}>
+          <button
+            className="primary-button"
+            type="submit"
+            disabled={saving || !canSubmitCurrentForm}
+          >
             <Save size={18} />
             <span>
               {saving
@@ -729,8 +991,9 @@ export function FormOneManager({
               <span>გაუქმება</span>
             </button>
           ) : null}
-        </div>
-      </form>
+          </div>
+        </form>
+      ) : null}
 
       <section className="surface form-one-history">
         <div className="section-title">
@@ -744,8 +1007,11 @@ export function FormOneManager({
                 key={record.id}
                 record={record}
                 permissions={permissions}
+                todayValue={todayValue}
+                onOpen={() => setSelectedRecordId(record.id)}
                 onEdit={() => startEdit(record)}
                 onDelete={() => removeRecord(record.id)}
+                onRequestCompletion={() => requestCompletion(record.id)}
               />
             ))}
           </div>
@@ -753,6 +1019,22 @@ export function FormOneManager({
           <div className="empty-state">ჩანაწერები არ არის.</div>
         )}
       </section>
+
+      {selectedRecord ? (
+        <FormOneRecordModal
+          record={selectedRecord}
+          permissions={permissions}
+          todayValue={todayValue}
+          onClose={() => setSelectedRecordId(null)}
+          onEdit={() => startEdit(selectedRecord)}
+          onDelete={() => removeRecord(selectedRecord.id)}
+          onRequestCompletion={() => requestCompletion(selectedRecord.id)}
+          onRespondCompletion={(action, comment) =>
+            respondToCompletion(selectedRecord.id, action, comment)
+          }
+          onUpdateComment={updateRejectionComment}
+        />
+      ) : null}
     </div>
   );
 }
@@ -761,6 +1043,11 @@ function ModelLineRows({
   line,
   lineCount,
   startNumber,
+  canAddService,
+  canDeleteService,
+  canEditModel,
+  canEditService,
+  canEditQuantity,
   onAddService,
   onRemoveModel,
   onUpdateModel,
@@ -772,6 +1059,11 @@ function ModelLineRows({
   line: ModelLine;
   lineCount: number;
   startNumber: number;
+  canAddService: boolean;
+  canDeleteService: boolean;
+  canEditModel: boolean;
+  canEditService: boolean;
+  canEditQuantity: boolean;
   onAddService: () => void;
   onRemoveModel: () => void;
   onUpdateModel: (modelId: string) => void;
@@ -807,6 +1099,7 @@ function ModelLineRows({
                 <select
                   value={line.modelId}
                   onChange={(event) => onUpdateModel(event.target.value)}
+                  disabled={!canEditModel}
                 >
                   {modelOptions.map((option) => (
                     <option key={option.id} value={option.id}>
@@ -821,7 +1114,7 @@ function ModelLineRows({
                     aria-label="მოდელის წაშლა"
                     title="მოდელის წაშლა"
                     onClick={onRemoveModel}
-                    disabled={lineCount === 1}
+                    disabled={lineCount === 1 || !canDeleteService}
                   >
                     <Trash2 size={16} />
                   </button>
@@ -836,6 +1129,7 @@ function ModelLineRows({
                     onChange={(event) =>
                       onUpdateService(service.id, event.target.value)
                     }
+                    disabled={!canEditService}
                   >
                     {availableServices.map((option) => (
                       <option key={option.id} value={option.id}>
@@ -850,6 +1144,7 @@ function ModelLineRows({
                     onUpdateCustomService(service.id, event.target.value)
                   }
                   placeholder="ან ჩაწერეთ მომსახურება"
+                  disabled={!canEditService}
                 />
               </div>
               <div className="form-one-service-actions">
@@ -858,6 +1153,7 @@ function ModelLineRows({
                     className="ghost-button form-one-add-service"
                     type="button"
                     onClick={onAddService}
+                    disabled={!canAddService}
                   >
                     <Plus size={16} />
                     <span>დამატება</span>
@@ -869,7 +1165,7 @@ function ModelLineRows({
                   aria-label="მომსახურების წაშლა"
                   title="მომსახურების წაშლა"
                   onClick={() => onRemoveService(service.id)}
-                  disabled={line.services.length === 1}
+                  disabled={line.services.length === 1 || !canDeleteService}
                 >
                   <Trash2 size={16} />
                 </button>
@@ -884,6 +1180,7 @@ function ModelLineRows({
                   onUpdateQuantity(service.id, Number(event.target.value))
                 }
                 aria-label={`${model?.label ?? "მოდელი"} რაოდენობა`}
+                disabled={!canEditQuantity}
               />
             </td>
           </tr>
@@ -896,33 +1193,95 @@ function ModelLineRows({
 function FormOneRecordCard({
   record,
   permissions,
+  todayValue,
+  onOpen,
   onEdit,
   onDelete,
+  onRequestCompletion,
 }: {
   record: FormOneRecord;
   permissions: Props["permissions"];
+  todayValue: string;
+  onOpen: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  onRequestCompletion: () => void;
 }) {
   const totalQuantity = record.items.reduce(
     (total, item) => total + item.quantity,
     0,
   );
+  const modelCount = new Set(record.items.map((item) => item.modelLabel)).size;
+  const status = getRecordDisplayStatus(record, todayValue);
+  const isPendingApproval = record.status === "completion_requested";
+  const showCompletionButton =
+    permissions.completionRequest && record.status !== "completed";
+  const canEditRecord = canEditFormOneRecord(permissions);
+  const dueDateClassName = `form-one-due-date-list${
+    record.dueDates.length > 1 ? " changed" : ""
+  }`;
 
   return (
-    <article className="form-one-record">
-      <div className="form-one-record-head">
-        <div>
-          <strong>{record.gardenLabel}</strong>
-          <div className="form-one-record-meta">
-            <span>{formatDisplayDate(record.submittedDate)}</span>
-            {record.phone ? <span>{record.phone}</span> : null}
-            <span>{record.items.length} მომსახურება</span>
-            <span>{totalQuantity} რაოდ.</span>
-          </div>
-        </div>
-        <div className="row-actions">
-          {permissions.edit ? (
+    <article
+      className={`form-one-record form-one-record-${status.key}`}
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+    >
+      <div className="form-one-record-summary">
+        <span className={`form-one-status-badge ${status.key}`}>
+          {formatGardenLabel(record.gardenLabel) || "ბაღი"}
+          <small>{status.label}</small>
+        </span>
+        <span>
+          <strong>{formatDisplayDate(record.submittedDate)}</strong>
+          <small>შექმნის თარიღი</small>
+        </span>
+        <span>
+          <strong>{record.items.length}</strong>
+          <small>მომსახურება</small>
+        </span>
+        <span>
+          <strong>{modelCount}</strong>
+          <small>მოდელი</small>
+        </span>
+        <span className="form-one-comment-count">
+          <strong>{record.rejectionComments.length}</strong>
+          <small>კომენტარი</small>
+        </span>
+        <span className={dueDateClassName}>
+          <strong>
+            {record.dueDates.length
+              ? record.dueDates
+                  .map((entry) => formatDisplayDate(entry.date))
+                  .join(", ")
+              : "არ არის"}
+          </strong>
+          <small>შესრულების თარიღები</small>
+        </span>
+        <div
+          className="row-actions"
+          onClick={(event) => event.stopPropagation()}
+        >
+          {showCompletionButton ? (
+            <button
+              className={`icon-button ${isPendingApproval ? "warning" : "success"}`}
+              type="button"
+              aria-label={isPendingApproval ? "დადასტურების მოლოდინი" : "დასრულებისთვის გაგზავნა"}
+              title={isPendingApproval ? "დადასტურების მოლოდინი" : "დასრულებისთვის გაგზავნა"}
+              onClick={isPendingApproval ? undefined : onRequestCompletion}
+              disabled={isPendingApproval}
+            >
+              <Send size={17} />
+            </button>
+          ) : null}
+          {canEditRecord ? (
             <button
               className="icon-button"
               type="button"
@@ -946,27 +1305,285 @@ function FormOneRecordCard({
           ) : null}
         </div>
       </div>
-
-      <div className="form-one-record-items">
-        <div className="form-one-record-item head">
-          <span>№</span>
-          <span>მოდელი</span>
-          <span>მომსახურება</span>
-          <span>რაოდ.</span>
-        </div>
-        {record.items.map((item, index) => (
-          <div
-            className="form-one-record-item"
-            key={`${record.id}-${index}-${item.serviceLabel}`}
-          >
-            <span>{index + 1}</span>
-            <strong>{item.modelLabel}</strong>
-            <span>{item.serviceLabel}</span>
-            <span>{item.quantity}</span>
-          </div>
-        ))}
+      <div className="form-one-record-foot">
+        <span>{totalQuantity} საერთო რაოდენობა</span>
+        {record.rejectionComments.length ? (
+          <span className="form-one-comments-preview">
+            {record.rejectionComments.at(-1)?.comment}
+          </span>
+        ) : null}
       </div>
     </article>
+  );
+}
+
+function FormOneRecordModal({
+  record,
+  permissions,
+  todayValue,
+  onClose,
+  onEdit,
+  onDelete,
+  onRequestCompletion,
+  onRespondCompletion,
+  onUpdateComment,
+}: {
+  record: FormOneRecord;
+  permissions: Props["permissions"];
+  todayValue: string;
+  onClose: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onRequestCompletion: () => void;
+  onRespondCompletion: (action: "approve" | "reject", comment: string) => Promise<boolean>;
+  onUpdateComment: (
+    recordId: string,
+    commentId: string,
+    comment: string,
+  ) => Promise<boolean>;
+}) {
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [commentDraft, setCommentDraft] = useState("");
+  const [responseComment, setResponseComment] = useState("");
+  const [responding, setResponding] = useState(false);
+  const [responseError, setResponseError] = useState("");
+  const status = getRecordDisplayStatus(record, todayValue);
+  const totalQuantity = record.items.reduce(
+    (total, item) => total + item.quantity,
+    0,
+  );
+  const modelCount = new Set(record.items.map((item) => item.modelLabel)).size;
+  const isPendingApprovalModal = record.status === "completion_requested";
+  const showCompletionButtonModal =
+    permissions.completionRequest && record.status !== "completed";
+  const canRespondToCompletion =
+    permissions.completionResponse && isPendingApprovalModal;
+  const canEditRecord = canEditFormOneRecord(permissions);
+  const dueDateClassName =
+    record.dueDates.length > 1 ? "form-one-due-date-value changed" : undefined;
+
+  return (
+    <div className="quick-task-modal-backdrop" role="presentation">
+      <section
+        className="quick-task-modal form-one-detail-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="form-one-detail-title"
+      >
+        <header>
+          <div>
+            <p className="eyebrow">ფორმა ერთი</p>
+            <h2 id="form-one-detail-title">
+              {formatGardenLabel(record.gardenLabel) || "ბაღი"}
+            </h2>
+          </div>
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="დახურვა"
+            onClick={onClose}
+          >
+            <X size={18} />
+          </button>
+        </header>
+
+        <div className="form-one-detail-summary">
+          <span className={`form-one-status-badge ${status.key}`}>
+            {status.label}
+          </span>
+          <span>შექმნა: {formatDisplayDate(record.submittedDate)}</span>
+          <span>მომსახურება: {record.items.length}</span>
+          <span>მოდელი: {modelCount}</span>
+          <span>რაოდენობა: {totalQuantity}</span>
+          <span className={dueDateClassName}>
+            შესრულება:{" "}
+            {record.dueDates.length
+              ? record.dueDates
+                  .map((entry) => formatDisplayDate(entry.date))
+                  .join(", ")
+              : "არ არის მითითებული"}
+          </span>
+        </div>
+
+        <div className="form-one-record-items modal-items">
+          <div className="form-one-record-item head">
+            <span>№</span>
+            <span>მოდელი</span>
+            <span>მომსახურება</span>
+            <span>რაოდ.</span>
+          </div>
+          {record.items.map((item, index) => (
+            <div
+              className="form-one-record-item"
+              key={`${record.id}-${index}-${item.serviceLabel}`}
+            >
+              <span>{index + 1}</span>
+              <strong>{item.modelLabel}</strong>
+              <span>{item.serviceLabel}</span>
+              <span>{item.quantity}</span>
+            </div>
+          ))}
+        </div>
+
+        {record.rejectionComments.length ? (
+          <div className="form-one-record-comments">
+            {record.rejectionComments.map((item) => {
+              const isEditingComment = editingCommentId === item.id;
+              return (
+                <div className="form-one-record-comment" key={item.id}>
+                  <MessageSquare size={14} />
+                  <div>
+                    <span>
+                      {item.sentAt
+                        ? `${formatDisplayDateTime(item.sentAt)} გაიგზავნა; `
+                        : ""}
+                      {formatDisplayDateTime(item.rejectedAt)} უარყოფა
+                    </span>
+                    {isEditingComment ? (
+                      <textarea
+                        value={commentDraft}
+                        onChange={(event) => setCommentDraft(event.target.value)}
+                      />
+                    ) : (
+                      <strong>{item.comment}</strong>
+                    )}
+                    {permissions.commentEdit ? (
+                      <div className="form-one-comment-actions">
+                        {isEditingComment ? (
+                          <>
+                            <button
+                              className="ghost-button"
+                              type="button"
+                              onClick={async () => {
+                                const updated = await onUpdateComment(
+                                  record.id,
+                                  item.id,
+                                  commentDraft,
+                                );
+                                if (updated) {
+                                  setEditingCommentId(null);
+                                  setCommentDraft("");
+                                }
+                              }}
+                            >
+                              <Save size={15} />
+                              <span>შენახვა</span>
+                            </button>
+                            <button
+                              className="ghost-button"
+                              type="button"
+                              onClick={() => {
+                                setEditingCommentId(null);
+                                setCommentDraft("");
+                              }}
+                            >
+                              <X size={15} />
+                              <span>გაუქმება</span>
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            className="ghost-button"
+                            type="button"
+                            onClick={() => {
+                              setEditingCommentId(item.id);
+                              setCommentDraft(item.comment);
+                            }}
+                          >
+                            <Edit3 size={15} />
+                            <span>კომენტარის რედაქტირება</span>
+                          </button>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+
+        {canRespondToCompletion ? (
+          <div className="form-one-response-section">
+            <label className="form-one-response-comment-field">
+              <span>კომენტარი (უარყოფის შემთხვევაში)</span>
+              <textarea
+                value={responseComment}
+                onChange={(event) => setResponseComment(event.target.value)}
+                placeholder="ჩაწერეთ უარყოფის მიზეზი"
+              />
+            </label>
+            {responseError ? (
+              <p className="form-error">{responseError}</p>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className="form-one-detail-actions">
+          {canRespondToCompletion ? (
+            <>
+              <button
+                className="primary-button danger"
+                type="button"
+                disabled={responding || !responseComment.trim()}
+                onClick={async () => {
+                  setResponding(true);
+                  setResponseError("");
+                  const ok = await onRespondCompletion("reject", responseComment);
+                  setResponding(false);
+                  if (!ok) {
+                    setResponseError("მოქმედების შესრულება ვერ მოხერხდა.");
+                  }
+                }}
+              >
+                <XCircle size={17} />
+                <span>უარყოფა</span>
+              </button>
+              <button
+                className="primary-button success"
+                type="button"
+                disabled={responding}
+                onClick={async () => {
+                  setResponding(true);
+                  setResponseError("");
+                  const ok = await onRespondCompletion("approve", responseComment);
+                  setResponding(false);
+                  if (!ok) {
+                    setResponseError("მოქმედების შესრულება ვერ მოხერხდა.");
+                  }
+                }}
+              >
+                <CheckCircle2 size={17} />
+                <span>დადასტურება</span>
+              </button>
+            </>
+          ) : null}
+          {showCompletionButtonModal ? (
+            <button
+              className={isPendingApprovalModal ? "primary-button warning" : "primary-button success"}
+              type="button"
+              onClick={isPendingApprovalModal ? undefined : onRequestCompletion}
+              disabled={isPendingApprovalModal}
+            >
+              <Send size={17} />
+              <span>{isPendingApprovalModal ? "დადასტურების მოლოდინი" : "დასრულებისთვის გაგზავნა"}</span>
+            </button>
+          ) : null}
+          {canEditRecord ? (
+            <button className="ghost-button" type="button" onClick={onEdit}>
+              <Edit3 size={17} />
+              <span>რედაქტირება</span>
+            </button>
+          ) : null}
+          {permissions.delete ? (
+            <button className="primary-button danger" type="button" onClick={onDelete}>
+              <Trash2 size={17} />
+              <span>წაშლა</span>
+            </button>
+          ) : null}
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -1184,7 +1801,8 @@ function buildGardenOptions(devices: Device[]): GardenOption[] {
 }
 
 function getGardenDisplayName(device: Device) {
-  return getGardenCode(device) || device.name;
+  const code = getGardenCode(device);
+  return code ? formatGardenLabel(code) : device.name;
 }
 
 function getGardenCode(device: Pick<Device, "code" | "name">) {
@@ -1206,6 +1824,53 @@ function normalizeGardenCode(value?: string) {
   return trimmed.match(/\d+/)?.[0] || firstPart || trimmed;
 }
 
+function formatGardenLabel(label?: string) {
+  const trimmed = String(label || "").trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  return trimmed.startsWith("ბაღი") ? trimmed : `ბაღი ${trimmed}`;
+}
+
+function canEditFormOneRecord(permissions: Props["permissions"]) {
+  return permissions.edit && hasEditableFormOneFields(permissions);
+}
+
+function hasEditableFormOneFields(permissions: Props["permissions"]) {
+  return (
+    permissions.gardenEdit ||
+    permissions.phoneEdit ||
+    permissions.dueDateEdit ||
+    permissions.modelAdd ||
+    permissions.modelEdit ||
+    permissions.serviceAdd ||
+    permissions.serviceEdit ||
+    permissions.serviceDelete ||
+    permissions.quantityEdit
+  );
+}
+
+function getRecordDisplayStatus(record: FormOneRecord, todayValue: string) {
+  if (record.status === "completed") {
+    return { key: "completed", label: "დასრულებული" };
+  }
+
+  if (record.status === "completion_requested") {
+    return { key: "pending-approval", label: "დადასტურების მოლოდინი" };
+  }
+
+  if (record.rejectionComments.length >= 2) {
+    return { key: "rejected-twice", label: "2-ჯერ უარყოფილი" };
+  }
+
+  if (record.dueDate && record.dueDate < todayValue) {
+    return { key: "overdue", label: "გადაცილებული" };
+  }
+
+  return { key: "in-progress", label: "შესრულების რეჟიმი" };
+}
+
 function formatDisplayDate(value: string) {
   const normalized = value.trim();
   const dateMatch = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -1214,6 +1879,21 @@ function formatDisplayDate(value: string) {
   }
 
   return `${dateMatch[3]}.${dateMatch[2]}.${dateMatch[1]}`;
+}
+
+function formatDisplayDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("ka-GE", {
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(date);
 }
 
 function makeClientId(prefix: string) {

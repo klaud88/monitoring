@@ -4,7 +4,7 @@ import { AppShell } from "@/components/layout/app-shell";
 import { UsersManager } from "@/components/users/users-manager";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { getFirstAllowedPath } from "@/lib/navigation";
-import { getUsers } from "@/lib/repositories";
+import { getRoles, getUsers } from "@/lib/repositories";
 
 export default async function UsersPage() {
   const cookieStore = await cookies();
@@ -14,12 +14,16 @@ export default async function UsersPage() {
     redirect(getFirstAllowedPath(user));
   }
 
-  const users = await getUsers();
+  const [users, roles] = await Promise.all([
+    getUsers(),
+    getRoles(),
+  ]);
 
   return (
     <AppShell>
       <UsersManager
         initialUsers={users}
+        roles={roles}
         permissions={{
           create: hasPermission(user, "users.create"),
           edit: hasPermission(user, "users.edit"),

@@ -39,7 +39,20 @@ export default async function FormOnePage() {
         devices={visibleDevices}
         initialRecords={initialRecords}
         permissions={{
+          commentEdit: hasPermission(user, "form_one.comment_edit"),
+          completionRequest: hasPermission(user, "form_one.completion_request"),
+          completionResponse: hasPermission(user, "form_one.completion_response"),
+          create: hasPermission(user, "form_one.create"),
+          dueDateEdit: hasPermission(user, "form_one.due_date_edit"),
           edit: hasPermission(user, "form_one.edit"),
+          gardenEdit: hasPermission(user, "form_one.garden_edit"),
+          modelAdd: hasPermission(user, "form_one.model_add"),
+          modelEdit: hasPermission(user, "form_one.model_edit"),
+          phoneEdit: hasPermission(user, "form_one.phone_edit"),
+          quantityEdit: hasPermission(user, "form_one.quantity_edit"),
+          serviceAdd: hasPermission(user, "form_one.service_add"),
+          serviceDelete: hasPermission(user, "form_one.service_delete"),
+          serviceEdit: hasPermission(user, "form_one.service_edit"),
           delete: hasPermission(user, "form_one.delete"),
         }}
         todayLabel={formatTbilisiDate(new Date())}

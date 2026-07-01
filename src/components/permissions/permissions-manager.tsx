@@ -6,6 +6,7 @@ import {
   EyeOff,
   LockKeyhole,
   Save,
+  Plus,
   ShieldCheck,
   ToggleLeft,
   ToggleRight,
@@ -17,24 +18,26 @@ import type {
   PermissionKey,
 } from "@/lib/types";
 
-const defaultActions: { key: PermissionAction; label: string }[] = [
+type ActionDef = { key: PermissionAction; label: string; dependsOn?: PermissionAction };
+
+const defaultActions: ActionDef[] = [
   { key: "view", label: "ნახვა" },
   { key: "create", label: "დამატება" },
   { key: "edit", label: "შეცვლა" },
   { key: "delete", label: "წაშლა" },
 ];
 
-const tagRegistryActions: { key: PermissionAction; label: string }[] = [
+const tagRegistryActions: ActionDef[] = [
   { key: "tag_create", label: "ახალი ტეგი" },
   { key: "tag_delete", label: "ტეგის წაშლა" },
 ];
 
-const taskActions: { key: PermissionAction; label: string }[] = [
+const taskActions: ActionDef[] = [
   ...defaultActions,
   ...tagRegistryActions,
 ];
 
-const problemReportActions: { key: PermissionAction; label: string }[] = [
+const problemReportActions: ActionDef[] = [
   ...defaultActions,
   { key: "assign", label: "მომხმარებლები" },
   { key: "tag", label: "ტეგები" },
@@ -42,16 +45,29 @@ const problemReportActions: { key: PermissionAction; label: string }[] = [
   ...tagRegistryActions,
 ];
 
-const formOneActions: { key: PermissionAction; label: string }[] = [
+const formOneActions: ActionDef[] = [
   { key: "view", label: "ნახვა" },
-  { key: "edit", label: "რედაქტირება" },
-  { key: "delete", label: "წაშლა" },
+  { key: "create", label: "ახალი ფორმის დამატება" },
+  { key: "edit", label: "არჩეული ფორმის რედაქტირება" },
+  { key: "garden_edit", label: "ბაღის ველი", dependsOn: "edit" },
+  { key: "phone_edit", label: "ტელეფონის ნომერი", dependsOn: "edit" },
+  { key: "due_date_edit", label: "შესრულების თარიღი", dependsOn: "edit" },
+  { key: "model_add", label: "მოდელის დამატება", dependsOn: "edit" },
+  { key: "model_edit", label: "მოდელის ცვლილება", dependsOn: "edit" },
+  { key: "service_add", label: "მომსახურების დამატება", dependsOn: "edit" },
+  { key: "service_edit", label: "მომსახურების ცვლილება", dependsOn: "edit" },
+  { key: "service_delete", label: "მომსახურების წაშლა", dependsOn: "edit" },
+  { key: "quantity_edit", label: "რაოდენობის ცვლილება", dependsOn: "edit" },
+  { key: "completion_request", label: "დადასტურებაზე გადაგზავნა" },
+  { key: "completion_response", label: "დადასტურება/გაუქმება" },
+  { key: "comment_edit", label: "კომენტარი" },
+  { key: "delete", label: "ფორმა ერთის წაშლა" },
 ];
 
 const pages: {
   key: PageKey;
   label: string;
-  actions?: { key: PermissionAction; label: string }[];
+  actions?: ActionDef[];
 }[] = [
   { key: "dashboard", label: "რუკა" },
   { key: "devices", label: "X-Stations" },
@@ -83,6 +99,9 @@ export function PermissionsManager({
   const [roleList, setRoleList] = useState(roles);
   const [selectedRoleId, setSelectedRoleId] = useState(roles[0]?.id || "");
   const [saving, setSaving] = useState(false);
+  const [creatingRole, setCreatingRole] = useState(false);
+  const [newRoleLabel, setNewRoleLabel] = useState("");
+  const [newRoleName, setNewRoleName] = useState("");
   const [error, setError] = useState("");
 
   const selectedRole = useMemo(
@@ -91,15 +110,69 @@ export function PermissionsManager({
   );
   const selectedPermissions = selectedRole?.permissions ?? [];
 
+  async function createRole(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canEdit || saving || creatingRole) {
+      return;
+    }
+
+    const name = normalizeRoleName(newRoleName);
+    const label = newRoleLabel.trim();
+    if (!name || !label) {
+      setError("როლის სახელი და კოდი აუცილებელია.");
+      return;
+    }
+    if (!/^[a-z][a-z0-9_-]{0,79}$/.test(name)) {
+      setError("როლის კოდი უნდა დაიწყოს ლათინური ასოთი და შეიცავდეს მხოლოდ a-z, 0-9, _ ან - სიმბოლოებს.");
+      return;
+    }
+    if (roleList.some((role) => role.name === name)) {
+      setError("ასეთი როლი უკვე არსებობს.");
+      return;
+    }
+
+    setCreatingRole(true);
+    setError("");
+    const response = await fetch("/api/roles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, label }),
+    });
+    setCreatingRole(false);
+
+    if (!response.ok) {
+      setError(response.status === 409 ? "ასეთი როლი უკვე არსებობს." : "როლის დამატება ვერ მოხერხდა.");
+      return;
+    }
+
+    const data = (await response.json()) as { role: AppRole };
+    setRoleList((current) => [...current, data.role]);
+    setSelectedRoleId(data.role.id);
+    setNewRoleLabel("");
+    setNewRoleName("");
+  }
+
   async function togglePermission(permission: PermissionKey) {
     if (!selectedRole || !canEdit || saving) {
       return;
     }
 
     const existing = selectedRole.permissions;
-    const nextPermissions = existing.includes(permission)
-      ? existing.filter((item) => item !== permission)
-      : [...existing, permission];
+    const isCurrentlyEnabled = existing.includes(permission);
+
+    let nextPermissions: PermissionKey[];
+    if (isCurrentlyEnabled) {
+      const [pageKey, actionKey] = permission.split(".");
+      const page = pages.find((p) => p.key === pageKey);
+      const dependents = (page?.actions ?? [])
+        .filter((action) => action.dependsOn === actionKey)
+        .map((action) => `${pageKey}.${action.key}` as PermissionKey);
+      nextPermissions = existing.filter(
+        (item) => item !== permission && !dependents.includes(item),
+      );
+    } else {
+      nextPermissions = [...existing, permission];
+    }
 
     setRoleList((current) =>
       current.map((role) =>
@@ -169,6 +242,32 @@ export function PermissionsManager({
             <h2>როლები</h2>
             <ShieldCheck size={20} />
           </div>
+          {canEdit ? (
+            <form className="role-create-form" onSubmit={createRole}>
+              <label className="sr-only" htmlFor="new-role-label">
+                როლის სახელი
+              </label>
+              <input
+                id="new-role-label"
+                value={newRoleLabel}
+                onChange={(event) => setNewRoleLabel(event.target.value)}
+                placeholder="როლის სახელი"
+              />
+              <label className="sr-only" htmlFor="new-role-name">
+                როლის კოდი
+              </label>
+              <input
+                id="new-role-name"
+                value={newRoleName}
+                onChange={(event) => setNewRoleName(event.target.value)}
+                placeholder="role_code"
+              />
+              <button className="primary-button" type="submit" disabled={saving || creatingRole}>
+                <Plus size={16} />
+                <span>{creatingRole ? "ემატება..." : "დამატება"}</span>
+              </button>
+            </form>
+          ) : null}
           <div className="permission-user-list">
             {roleList.map((role) => (
               <button
@@ -223,14 +322,21 @@ export function PermissionsManager({
                       const permission =
                         `${page.key}.${action.key}` as PermissionKey;
                       const enabled = selectedPermissions.includes(permission);
+                      const parentPermission = action.dependsOn
+                        ? (`${page.key}.${action.dependsOn}` as PermissionKey)
+                        : null;
+                      const parentEnabled = parentPermission
+                        ? selectedPermissions.includes(parentPermission)
+                        : true;
                       return (
                         <button
                           key={permission}
                           type="button"
-                          className={`permission-toggle ${enabled ? "enabled" : ""}`}
+                          className={`permission-toggle ${enabled ? "enabled" : ""} ${action.dependsOn ? "sub-permission" : ""}`}
                           onClick={() => togglePermission(permission)}
                           aria-label={`${page.label} ${action.label}`}
-                          disabled={!canEdit || saving}
+                          disabled={!canEdit || saving || !parentEnabled}
+                          title={!parentEnabled ? `საჭიროა "${actions.find(a => a.key === action.dependsOn)?.label}" ჩართვა` : undefined}
                         >
                           {enabled ? (
                             <ToggleRight size={28} />
@@ -256,4 +362,8 @@ export function PermissionsManager({
       </section>
     </div>
   );
+}
+
+function normalizeRoleName(value: string) {
+  return value.trim().toLowerCase();
 }

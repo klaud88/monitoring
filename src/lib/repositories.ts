@@ -1,4 +1,4 @@
-import { createHash } from "crypto";
+import { createHash, randomBytes } from "crypto";
 import bcrypt from "bcryptjs";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
@@ -11,8 +11,13 @@ import type {
   AppRole,
   Device,
   DeviceStatus,
+  FormOneDueDateEntry,
+  FormOneNotification,
+  FormOneNotificationType,
   FormOneRecord,
   FormOneRecordItem,
+  FormOneRejectionComment,
+  FormOneStatus,
   MonitoredDevice,
   MonitoredOfflinePeriod,
   OfflineSnapshot,
@@ -43,6 +48,7 @@ type UserRow = {
   color: string;
   device_group_code: string | null;
   password_hash: string;
+  must_change_password: boolean | number;
   permissions: string | null;
 };
 
@@ -141,6 +147,8 @@ const DEFAULT_REGION_COLORS = [
 ];
 const GARDEN_ROLE_NAME = "garden";
 const GARDEN_ROLE_LABEL = "ბაღი";
+const OUTSOURCING_ROLE_NAME = "outsourcing";
+const OUTSOURCING_ROLE_LABEL = "Outsourcing";
 const PROBLEM_REPORT_PERMISSIONS: {
   code: PermissionKey;
   label: string;
@@ -190,12 +198,77 @@ const FORM_ONE_PERMISSIONS: {
   {
     code: "form_one.view",
     label: "ფორმა ერთი: ნახვა",
-    roles: ["admin", "dispatcher", GARDEN_ROLE_NAME],
+    roles: ["admin", "dispatcher", GARDEN_ROLE_NAME, OUTSOURCING_ROLE_NAME],
+  },
+  {
+    code: "form_one.create",
+    label: "ფორმა ერთი: ახალი ფორმის დამატება",
+    roles: ["admin", "dispatcher", OUTSOURCING_ROLE_NAME],
   },
   {
     code: "form_one.edit",
-    label: "ფორმა ერთი: რედაქტირება",
-    roles: ["admin", "dispatcher"],
+    label: "ფორმა ერთი: არჩეული ფორმის რედაქტირება",
+    roles: ["admin", "dispatcher", OUTSOURCING_ROLE_NAME],
+  },
+  {
+    code: "form_one.garden_edit",
+    label: "ფორმა ერთი: ბაღის ველის რედაქტირება",
+    roles: ["admin", "dispatcher", OUTSOURCING_ROLE_NAME],
+  },
+  {
+    code: "form_one.phone_edit",
+    label: "ფორმა ერთი: ტელეფონის ნომრის რედაქტირება",
+    roles: ["admin", "dispatcher", OUTSOURCING_ROLE_NAME],
+  },
+  {
+    code: "form_one.due_date_edit",
+    label: "ფორმა ერთი: შესრულების თარიღის რედაქტირება",
+    roles: ["admin", "dispatcher", OUTSOURCING_ROLE_NAME],
+  },
+  {
+    code: "form_one.model_add",
+    label: "ფორმა ერთი: მოდელის დამატება",
+    roles: ["admin", "dispatcher", OUTSOURCING_ROLE_NAME],
+  },
+  {
+    code: "form_one.model_edit",
+    label: "ფორმა ერთი: მოდელის ცვლილება",
+    roles: ["admin", "dispatcher", OUTSOURCING_ROLE_NAME],
+  },
+  {
+    code: "form_one.service_add",
+    label: "ფორმა ერთი: მომსახურების დამატება",
+    roles: ["admin", "dispatcher", OUTSOURCING_ROLE_NAME],
+  },
+  {
+    code: "form_one.service_edit",
+    label: "ფორმა ერთი: მომსახურების ცვლილება",
+    roles: ["admin", "dispatcher", OUTSOURCING_ROLE_NAME],
+  },
+  {
+    code: "form_one.service_delete",
+    label: "ფორმა ერთი: მომსახურების წაშლა",
+    roles: ["admin", "dispatcher", OUTSOURCING_ROLE_NAME],
+  },
+  {
+    code: "form_one.quantity_edit",
+    label: "ფორმა ერთი: რაოდენობის ცვლილება",
+    roles: ["admin", "dispatcher", OUTSOURCING_ROLE_NAME],
+  },
+  {
+    code: "form_one.completion_request",
+    label: "ფორმა ერთი: დადასტურებაზე გადაგზავნა",
+    roles: ["admin", "dispatcher", OUTSOURCING_ROLE_NAME],
+  },
+  {
+    code: "form_one.completion_response",
+    label: "ფორმა ერთი: დადასტურება/გაუქმება",
+    roles: ["admin", GARDEN_ROLE_NAME],
+  },
+  {
+    code: "form_one.comment_edit",
+    label: "ფორმა ერთი: კომენტარის რედაქტირება",
+    roles: ["admin", "dispatcher", OUTSOURCING_ROLE_NAME],
   },
   {
     code: "form_one.delete",
@@ -274,6 +347,37 @@ type ProblemReportRow = {
   created_at: DatabaseDate;
   updated_at: DatabaseDate;
   assignee_ids: string | null;
+};
+
+type FormOneRecordRow = {
+  id: string;
+  device_id: string;
+  device_group_code: string;
+  garden_label: string;
+  phone: string | null;
+  submitted_date: DatabaseDate;
+  due_date: DatabaseDate | null;
+  due_dates: unknown;
+  due_date_change_count: number | null;
+  status: FormOneStatus | string | null;
+  completion_requested_at: DatabaseDate | null;
+  completion_requested_by: string | null;
+  completed_at: DatabaseDate | null;
+  completed_by: string | null;
+  rejection_comments: unknown;
+  items: unknown;
+  created_by: string | null;
+  created_at: DatabaseDate;
+  updated_at: DatabaseDate;
+};
+
+type FormOneNotificationRow = FormOneRecordRow & {
+  notification_id: string;
+  notification_record_id: string;
+  notification_type: string;
+  notification_comment_text: string | null;
+  notification_read_at: DatabaseDate | null;
+  notification_created_at: DatabaseDate;
 };
 
 const csv = (value: string | null | undefined) =>
@@ -580,6 +684,13 @@ async function ensureOperationalSchema() {
         "device_group_code",
         "device_group_code varchar(80) null after color",
       );
+      await addColumnIfMissing(
+        connection,
+        userColumns,
+        "users",
+        "must_change_password",
+        "must_change_password boolean not null default false after is_active",
+      );
       await addIndexIfMissing(
         connection,
         "users",
@@ -718,6 +829,15 @@ async function ensureOperationalSchema() {
           garden_label varchar(180) not null,
           phone varchar(80) null,
           submitted_date date not null,
+          due_date date null,
+          due_dates json null,
+          due_date_change_count int not null default 0,
+          status enum('in_progress', 'completion_requested', 'completed') not null default 'in_progress',
+          completion_requested_at datetime null,
+          completion_requested_by varchar(64) null,
+          completed_at datetime null,
+          completed_by varchar(64) null,
+          rejection_comments json null,
           items json not null,
           created_by varchar(64) null,
           created_at timestamp not null default current_timestamp,
@@ -727,6 +847,92 @@ async function ensureOperationalSchema() {
           index idx_form_one_records_device_group (device_group_code),
           index fk_form_one_records_device (device_id),
           index fk_form_one_records_created_by (created_by)
+        )
+      `);
+      const formOneColumns = await getTableColumns(connection, "form_one_records");
+      await addColumnIfMissing(
+        connection,
+        formOneColumns,
+        "form_one_records",
+        "due_date",
+        "due_date date null after submitted_date",
+      );
+      await addColumnIfMissing(
+        connection,
+        formOneColumns,
+        "form_one_records",
+        "due_dates",
+        "due_dates json null after due_date",
+      );
+      await addColumnIfMissing(
+        connection,
+        formOneColumns,
+        "form_one_records",
+        "due_date_change_count",
+        "due_date_change_count int not null default 0 after due_dates",
+      );
+      await addColumnIfMissing(
+        connection,
+        formOneColumns,
+        "form_one_records",
+        "status",
+        "status enum('in_progress', 'completion_requested', 'completed') not null default 'in_progress' after due_date_change_count",
+      );
+      await connection.query(
+        "alter table form_one_records modify status enum('in_progress', 'completion_requested', 'completed') not null default 'in_progress'",
+      );
+      await addColumnIfMissing(
+        connection,
+        formOneColumns,
+        "form_one_records",
+        "completion_requested_at",
+        "completion_requested_at datetime null after status",
+      );
+      await addColumnIfMissing(
+        connection,
+        formOneColumns,
+        "form_one_records",
+        "completion_requested_by",
+        "completion_requested_by varchar(64) null after completion_requested_at",
+      );
+      await addColumnIfMissing(
+        connection,
+        formOneColumns,
+        "form_one_records",
+        "completed_at",
+        "completed_at datetime null after completion_requested_by",
+      );
+      await addColumnIfMissing(
+        connection,
+        formOneColumns,
+        "form_one_records",
+        "completed_by",
+        "completed_by varchar(64) null after completed_at",
+      );
+      await addColumnIfMissing(
+        connection,
+        formOneColumns,
+        "form_one_records",
+        "rejection_comments",
+        "rejection_comments json null after completed_by",
+      );
+      await connection.query(`
+        create table if not exists form_one_notifications (
+          id varchar(64) primary key,
+          record_id varchar(64) not null,
+          type varchar(40) not null,
+          recipient_user_id varchar(64) null,
+          recipient_role varchar(80) null,
+          recipient_device_group_code varchar(80) null,
+          comment_text text null,
+          created_by varchar(64) null,
+          read_at datetime null,
+          created_at timestamp not null default current_timestamp,
+          constraint fk_form_one_notifications_record foreign key (record_id) references form_one_records(id) on delete cascade,
+          index fk_form_one_notifications_record (record_id),
+          index idx_form_one_notifications_user (recipient_user_id, read_at),
+          index idx_form_one_notifications_group (recipient_device_group_code, read_at),
+          index idx_form_one_notifications_role (recipient_role, read_at)
         )
       `);
       await ensureTaskTagCatalog(connection);
@@ -760,7 +966,12 @@ async function getTableColumns(connection: PoolConnection, tableName: string) {
 async function addColumnIfMissing(
   connection: PoolConnection,
   columns: Set<string>,
-  tableName: "devices" | "tasks" | "users" | "monitored_devices",
+  tableName:
+    | "devices"
+    | "tasks"
+    | "users"
+    | "monitored_devices"
+    | "form_one_records",
   columnName: string,
   columnDefinition: string,
 ) {
@@ -843,6 +1054,18 @@ async function ensureProblemReportAccess(connection: PoolConnection) {
       on duplicate key update label = values(label)
     `,
     [makeStableId("role", GARDEN_ROLE_NAME), GARDEN_ROLE_NAME, GARDEN_ROLE_LABEL],
+  );
+  await connection.query<ResultSetHeader>(
+    `
+      insert into roles (id, name, label)
+      values (?, ?, ?)
+      on duplicate key update label = values(label)
+    `,
+    [
+      makeStableId("role", OUTSOURCING_ROLE_NAME),
+      OUTSOURCING_ROLE_NAME,
+      OUTSOURCING_ROLE_LABEL,
+    ],
   );
 
   for (const permission of ACCESS_PERMISSIONS) {
@@ -972,12 +1195,12 @@ async function ensureGardenUsersForDevices(connection: PoolConnection) {
 
     const email = `xstation-${groupCode}@local.ge`;
     const initials = groupCode.slice(0, 3).toUpperCase();
-    const passwordHash = await bcrypt.hash(groupCode, 10);
+    const passwordHash = await bcrypt.hash(randomBytes(24).toString("base64"), 10);
     await connection.query<ResultSetHeader>(
       `
         insert into users
-          (id, role_id, name, email, password_hash, initials, color, device_group_code)
-        values (?, ?, ?, ?, ?, ?, ?, ?)
+          (id, role_id, name, email, password_hash, initials, color, device_group_code, must_change_password)
+        values (?, ?, ?, ?, ?, ?, ?, ?, true)
         on duplicate key update
           role_id = values(role_id),
           name = values(name),
@@ -1015,6 +1238,7 @@ export async function getUserByEmail(email: string): Promise<AppUser | null> {
         u.color,
         u.device_group_code,
         u.password_hash,
+        u.must_change_password,
         group_concat(distinct p.code order by p.code separator ',') as permissions
       from users u
       join roles r on r.id = u.role_id
@@ -1049,6 +1273,7 @@ export async function getUserByEmail(email: string): Promise<AppUser | null> {
     color: row.color,
     deviceGroupCode: row.device_group_code ?? undefined,
     passwordHash: row.password_hash,
+    mustChangePassword: Boolean(row.must_change_password),
     permissions: csv(row.permissions) as PermissionKey[],
   };
 }
@@ -1076,6 +1301,7 @@ export async function getUserByLogin(identifier: string): Promise<AppUser | null
         u.color,
         u.device_group_code,
         u.password_hash,
+        u.must_change_password,
         group_concat(distinct p.code order by p.code separator ',') as permissions
       from users u
       join roles r on r.id = u.role_id
@@ -1110,6 +1336,7 @@ export async function getUserByLogin(identifier: string): Promise<AppUser | null
     color: row.color,
     deviceGroupCode: row.device_group_code ?? undefined,
     passwordHash: row.password_hash,
+    mustChangePassword: Boolean(row.must_change_password),
     permissions: csv(row.permissions) as PermissionKey[],
   };
 }
@@ -1123,6 +1350,7 @@ function toPublicUser(user: AppUser): SessionUser {
     initials: user.initials,
     color: user.color,
     deviceGroupCode: user.deviceGroupCode,
+    mustChangePassword: user.mustChangePassword,
     permissions: user.permissions,
   };
 }
@@ -1140,6 +1368,7 @@ export async function getUsers(): Promise<SessionUser[]> {
         u.initials,
         u.color,
         u.device_group_code,
+        u.must_change_password,
         group_concat(distinct p.code order by p.code separator ',') as permissions
       from users u
       join roles r on r.id = u.role_id
@@ -1163,6 +1392,7 @@ export async function getUsers(): Promise<SessionUser[]> {
     initials: row.initials,
     color: row.color,
     deviceGroupCode: row.device_group_code ?? undefined,
+    mustChangePassword: Boolean(row.must_change_password),
     permissions: csv(row.permissions) as PermissionKey[],
   }));
 }
@@ -1193,8 +1423,8 @@ export async function createUser(input: {
 
     await connection.query<ResultSetHeader>(
       `
-        insert into users (id, role_id, name, email, password_hash, initials, color)
-        values (?, ?, ?, ?, ?, ?, ?)
+        insert into users (id, role_id, name, email, password_hash, initials, color, must_change_password)
+        values (?, ?, ?, ?, ?, ?, ?, true)
       `,
       [
         id,
@@ -1248,7 +1478,7 @@ export async function updateUser(
       await connection.query<ResultSetHeader>(
         `
           update users
-          set role_id = ?, name = ?, email = ?, password_hash = ?, initials = ?, color = ?
+          set role_id = ?, name = ?, email = ?, password_hash = ?, initials = ?, color = ?, must_change_password = true
           where id = ? and is_active = true
         `,
         [
@@ -1290,7 +1520,26 @@ export async function deleteUser(id: string) {
   return deleted ?? false;
 }
 
-const fallbackRoles: AppRole[] = [
+export async function changeUserPassword(
+  id: string,
+  newPasswordHash: string,
+): Promise<boolean> {
+  const updated = await withConnection(async (connection) => {
+    const [result] = await connection.query<ResultSetHeader>(
+      `
+        update users
+        set password_hash = ?, must_change_password = false
+        where id = ? and is_active = true
+      `,
+      [newPasswordHash, id],
+    );
+    return result.affectedRows > 0;
+  });
+
+  return updated ?? false;
+}
+
+let fallbackRoles: AppRole[] = [
   {
     id: "role-admin",
     name: "admin",
@@ -1320,8 +1569,21 @@ const fallbackRoles: AppRole[] = [
       "problem_reports.tag_delete",
       "problem_reports.status",
       "form_one.view",
+      "form_one.create",
       "form_one.edit",
+      "form_one.garden_edit",
+      "form_one.phone_edit",
+      "form_one.due_date_edit",
+      "form_one.model_add",
+      "form_one.model_edit",
+      "form_one.service_add",
+      "form_one.service_edit",
+      "form_one.service_delete",
+      "form_one.quantity_edit",
+      "form_one.completion_request",
+      "form_one.completion_response",
       "form_one.delete",
+      "form_one.comment_edit",
       "regions.view",
       "regions.create",
       "regions.edit",
@@ -1365,7 +1627,19 @@ const fallbackRoles: AppRole[] = [
       "problem_reports.tag_create",
       "problem_reports.status",
       "form_one.view",
+      "form_one.create",
       "form_one.edit",
+      "form_one.garden_edit",
+      "form_one.phone_edit",
+      "form_one.due_date_edit",
+      "form_one.model_add",
+      "form_one.model_edit",
+      "form_one.service_add",
+      "form_one.service_edit",
+      "form_one.service_delete",
+      "form_one.quantity_edit",
+      "form_one.completion_request",
+      "form_one.comment_edit",
       "regions.view",
       "offline_records.view",
       "offline_records.create",
@@ -1392,6 +1666,30 @@ const fallbackRoles: AppRole[] = [
     ],
   },
   {
+    id: "role-outsourcing",
+    name: OUTSOURCING_ROLE_NAME,
+    label: OUTSOURCING_ROLE_LABEL,
+    permissions: [
+      "dashboard.view",
+      "devices.view",
+      "problem_reports.view",
+      "form_one.view",
+      "form_one.create",
+      "form_one.edit",
+      "form_one.garden_edit",
+      "form_one.phone_edit",
+      "form_one.due_date_edit",
+      "form_one.model_add",
+      "form_one.model_edit",
+      "form_one.service_add",
+      "form_one.service_edit",
+      "form_one.service_delete",
+      "form_one.quantity_edit",
+      "form_one.completion_request",
+      "form_one.comment_edit",
+    ],
+  },
+  {
     id: "role-viewer",
     name: "viewer",
     label: "მხოლოდ ნახვა",
@@ -1410,7 +1708,12 @@ const fallbackRoles: AppRole[] = [
     id: "role-garden",
     name: GARDEN_ROLE_NAME,
     label: GARDEN_ROLE_LABEL,
-    permissions: ["problem_reports.view", "problem_reports.create", "form_one.view"],
+    permissions: [
+      "problem_reports.view",
+      "problem_reports.create",
+      "form_one.view",
+      "form_one.completion_response",
+    ],
   },
 ];
 
@@ -1442,6 +1745,48 @@ export async function getRoles(): Promise<AppRole[]> {
     label: row.label,
     permissions: csv(row.permissions) as PermissionKey[],
   }));
+}
+
+export async function createRole(input: {
+  name: string;
+  label: string;
+}): Promise<AppRole | null> {
+  const name = input.name.trim().toLowerCase();
+  const label = input.label.trim();
+  if (!name || !label) {
+    return null;
+  }
+
+  const created = await withConnection(async (connection) => {
+    const [existingRows] = await connection.query<RoleIdRow[]>(
+      "select id from roles where name = ? limit 1",
+      [name],
+    );
+    if (existingRows.length) {
+      return null;
+    }
+
+    const id = makeStableId("role", name);
+    await connection.query<ResultSetHeader>(
+      "insert into roles (id, name, label) values (?, ?, ?)",
+      [id, name, label],
+    );
+
+    return getRoles().then(
+      (roles) => roles.find((role) => role.name === name) ?? null,
+    );
+  });
+
+  if (created !== null) {
+    return created;
+  }
+
+  if (fallbackRoles.some((role) => role.name === name)) {
+    return null;
+  }
+  const role = { id: makeStableId("role", name), name, label, permissions: [] };
+  fallbackRoles = [...fallbackRoles, role];
+  return role;
 }
 
 export async function updateRolePermissions(
@@ -3208,6 +3553,7 @@ export async function createFormOneRecord(
     gardenLabel: string;
     phone?: string;
     submittedDate: string;
+    dueDate?: string;
     items: FormOneRecordItem[];
   },
   options: { createdBy?: string; allowedDeviceGroupCode?: string } = {},
@@ -3221,6 +3567,18 @@ export async function createFormOneRecord(
   const recordId = makeId("formone");
   const items = normalizeFormOneRecordItems(input.items);
   const submittedDate = normalizeDateInput(input.submittedDate);
+  const dueDate = normalizeOptionalDateInput(input.dueDate);
+  const now = new Date();
+  const dueDates = dueDate
+    ? [
+        {
+          id: makeId("formonedue"),
+          date: dueDate,
+          changedAt: now.toISOString(),
+          changedBy: options.createdBy,
+        },
+      ]
+    : [];
   if (!items.length) {
     return null;
   }
@@ -3248,6 +3606,12 @@ export async function createFormOneRecord(
         garden_label: input.gardenLabel || device.name || deviceGroupCode,
         phone: input.phone || null,
         submitted_date: toPrismaDateOnly(submittedDate),
+        due_date: dueDate ? toPrismaDateOnly(dueDate) : null,
+        due_dates: dueDates.length
+          ? (dueDates as unknown as Prisma.InputJsonValue)
+          : Prisma.JsonNull,
+        due_date_change_count: 0,
+        status: "in_progress",
         items: items as unknown as Prisma.InputJsonValue,
         created_by: options.createdBy ?? null,
       },
@@ -3264,9 +3628,10 @@ export async function updateFormOneRecord(
     gardenLabel: string;
     phone?: string;
     submittedDate: string;
+    dueDate?: string;
     items: FormOneRecordItem[];
   },
-  options: { allowedDeviceGroupCode?: string } = {},
+  options: { allowedDeviceGroupCode?: string; updatedBy?: string } = {},
 ): Promise<FormOneRecord | null> {
   if (isBuildTime()) {
     return null;
@@ -3276,13 +3641,19 @@ export async function updateFormOneRecord(
 
   const items = normalizeFormOneRecordItems(input.items);
   const submittedDate = normalizeDateInput(input.submittedDate);
+  const dueDate = normalizeOptionalDateInput(input.dueDate);
   if (!items.length) {
     return null;
   }
 
   return prisma.$transaction(async (transaction) => {
     const existing = await transaction.form_one_records.findUnique({
-      select: { device_group_code: true },
+      select: {
+        device_group_code: true,
+        due_date: true,
+        due_dates: true,
+        due_date_change_count: true,
+      },
       where: { id },
     });
     if (!existing) {
@@ -3307,6 +3678,39 @@ export async function updateFormOneRecord(
       return null;
     }
 
+    const existingDueDate = existing.due_date
+      ? toDateString(existing.due_date)
+      : undefined;
+    const dueDateChanged = (dueDate || "") !== (existingDueDate || "");
+    const dueDateChangeCount = existing.due_date_change_count ?? 0;
+    const countsAsDueDateChange = dueDateChanged && Boolean(existingDueDate);
+    const existingDueDates = normalizeFormOneDueDates(existing.due_dates);
+    const dueDateHistoryBase =
+      existingDueDates.length || !existingDueDate
+        ? existingDueDates
+        : [
+            {
+              id: makeStableId("formonedue", `${id}:${existingDueDate}`),
+              date: existingDueDate,
+              changedAt: "",
+            },
+          ];
+    const dueDates = dueDateChanged
+      ? [
+          ...dueDateHistoryBase,
+          ...(dueDate
+            ? [
+                {
+                  id: makeId("formonedue"),
+                  date: dueDate,
+                  changedAt: new Date().toISOString(),
+                  changedBy: options.updatedBy,
+                },
+              ]
+            : []),
+        ]
+      : dueDateHistoryBase;
+
     const record = await transaction.form_one_records.update({
       data: {
         device_id: input.deviceId,
@@ -3314,6 +3718,13 @@ export async function updateFormOneRecord(
         garden_label: input.gardenLabel || device.name || deviceGroupCode,
         phone: input.phone || null,
         submitted_date: toPrismaDateOnly(submittedDate),
+        due_date: dueDate ? toPrismaDateOnly(dueDate) : null,
+        due_dates: dueDates.length
+          ? (dueDates as unknown as Prisma.InputJsonValue)
+          : Prisma.JsonNull,
+        due_date_change_count: countsAsDueDateChange
+          ? dueDateChangeCount + 1
+          : dueDateChangeCount,
         items: items as unknown as Prisma.InputJsonValue,
       },
       where: { id },
@@ -3352,6 +3763,332 @@ export async function deleteFormOneRecord(
   });
 }
 
+export async function requestFormOneCompletion(
+  id: string,
+  options: { requestedBy?: string; allowedDeviceGroupCode?: string } = {},
+): Promise<FormOneRecord | null> {
+  if (isBuildTime()) {
+    return null;
+  }
+
+  await ensureOperationalSchema();
+
+  return prisma.$transaction(async (transaction) => {
+    const existing = await transaction.form_one_records.findUnique({
+      where: { id },
+    });
+    if (!existing) {
+      return null;
+    }
+
+    const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
+    if (allowedGroup && existing.device_group_code !== allowedGroup) {
+      return null;
+    }
+    if (normalizeFormOneStatus(existing.status) === "completed") {
+      return mapPrismaFormOneRecord(existing);
+    }
+
+    const now = new Date();
+    await transaction.form_one_notifications.updateMany({
+      data: { read_at: now },
+      where: {
+        record_id: id,
+        type: "completion_request",
+        read_at: null,
+      },
+    });
+
+    const record = await transaction.form_one_records.update({
+      data: {
+        status: "completion_requested",
+        completion_requested_at: now,
+        completion_requested_by: options.requestedBy ?? null,
+        completed_at: null,
+        completed_by: null,
+      },
+      where: { id },
+    });
+
+    await transaction.form_one_notifications.create({
+      data: {
+        id: makeId("formonenotification"),
+        record_id: id,
+        type: "completion_request",
+        recipient_device_group_code: existing.device_group_code,
+        created_by: options.requestedBy ?? null,
+      },
+    });
+
+    return mapPrismaFormOneRecord(record);
+  });
+}
+
+export async function respondToFormOneCompletion(
+  id: string,
+  input: {
+    action: "approve" | "reject";
+    comment?: string;
+  },
+  options: { userId?: string; allowedDeviceGroupCode?: string } = {},
+): Promise<FormOneRecord | null> {
+  if (isBuildTime()) {
+    return null;
+  }
+
+  await ensureOperationalSchema();
+  const comment = String(input.comment || "").trim();
+  if (input.action === "reject" && !comment) {
+    return null;
+  }
+
+  return prisma.$transaction(async (transaction) => {
+    const existing = await transaction.form_one_records.findUnique({
+      where: { id },
+    });
+    if (!existing) {
+      return null;
+    }
+
+    const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
+    if (allowedGroup && existing.device_group_code !== allowedGroup) {
+      return null;
+    }
+
+    const now = new Date();
+    const nowIso = now.toISOString();
+    await transaction.form_one_notifications.updateMany({
+      data: { read_at: now },
+      where: {
+        record_id: id,
+        type: "completion_request",
+        read_at: null,
+      },
+    });
+
+    if (input.action === "approve") {
+      const record = await transaction.form_one_records.update({
+        data: {
+          status: "completed",
+          completed_at: now,
+          completed_by: options.userId ?? null,
+        },
+        where: { id },
+      });
+      return mapPrismaFormOneRecord(record);
+    }
+
+    const rejectionComments = [
+      ...normalizeFormOneRejectionComments(existing.rejection_comments),
+      {
+        id: makeId("formonecomment"),
+        comment,
+        sentAt: existing.completion_requested_at
+          ? toDateTimeString(existing.completion_requested_at)
+          : undefined,
+        rejectedAt: nowIso,
+        rejectedBy: options.userId,
+      },
+    ];
+    const recipientUserId =
+      existing.completion_requested_by || existing.created_by || null;
+
+    const record = await transaction.form_one_records.update({
+      data: {
+        status: "in_progress",
+        rejection_comments:
+          rejectionComments as unknown as Prisma.InputJsonValue,
+      },
+      where: { id },
+    });
+
+    if (recipientUserId) {
+      await transaction.form_one_notifications.create({
+        data: {
+          id: makeId("formonenotification"),
+          record_id: id,
+          type: "rejection",
+          recipient_user_id: recipientUserId,
+          comment_text: comment,
+          created_by: options.userId ?? null,
+        },
+      });
+    } else {
+      await transaction.form_one_notifications.create({
+        data: {
+          id: makeId("formonenotification"),
+          record_id: id,
+          type: "rejection",
+          recipient_role: OUTSOURCING_ROLE_NAME,
+          comment_text: comment,
+          created_by: options.userId ?? null,
+        },
+      });
+    }
+
+    return mapPrismaFormOneRecord(record);
+  });
+}
+
+export async function updateFormOneRejectionComment(
+  recordId: string,
+  commentId: string,
+  comment: string,
+  options: { allowedDeviceGroupCode?: string } = {},
+): Promise<FormOneRecord | null> {
+  if (isBuildTime()) {
+    return null;
+  }
+
+  const normalizedComment = comment.trim();
+  if (!normalizedComment) {
+    return null;
+  }
+
+  await ensureOperationalSchema();
+
+  return prisma.$transaction(async (transaction) => {
+    const existing = await transaction.form_one_records.findUnique({
+      where: { id: recordId },
+    });
+    if (!existing) {
+      return null;
+    }
+
+    const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
+    if (allowedGroup && existing.device_group_code !== allowedGroup) {
+      return null;
+    }
+
+    let updated = false;
+    const rejectionComments = normalizeFormOneRejectionComments(
+      existing.rejection_comments,
+    ).map((item) => {
+      if (item.id !== commentId) {
+        return item;
+      }
+
+      updated = true;
+      return { ...item, comment: normalizedComment };
+    });
+
+    if (!updated) {
+      return null;
+    }
+
+    const record = await transaction.form_one_records.update({
+      data: {
+        rejection_comments:
+          rejectionComments as unknown as Prisma.InputJsonValue,
+      },
+      where: { id: recordId },
+    });
+
+    return mapPrismaFormOneRecord(record);
+  });
+}
+
+export async function getFormOneNotifications(
+  user: Pick<SessionUser, "id" | "role" | "deviceGroupCode"> | null,
+): Promise<FormOneNotification[]> {
+  if (!user || isBuildTime()) {
+    return [];
+  }
+
+  await ensureOperationalSchema();
+  const scopedGroup =
+    user.role === GARDEN_ROLE_NAME
+      ? normalizeDeviceGroupCode(user.deviceGroupCode)
+      : "";
+  const rows = await queryRows<FormOneNotificationRow>(
+    `
+      select
+        n.id as notification_id,
+        n.record_id as notification_record_id,
+        n.type as notification_type,
+        n.comment_text as notification_comment_text,
+        n.read_at as notification_read_at,
+        n.created_at as notification_created_at,
+        r.id,
+        r.device_id,
+        r.device_group_code,
+        r.garden_label,
+        r.phone,
+        r.submitted_date,
+        r.due_date,
+        r.due_dates,
+        r.due_date_change_count,
+        r.status,
+        r.completion_requested_at,
+        r.completion_requested_by,
+        r.completed_at,
+        r.completed_by,
+        r.rejection_comments,
+        r.items,
+        r.created_by,
+        r.created_at,
+        r.updated_at
+      from form_one_notifications n
+      join form_one_records r on r.id = n.record_id
+      where n.read_at is null
+        and (
+          n.recipient_user_id = ?
+          or n.recipient_role = ?
+          or (? <> '' and n.recipient_device_group_code = ?)
+        )
+      order by n.created_at desc
+      limit 50
+    `,
+    [user.id, user.role, scopedGroup, scopedGroup],
+  );
+
+  return (rows ?? []).map((row) => ({
+    id: row.notification_id,
+    recordId: row.notification_record_id,
+    type: normalizeFormOneNotificationType(row.notification_type),
+    comment: row.notification_comment_text ?? undefined,
+    readAt: row.notification_read_at
+      ? toDateTimeString(row.notification_read_at)
+      : undefined,
+    createdAt: toDateTimeString(row.notification_created_at),
+    record: mapPrismaFormOneRecord(row),
+  }));
+}
+
+export async function markFormOneNotificationRead(
+  notificationId: string,
+  user: Pick<SessionUser, "id" | "role" | "deviceGroupCode"> | null,
+) {
+  if (!user || isBuildTime()) {
+    return false;
+  }
+
+  await ensureOperationalSchema();
+  const scopedGroup =
+    user.role === GARDEN_ROLE_NAME
+      ? normalizeDeviceGroupCode(user.deviceGroupCode)
+      : "";
+  const updated = await withConnection(async (connection) => {
+    const [result] = await connection.query<ResultSetHeader>(
+      `
+        update form_one_notifications
+        set read_at = ?
+        where id = ?
+          and read_at is null
+          and (
+            recipient_user_id = ?
+            or recipient_role = ?
+            or (? <> '' and recipient_device_group_code = ?)
+          )
+      `,
+      [toSqlDateTime(new Date()), notificationId, user.id, user.role, scopedGroup, scopedGroup],
+    );
+    return result.affectedRows > 0;
+  });
+
+  return updated ?? false;
+}
+
 function mapProblemReportRow(row: ProblemReportRow): ProblemReport {
   return {
     id: row.id,
@@ -3372,18 +4109,9 @@ function mapProblemReportRow(row: ProblemReportRow): ProblemReport {
   };
 }
 
-function mapPrismaFormOneRecord(row: {
-  id: string;
-  device_id: string;
-  device_group_code: string;
-  garden_label: string;
-  phone: string | null;
-  submitted_date: Date;
-  items: unknown;
-  created_by: string | null;
-  created_at: Date;
-  updated_at: Date;
-}): FormOneRecord {
+function mapPrismaFormOneRecord(row: FormOneRecordRow): FormOneRecord {
+  const dueDate = row.due_date ? toDateString(row.due_date) : undefined;
+  const dueDates = normalizeFormOneDueDates(row.due_dates);
   return {
     id: row.id,
     deviceId: row.device_id,
@@ -3391,6 +4119,30 @@ function mapPrismaFormOneRecord(row: {
     gardenLabel: row.garden_label,
     phone: row.phone ?? undefined,
     submittedDate: toDateString(row.submitted_date),
+    dueDate,
+    dueDates:
+      dueDates.length || !dueDate
+        ? dueDates
+        : [
+            {
+              id: makeStableId("formonedue", `${row.id}:${dueDate}`),
+              date: dueDate,
+              changedAt: "",
+            },
+          ],
+    dueDateChangeCount: Number(row.due_date_change_count) || 0,
+    status: normalizeFormOneStatus(row.status),
+    completionRequestedAt: row.completion_requested_at
+      ? toDateTimeString(row.completion_requested_at)
+      : undefined,
+    completionRequestedBy: row.completion_requested_by ?? undefined,
+    completedAt: row.completed_at
+      ? toDateTimeString(row.completed_at)
+      : undefined,
+    completedBy: row.completed_by ?? undefined,
+    rejectionComments: normalizeFormOneRejectionComments(
+      row.rejection_comments,
+    ),
     items: normalizeFormOneRecordItems(row.items),
     createdBy: row.created_by ?? undefined,
     createdAt: toDateTimeString(row.created_at),
@@ -3421,6 +4173,79 @@ function normalizeFormOneRecordItems(items: unknown): FormOneRecordItem[] {
     .filter((item) => item.modelLabel && item.serviceLabel);
 }
 
+function normalizeFormOneStatus(value: unknown): FormOneStatus {
+  return value === "completion_requested" || value === "completed"
+    ? value
+    : "in_progress";
+}
+
+function normalizeFormOneNotificationType(
+  value: unknown,
+): FormOneNotificationType {
+  return value === "rejection" ? "rejection" : "completion_request";
+}
+
+function normalizeFormOneDueDates(value: unknown): FormOneDueDateEntry[] {
+  return parseJsonArray(value)
+    .map((item): FormOneDueDateEntry | null => {
+      const source =
+        typeof item === "object" && item !== null
+          ? (item as Record<string, unknown>)
+          : {};
+      const date = normalizeOptionalDateInput(String(source.date || ""));
+      if (!date) {
+        return null;
+      }
+
+      const changedBy = source.changedBy
+        ? String(source.changedBy)
+        : source.changed_by
+          ? String(source.changed_by)
+          : undefined;
+      return {
+        id: String(source.id || makeStableId("formonedue", date)),
+        date,
+        changedAt: String(source.changedAt || source.changed_at || ""),
+        ...(changedBy ? { changedBy } : {}),
+      };
+    })
+    .filter((item): item is FormOneDueDateEntry => Boolean(item));
+}
+
+function normalizeFormOneRejectionComments(
+  value: unknown,
+): FormOneRejectionComment[] {
+  return parseJsonArray(value)
+    .map((item): FormOneRejectionComment | null => {
+      const source =
+        typeof item === "object" && item !== null
+          ? (item as Record<string, unknown>)
+          : {};
+      const comment = String(source.comment || "").trim();
+      const rejectedAt = String(source.rejectedAt || source.rejected_at || "");
+      if (!comment || !rejectedAt) {
+        return null;
+      }
+
+      const sentAt =
+        source.sentAt || source.sent_at
+          ? String(source.sentAt || source.sent_at)
+          : undefined;
+      const rejectedBy =
+        source.rejectedBy || source.rejected_by
+          ? String(source.rejectedBy || source.rejected_by)
+          : undefined;
+      return {
+        id: String(source.id || makeStableId("formonecomment", rejectedAt)),
+        comment,
+        rejectedAt,
+        ...(sentAt ? { sentAt } : {}),
+        ...(rejectedBy ? { rejectedBy } : {}),
+      };
+    })
+    .filter((item): item is FormOneRejectionComment => Boolean(item));
+}
+
 function parseJsonArray(value: unknown): unknown[] {
   if (Array.isArray(value)) {
     return value;
@@ -3443,6 +4268,11 @@ function normalizeDateInput(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(normalized)
     ? normalized
     : getTbilisiDateKey();
+}
+
+function normalizeOptionalDateInput(value?: string | null) {
+  const normalized = String(value || "").trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : undefined;
 }
 
 function toPrismaDateOnly(value: string) {

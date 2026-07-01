@@ -20,8 +20,8 @@ export async function POST(request: NextRequest) {
   const response = NextResponse.redirect(new URL("/login", request.url), 303);
   response.cookies.set(SESSION_COOKIE, "", {
     httpOnly: true,
-    sameSite: "lax",
-    secure: shouldUseSecureCookie(request),
+    sameSite: "strict",
+    secure: shouldUseSecureCookie(),
     path: "/",
     maxAge: 0
   });

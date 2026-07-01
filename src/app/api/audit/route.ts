@@ -8,6 +8,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   }
 
+  if (!user || user.role !== "admin") {
+    return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+  }
+
   const body = await request.json().catch(() => null);
   const action = String(body?.action || "");
   const entityType = String(body?.entityType || "");

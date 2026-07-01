@@ -31,10 +31,6 @@ export async function logAudit(input: AuditInput) {
   );
 
   if (!inserted) {
-    console.info("[audit]", {
-      id,
-      createdAt: new Date().toISOString(),
-      ...input
-    });
+    console.warn("[audit] DB insert failed", { id, action: input.action, entityType: input.entityType });
   }
 }

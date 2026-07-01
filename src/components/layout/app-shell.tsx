@@ -18,7 +18,9 @@ import {
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { getFirstAllowedPath } from "@/lib/navigation";
 import type { PermissionKey } from "@/lib/types";
+import { MustChangePasswordModal } from "@/components/auth/must-change-password-modal";
 import { AgencyLogo } from "./agency-logo";
+import { FormOneNotifications } from "./form-one-notifications";
 import { OfflineMonitorNotifications } from "./offline-monitor-notifications";
 import { ThemeToggle } from "./theme-toggle";
 
@@ -99,6 +101,8 @@ export async function AppShell({
   });
 
   return (
+    <>
+    <MustChangePasswordModal mustChangePassword={user?.mustChangePassword ?? false} />
     <div className="app-shell">
       <header className="topbar">
         <div className="topbar-main">
@@ -132,6 +136,14 @@ export async function AppShell({
             <ThemeToggle />
             {hasPermission(user, "offline_records.view") ? (
               <OfflineMonitorNotifications />
+            ) : null}
+            {hasPermission(user, "form_one.view") ? (
+              <FormOneNotifications
+                canRespondToCompletion={hasPermission(
+                  user,
+                  "form_one.completion_response",
+                )}
+              />
             ) : null}
             <Link
               className="profile-button"
@@ -176,5 +188,6 @@ export async function AppShell({
 
       <main className="app-main">{children}</main>
     </div>
+    </>
   );
 }

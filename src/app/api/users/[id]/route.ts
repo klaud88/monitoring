@@ -32,6 +32,18 @@ export async function PATCH(
     return NextResponse.json({ message: "Invalid user payload" }, { status: 400 });
   }
 
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
+    return NextResponse.json({ message: "ელფოსტის ფორმატი არასწორია." }, { status: 400 });
+  }
+
+  if (password && password.length < 8) {
+    return NextResponse.json({ message: "პაროლი მინიმუმ 8 სიმბოლო უნდა იყოს." }, { status: 400 });
+  }
+
+  if (!/^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(color)) {
+    return NextResponse.json({ message: "ფერის ფორმატი არასწორია." }, { status: 400 });
+  }
+
   const updatedUser = await updateUser(id, {
     name,
     email,
