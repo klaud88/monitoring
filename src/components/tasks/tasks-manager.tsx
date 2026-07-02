@@ -113,7 +113,7 @@ export function TasksManager({
     phone: "",
     deviceId: sortedDevices[0]?.id || "",
     deviceQuery: sortedDevices[0]?.name || "",
-    assigneeId: assignableUsers[0]?.id || "",
+    assigneeIds: [] as string[],
     priority: "normal" as TaskPriority,
     tags: [] as string[],
     dueDate: new Date().toISOString().slice(0, 10),
@@ -205,7 +205,7 @@ export function TasksManager({
       issue: draft.issue.trim(),
       phone: draft.phone.trim(),
       deviceId: draft.deviceId,
-      assigneeIds: draft.assigneeId ? [draft.assigneeId] : [],
+      assigneeIds: draft.assigneeIds,
       status: "planned",
       priority: draft.priority,
       tags: draft.tags,
@@ -219,6 +219,7 @@ export function TasksManager({
       title: "",
       issue: "",
       phone: "",
+      assigneeIds: [],
       tags: [],
     }));
 
@@ -542,24 +543,28 @@ export function TasksManager({
                 inputMode="tel"
               />
             </label>
-            <label>
-              <span>მომხმარებელი</span>
-              <select
-                value={draft.assigneeId}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    assigneeId: event.target.value,
-                  }))
-                }
-              >
+            <div className="task-assignee-edit">
+              <span>მომხმარებლები</span>
+              <div className="row-tags">
                 {assignableUsers.map((user) => (
-                  <option key={user.id} value={user.id}>
+                  <button
+                    key={user.id}
+                    type="button"
+                    className={`tag-toggle compact ${draft.assigneeIds.includes(user.id) ? "active" : ""}`}
+                    onClick={() =>
+                      setDraft((current) => ({
+                        ...current,
+                        assigneeIds: current.assigneeIds.includes(user.id)
+                          ? current.assigneeIds.filter((id) => id !== user.id)
+                          : [...current.assigneeIds, user.id],
+                      }))
+                    }
+                  >
                     {user.name}
-                  </option>
+                  </button>
                 ))}
-              </select>
-            </label>
+              </div>
+            </div>
             <div className="form-row">
               <label>
                 <span>პრიორიტეტი</span>
