@@ -623,7 +623,7 @@ function createMarkerOverlay({
   };
 
   overlay.onRemove = () => {
-    root.unmount();
+    setTimeout(() => root.unmount(), 0);
     container.remove();
   };
 

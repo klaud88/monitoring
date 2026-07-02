@@ -14,7 +14,6 @@ import {
   WifiOff,
 } from "lucide-react";
 import { DeviceTagsEditor } from "@/components/devices/device-tags-editor";
-import { AppShell } from "@/components/layout/app-shell";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { tagCatalog } from "@/lib/catalog";
 import { withoutDeviceCodes } from "@/lib/display";
@@ -72,7 +71,7 @@ export default async function DeviceDetailsPage({
   );
 
   return (
-    <AppShell>
+    <>
       <section className="page-header">
         <div>
           <Link className="back-link" href={homePath}>
@@ -284,7 +283,7 @@ export default async function DeviceDetailsPage({
           </div>
         </div>
       </section>
-    </AppShell>
+    </>
   );
 }
 

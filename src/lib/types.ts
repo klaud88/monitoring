@@ -193,6 +193,21 @@ export type AuditLog = {
   createdAt: string;
 };
 
+export type AuditLogEntry = AuditLog & {
+  userName: string;
+  userEmail: string;
+  userRole: string;
+  ipAddress?: string;
+  userAgent?: string;
+};
+
+export type AuditLogsResult = {
+  entries: AuditLogEntry[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
 export type SessionUser = Omit<AppUser, "passwordHash">;
 
 export type AppRole = {

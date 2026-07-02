@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { NextResponse, type NextRequest } from "next/server";
 import { createSessionToken, SESSION_COOKIE, verifyPassword, verifySessionToken } from "@/lib/auth";
+import { logAudit } from "@/lib/audit";
 import { changeUserPassword, getUserByEmail } from "@/lib/repositories";
 import { shouldUseSecureCookie } from "@/lib/session";
 
@@ -46,6 +47,16 @@ export async function POST(request: NextRequest) {
   if (!changed) {
     return NextResponse.json({ message: "პაროლის შეცვლა ვერ მოხერხდა." }, { status: 500 });
   }
+
+  await logAudit({
+    userId: user.id,
+    action: "auth.change_password",
+    entityType: "user",
+    entityId: user.id,
+    metadata: { forced: user.mustChangePassword ?? false },
+    ipAddress: request.headers.get("x-forwarded-for") ?? undefined,
+    userAgent: request.headers.get("user-agent") ?? undefined,
+  });
 
   // Issue a fresh token with mustChangePassword cleared
   const updatedUser = { ...user, mustChangePassword: false };

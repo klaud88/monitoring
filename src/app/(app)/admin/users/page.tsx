@@ -1,6 +1,5 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { AppShell } from "@/components/layout/app-shell";
 import { UsersManager } from "@/components/users/users-manager";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { getFirstAllowedPath } from "@/lib/navigation";
@@ -20,16 +19,14 @@ export default async function UsersPage() {
   ]);
 
   return (
-    <AppShell>
-      <UsersManager
-        initialUsers={users}
-        roles={roles}
-        permissions={{
-          create: hasPermission(user, "users.create"),
-          edit: hasPermission(user, "users.edit"),
-          delete: hasPermission(user, "users.delete"),
-        }}
-      />
-    </AppShell>
+    <UsersManager
+      initialUsers={users}
+      roles={roles}
+      permissions={{
+        create: hasPermission(user, "users.create"),
+        edit: hasPermission(user, "users.edit"),
+        delete: hasPermission(user, "users.delete"),
+      }}
+    />
   );
 }

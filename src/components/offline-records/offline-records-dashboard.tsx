@@ -180,14 +180,21 @@ export function OfflineRecordsDashboard({
 
       const payload = (await response.json()) as {
         monitoredDevices?: MonitoredDevice[];
+        notifications?: unknown[];
       };
       if (payload.monitoredDevices) {
         setMonitoredDevices(payload.monitoredDevices);
+        // Share fresh data with the navbar bell so it skips its own HTTP request.
+        window.dispatchEvent(
+          new CustomEvent("monitoring-data", {
+            detail: { notifications: payload.notifications ?? [] },
+          }),
+        );
       }
     }
 
     void refreshMonitoring();
-    const intervalId = window.setInterval(refreshMonitoring, 12000);
+    const intervalId = window.setInterval(refreshMonitoring, 60000);
 
     return () => {
       cancelled = true;
@@ -689,7 +696,7 @@ function compareStatusFirst(
 }
 
 function compareDeviceNames(a: Device, b: Device) {
-  return a.name.localeCompare(b.name, "ka") || a.id.localeCompare(b.id, "ka");
+  return a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
 }
 
 function addDays(value: Date, days: number) {

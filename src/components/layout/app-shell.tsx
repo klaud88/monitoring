@@ -10,18 +10,18 @@ import {
   MapPinned,
   Menu,
   MonitorCog,
+  ScrollText,
   ShieldCheck,
   UserCircle,
   Users,
   WifiOff,
 } from "lucide-react";
-import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
+import { SESSION_COOKIE, hasPermission, isAdmin, verifySessionToken } from "@/lib/auth";
 import { getFirstAllowedPath } from "@/lib/navigation";
 import type { PermissionKey } from "@/lib/types";
 import { MustChangePasswordModal } from "@/components/auth/must-change-password-modal";
 import { AgencyLogo } from "./agency-logo";
-import { FormOneNotifications } from "./form-one-notifications";
-import { OfflineMonitorNotifications } from "./offline-monitor-notifications";
+import { NotificationsBell } from "./notifications-bell";
 import { ThemeToggle } from "./theme-toggle";
 
 type NavItem = {
@@ -100,6 +100,8 @@ export async function AppShell({
     return permissions.some((permission) => hasPermission(user, permission));
   });
 
+  const adminOnly = isAdmin(user);
+
   return (
     <>
     <MustChangePasswordModal mustChangePassword={user?.mustChangePassword ?? false} />
@@ -129,20 +131,23 @@ export async function AppShell({
                   </Link>
                 );
               })}
+              {adminOnly && (
+                <Link href="/admin/audit-logs" className="menu-link">
+                  <ScrollText size={18} />
+                  <span>Audit Logs</span>
+                </Link>
+              )}
             </nav>
           </details>
 
           <div className="account-actions">
             <ThemeToggle />
-            {hasPermission(user, "offline_records.view") ? (
-              <OfflineMonitorNotifications />
-            ) : null}
-            {hasPermission(user, "form_one.view") ? (
-              <FormOneNotifications
-                canRespondToCompletion={hasPermission(
-                  user,
-                  "form_one.completion_response",
-                )}
+            {hasPermission(user, "offline_records.view") ||
+            hasPermission(user, "form_one.view") ? (
+              <NotificationsBell
+                canOfflineMonitor={hasPermission(user, "offline_records.view")}
+                canFormOne={hasPermission(user, "form_one.view")}
+                canRespondToCompletion={hasPermission(user, "form_one.completion_response")}
               />
             ) : null}
             <Link
@@ -183,6 +188,12 @@ export async function AppShell({
               </Link>
             );
           })}
+          {adminOnly && (
+            <Link href="/admin/audit-logs" className="menu-link">
+              <ScrollText size={18} />
+              <span>Audit Logs</span>
+            </Link>
+          )}
         </nav>
       </header>
 

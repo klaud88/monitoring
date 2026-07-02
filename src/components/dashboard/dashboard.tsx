@@ -349,7 +349,7 @@ export function Dashboard({
     () =>
       activeDevices
         .filter((device) => device.status === "offline")
-        .sort((a, b) => a.name.localeCompare(b.name, "ka")),
+        .sort((a, b) => a.name.localeCompare(b.name)),
     [activeDevices],
   );
   const offlineCount = offlineDevices.length;

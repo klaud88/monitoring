@@ -1,5 +1,4 @@
 import { cookies } from "next/headers";
-import { AppShell } from "@/components/layout/app-shell";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
 
 export default async function ProfilePage() {
@@ -7,7 +6,7 @@ export default async function ProfilePage() {
   const user = await verifySessionToken(cookieStore.get(SESSION_COOKIE)?.value);
 
   return (
-    <AppShell>
+    <>
       <section className="page-header">
         <div>
           <p className="eyebrow">პროფილი</p>
@@ -45,6 +44,6 @@ export default async function ProfilePage() {
           </div>
         </div>
       </section>
-    </AppShell>
+    </>
   );
 }

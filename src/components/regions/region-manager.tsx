@@ -1141,13 +1141,13 @@ function toggleListValue(values: string[], value: string) {
 function compareDevices(a: Device, b: Device, sortMode: DeviceSortMode) {
   if (sortMode === "region") {
     return (
-      a.region.localeCompare(b.region, "ka") ||
-      a.name.localeCompare(b.name, "ka") ||
-      a.id.localeCompare(b.id, "ka")
+      a.region.localeCompare(b.region) ||
+      a.name.localeCompare(b.name) ||
+      a.id.localeCompare(b.id)
     );
   }
 
   const result =
-    a.name.localeCompare(b.name, "ka") || a.id.localeCompare(b.id, "ka");
+    a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
   return sortMode === "za" ? -result : result;
 }

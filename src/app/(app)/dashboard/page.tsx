@@ -1,6 +1,5 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { AppShell } from "@/components/layout/app-shell";
 import { Dashboard } from "@/components/dashboard/dashboard";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { getFirstAllowedPath } from "@/lib/navigation";
@@ -26,16 +25,14 @@ export default async function DashboardPage() {
   ]);
 
   return (
-    <AppShell>
-      <Dashboard
-        initialDevices={devices}
-        initialTasks={tasks}
-        initialTags={taskTags}
-        users={users}
-        canEditDeviceLocations={hasPermission(user, "devices.edit")}
-        canCreateTaskTags={hasPermission(user, "tasks.tag_create")}
-        canDeleteTaskTags={hasPermission(user, "tasks.tag_delete")}
-      />
-    </AppShell>
+    <Dashboard
+      initialDevices={devices}
+      initialTasks={tasks}
+      initialTags={taskTags}
+      users={users}
+      canEditDeviceLocations={hasPermission(user, "devices.edit")}
+      canCreateTaskTags={hasPermission(user, "tasks.tag_create")}
+      canDeleteTaskTags={hasPermission(user, "tasks.tag_delete")}
+    />
   );
 }

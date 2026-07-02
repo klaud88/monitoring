@@ -246,7 +246,7 @@ textarea:focus {
 
 .main-menu {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
   gap: 6px 8px;
@@ -479,6 +479,26 @@ textarea:focus {
   margin-top: 9px;
 }
 
+.notification-section {
+  display: grid;
+  gap: 6px;
+}
+
+.notification-section + .notification-section {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  margin-top: 2px;
+}
+
+.notification-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin: 0;
+}
+
 .notification-item {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -682,8 +702,31 @@ textarea:focus {
 }
 
 .app-main {
-  margin-top: 0px;
+  margin-top: 50px;
   padding: 22px;
+}
+
+.page-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40vh;
+}
+
+.page-loading-spinner {
+  display: block;
+  width: 36px;
+  height: 36px;
+  border: 3px solid var(--line);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: page-spin 0.7s linear infinite;
+}
+
+@keyframes page-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .login-page {

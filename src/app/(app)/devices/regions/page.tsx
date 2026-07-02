@@ -1,6 +1,5 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { AppShell } from "@/components/layout/app-shell";
 import { RegionManager } from "@/components/regions/region-manager";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { getFirstAllowedPath } from "@/lib/navigation";
@@ -22,22 +21,20 @@ export default async function DeviceRegionsPage() {
   ]);
 
   return (
-    <AppShell>
-      <RegionManager
-        initialDevices={devices}
-        initialRegions={regions}
-        initialTags={tags}
-        permissions={{
-          createDevice: hasPermission(user, "devices.create"),
-          editDevice: hasPermission(user, "devices.edit"),
-          deleteDevice: hasPermission(user, "devices.delete"),
-          createTags: hasPermission(user, "devices.edit"),
-          deleteTags: hasPermission(user, "devices.edit"),
-          createRegion: hasPermission(user, "regions.create"),
-          editRegion: hasPermission(user, "regions.edit"),
-          deleteRegion: hasPermission(user, "regions.delete"),
-        }}
-      />
-    </AppShell>
+    <RegionManager
+      initialDevices={devices}
+      initialRegions={regions}
+      initialTags={tags}
+      permissions={{
+        createDevice: hasPermission(user, "devices.create"),
+        editDevice: hasPermission(user, "devices.edit"),
+        deleteDevice: hasPermission(user, "devices.delete"),
+        createTags: hasPermission(user, "devices.edit"),
+        deleteTags: hasPermission(user, "devices.edit"),
+        createRegion: hasPermission(user, "regions.create"),
+        editRegion: hasPermission(user, "regions.edit"),
+        deleteRegion: hasPermission(user, "regions.delete"),
+      }}
+    />
   );
 }

@@ -1,6 +1,5 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { AppShell } from "@/components/layout/app-shell";
 import { AnalyticsDashboard } from "@/components/analytics/analytics-dashboard";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { getFirstAllowedPath } from "@/lib/navigation";
@@ -18,9 +17,5 @@ export default async function AnalyticsPage() {
     getOfflineSnapshots(),
   ]);
 
-  return (
-    <AppShell>
-      <AnalyticsDashboard devices={devices} snapshots={snapshots} />
-    </AppShell>
-  );
+  return <AnalyticsDashboard devices={devices} snapshots={snapshots} />;
 }

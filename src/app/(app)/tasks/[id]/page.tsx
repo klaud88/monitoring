@@ -13,7 +13,6 @@ import {
   Tags,
   UserRoundCheck,
 } from "lucide-react";
-import { AppShell } from "@/components/layout/app-shell";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { withoutDeviceCodes } from "@/lib/display";
 import { getFirstAllowedPath } from "@/lib/navigation";
@@ -64,7 +63,7 @@ export default async function TaskDetailsPage({
   const canEditTask = hasPermission(user, "tasks.edit");
 
   return (
-    <AppShell>
+    <>
       <section className="page-header">
         <div>
           <Link className="back-link" href="/tasks">
@@ -217,7 +216,7 @@ export default async function TaskDetailsPage({
           )}
         </div>
       </section>
-    </AppShell>
+    </>
   );
 }
 

@@ -1,6 +1,5 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { AppShell } from "@/components/layout/app-shell";
 import { TasksManager } from "@/components/tasks/tasks-manager";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { getFirstAllowedPath } from "@/lib/navigation";
@@ -34,21 +33,19 @@ export default async function TasksPage({
   const initialEditTaskId = Array.isArray(editParam) ? editParam[0] : editParam;
 
   return (
-    <AppShell>
-      <TasksManager
-        initialTasks={tasks}
-        devices={devices}
-        users={users}
-        initialTags={taskTags}
-        initialEditTaskId={initialEditTaskId}
-        permissions={{
-          create: hasPermission(user, "tasks.create"),
-          edit: hasPermission(user, "tasks.edit"),
-          delete: hasPermission(user, "tasks.delete"),
-          createTags: hasPermission(user, "tasks.tag_create"),
-          deleteTags: hasPermission(user, "tasks.tag_delete"),
-        }}
-      />
-    </AppShell>
+    <TasksManager
+      initialTasks={tasks}
+      devices={devices}
+      users={users}
+      initialTags={taskTags}
+      initialEditTaskId={initialEditTaskId}
+      permissions={{
+        create: hasPermission(user, "tasks.create"),
+        edit: hasPermission(user, "tasks.edit"),
+        delete: hasPermission(user, "tasks.delete"),
+        createTags: hasPermission(user, "tasks.tag_create"),
+        deleteTags: hasPermission(user, "tasks.tag_delete"),
+      }}
+    />
   );
 }

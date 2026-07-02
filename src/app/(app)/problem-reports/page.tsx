@@ -1,6 +1,5 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { AppShell } from "@/components/layout/app-shell";
 import { ProblemReportsManager } from "@/components/problem-reports/problem-reports-manager";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { getFirstAllowedPath } from "@/lib/navigation";
@@ -36,23 +35,21 @@ export default async function ProblemReportsPage() {
     : devices;
 
   return (
-    <AppShell>
-      <ProblemReportsManager
-        initialReports={reports}
-        devices={visibleDevices}
-        users={users}
-        initialTags={taskTags}
-        permissions={{
-          create: hasPermission(user, "problem_reports.create"),
-          edit: hasPermission(user, "problem_reports.edit"),
-          delete: hasPermission(user, "problem_reports.delete"),
-          assignUsers: canAssignUsers,
-          manageTags: hasPermission(user, "problem_reports.tag"),
-          createTags: hasPermission(user, "problem_reports.tag_create"),
-          deleteTags: hasPermission(user, "problem_reports.tag_delete"),
-          manageStatus: hasPermission(user, "problem_reports.status"),
-        }}
-      />
-    </AppShell>
+    <ProblemReportsManager
+      initialReports={reports}
+      devices={visibleDevices}
+      users={users}
+      initialTags={taskTags}
+      permissions={{
+        create: hasPermission(user, "problem_reports.create"),
+        edit: hasPermission(user, "problem_reports.edit"),
+        delete: hasPermission(user, "problem_reports.delete"),
+        assignUsers: canAssignUsers,
+        manageTags: hasPermission(user, "problem_reports.tag"),
+        createTags: hasPermission(user, "problem_reports.tag_create"),
+        deleteTags: hasPermission(user, "problem_reports.tag_delete"),
+        manageStatus: hasPermission(user, "problem_reports.status"),
+      }}
+    />
   );
 }

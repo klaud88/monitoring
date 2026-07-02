@@ -15,7 +15,6 @@ export async function GET(request: NextRequest) {
   }
 
   const monitoredDevices = await refreshMonitoredDeviceStatuses({
-    sync: true,
     includeInactive: true,
   });
   return NextResponse.json({

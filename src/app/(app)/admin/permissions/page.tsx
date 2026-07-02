@@ -1,6 +1,5 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { AppShell } from "@/components/layout/app-shell";
 import { PermissionsManager } from "@/components/permissions/permissions-manager";
 import {
   SESSION_COOKIE,
@@ -21,11 +20,9 @@ export default async function PermissionsPage() {
   const roles = await getRoles();
 
   return (
-    <AppShell>
-      <PermissionsManager
-        roles={roles}
-        canEdit={isAdmin(user)}
-      />
-    </AppShell>
+    <PermissionsManager
+      roles={roles}
+      canEdit={isAdmin(user)}
+    />
   );
 }

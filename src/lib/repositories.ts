@@ -9,6 +9,8 @@ import { prisma } from "./prisma";
 import type {
   AppUser,
   AppRole,
+  AuditLogEntry,
+  AuditLogsResult,
   Device,
   DeviceStatus,
   FormOneDueDateEntry,
@@ -136,6 +138,7 @@ type DatabaseDate = string | Date;
 
 const TBILISI_TIME_ZONE = "Asia/Tbilisi";
 const DEFAULT_BIOSTAR_SYNC_TTL_MS = 60 * 60 * 1000;
+const DEFAULT_BIOSTAR_SYNC_FAILURE_BACKOFF_MS = 5 * 60 * 1000;
 const UNASSIGNED_REGION = "დაუნაწილებელი";
 const DEFAULT_REGION_COLORS = [
   "#2563eb",
@@ -308,6 +311,7 @@ const ACCESS_PERMISSIONS = [
   ...TASK_TAG_PERMISSIONS,
 ];
 let lastBiostarSyncAt = 0;
+let nextBiostarSyncAllowedAt = 0;
 let biostarSyncPromise: Promise<{ synced: number; syncedAt: string }> | null =
   null;
 let operationalSchemaPromise: Promise<void> | null = null;
@@ -502,19 +506,12 @@ const getSyncTtlMs = () => {
     : DEFAULT_BIOSTAR_SYNC_TTL_MS;
 };
 
-async function ensureBiostarDeviceSync() {
-  if (!hasBiostarConfig() || isBuildTime()) {
-    return;
-  }
-
-  try {
-    await syncBiostarDevices();
-  } catch (error) {
-    console.warn(
-      `[biostar] ${error instanceof Error ? error.message : "Sync failed"}`,
-    );
-  }
-}
+const getSyncFailureBackoffMs = () => {
+  const configured = Number(process.env.BIOSTAR2_SYNC_FAILURE_BACKOFF_MS);
+  return Number.isFinite(configured) && configured >= 0
+    ? configured
+    : DEFAULT_BIOSTAR_SYNC_FAILURE_BACKOFF_MS;
+};
 
 export async function syncBiostarDevices({
   force = false,
@@ -524,14 +521,26 @@ export async function syncBiostarDevices({
   }
 
   const now = Date.now();
+  if (!force && nextBiostarSyncAllowedAt && now < nextBiostarSyncAllowedAt) {
+    return {
+      synced: 0,
+      syncedAt: new Date(lastBiostarSyncAt || now).toISOString(),
+    };
+  }
+
   if (!force && lastBiostarSyncAt && now - lastBiostarSyncAt < getSyncTtlMs()) {
     return { synced: 0, syncedAt: new Date(lastBiostarSyncAt).toISOString() };
   }
 
   if (!biostarSyncPromise) {
-    biostarSyncPromise = runBiostarDeviceSync().finally(() => {
-      biostarSyncPromise = null;
-    });
+    biostarSyncPromise = runBiostarDeviceSync()
+      .catch((error) => {
+        nextBiostarSyncAllowedAt = Date.now() + getSyncFailureBackoffMs();
+        throw error;
+      })
+      .finally(() => {
+        biostarSyncPromise = null;
+      });
   }
 
   return biostarSyncPromise;
@@ -541,6 +550,7 @@ async function runBiostarDeviceSync() {
   await ensureOperationalSchema();
   const biostarDevices = await fetchBiostarDevices();
   const syncedAt = new Date();
+  nextBiostarSyncAllowedAt = 0;
 
   if (!biostarDevices.length) {
     lastBiostarSyncAt = syncedAt.getTime();
@@ -551,11 +561,6 @@ async function runBiostarDeviceSync() {
       await connection.beginTransaction();
       try {
         for (const device of biostarDevices) {
-          const [existingRows] = await connection.query<RowDataPacket[]>(
-            "select status from devices where id = ? limit 1 for update",
-            [device.id],
-          );
-          const previousStatus = normalizeDeviceStatus(existingRows[0]?.status);
           await connection.query<ResultSetHeader>(
             `
               insert into devices
@@ -579,7 +584,6 @@ async function runBiostarDeviceSync() {
             device.id,
             device.status,
             syncedAt,
-            previousStatus,
           );
       }
 
@@ -1859,7 +1863,6 @@ export async function getDevices(): Promise<Device[]> {
     return mockDevices;
   }
 
-  await ensureBiostarDeviceSync();
   await ensureOperationalSchema();
 
   const rows = await queryRows<DeviceRow>(
@@ -2360,11 +2363,6 @@ export async function updateDevice(
     try {
       const regionId = await getRegionIdByName(connection, input.region);
       const position = clampLatLng(input.position);
-      const [existingRows] = await connection.query<RowDataPacket[]>(
-        "select status from devices where id = ? limit 1 for update",
-        [id],
-      );
-      const previousStatus = normalizeDeviceStatus(existingRows[0]?.status);
       const [result] = await connection.query<ResultSetHeader>(
         `
           update devices
@@ -2407,7 +2405,6 @@ export async function updateDevice(
           id,
           input.status,
           new Date(),
-          previousStatus,
         );
       }
       await connection.commit();
@@ -2475,14 +2472,6 @@ export async function ensureTodayOfflineSnapshot() {
 export async function captureDailyOfflineSnapshot(value = new Date()) {
   if (isBuildTime()) {
     return null;
-  }
-
-  try {
-    await syncBiostarDevices({ force: true });
-  } catch (error) {
-    console.warn(
-      `[biostar] ${error instanceof Error ? error.message : "Snapshot sync failed"}`,
-    );
   }
 
   await ensureOperationalSchema();
@@ -2716,53 +2705,27 @@ export async function getMonitoredDevices({
 }
 
 export async function refreshMonitoredDeviceStatuses({
-  sync = false,
   includeInactive = true,
 }: {
-  sync?: boolean;
   includeInactive?: boolean;
 } = {}) {
-  if (sync && hasBiostarConfig()) {
-    try {
-      await syncBiostarDevices({ force: true });
-    } catch (error) {
-      console.warn(
-        `[biostar] ${
-          error instanceof Error ? error.message : "Monitoring sync failed"
-        }`,
-      );
-    }
-  }
-
   await ensureOperationalSchema();
 
   await withConnection(async (connection) => {
-    await connection.beginTransaction();
-    try {
-      const [rows] = await connection.query<RowDataPacket[]>(
-        `
-          select md.device_id, md.last_status, d.status
-          from monitored_devices md
-          join devices d on d.id = md.device_id and d.is_excluded = false
-          where md.is_active = true
-          for update
-        `,
+    const [rows] = await connection.query<RowDataPacket[]>(
+      `select md.device_id, d.status
+       from monitored_devices md
+       join devices d on d.id = md.device_id and d.is_excluded = false
+       where md.is_active = true`,
+    );
+
+    for (const row of rows) {
+      await updateMonitoredDeviceStatus(
+        connection,
+        String(row.device_id),
+        normalizeDeviceStatus(row.status) ?? "error",
+        new Date(),
       );
-
-      for (const row of rows) {
-        await updateMonitoredDeviceStatus(
-          connection,
-          String(row.device_id),
-          normalizeDeviceStatus(row.status) ?? "error",
-          new Date(),
-          normalizeDeviceStatus(row.last_status),
-        );
-      }
-
-      await connection.commit();
-    } catch (error) {
-      await connection.rollback();
-      throw error;
     }
   });
 
@@ -2878,75 +2841,47 @@ async function updateMonitoredDeviceStatus(
   deviceId: string,
   status: DeviceStatus,
   happenedAt: Date,
-  previousStatus?: DeviceStatus | null,
 ) {
-  const [rows] = await connection.query<RowDataPacket[]>(
-    `
-      select last_status, is_active
-      from monitored_devices
-      where device_id = ? and is_active = true
-      limit 1
-      for update
-    `,
-    [deviceId],
-  );
-  const row = rows[0];
-  if (!row || !toBoolean(row.is_active)) {
-    return;
-  }
-
-  const trackedStatus =
-    normalizeDeviceStatus(row.last_status) ?? previousStatus ?? null;
-  const shouldIncrement =
-    status === "offline" && trackedStatus !== null && trackedStatus !== "offline";
   const happenedAtSql = toSqlDateTime(happenedAt);
 
-  if (shouldIncrement) {
-    await connection.query<ResultSetHeader>(
-      `
-        insert into monitored_device_offline_periods
-          (id, device_id, offline_at)
-        values (?, ?, ?)
-      `,
-      [makeId("mon-offline"), deviceId, happenedAtSql],
+  if (status === "offline") {
+    // Atomic: only increment if NOT already offline — prevents double-counting under concurrent polls.
+    const [result] = await connection.query<ResultSetHeader>(
+      `update monitored_devices
+       set offline_count = offline_count + 1,
+           last_status = 'offline',
+           last_offline_at = ?,
+           last_notification_at = ?,
+           updated_at = current_timestamp
+       where device_id = ?
+         and is_active = true
+         and (last_status is null or last_status != 'offline')`,
+      [happenedAtSql, happenedAtSql, deviceId],
     );
-    await connection.query<ResultSetHeader>(
-      `
-        update monitored_devices
-        set
-          offline_count = offline_count + 1,
-          last_status = ?,
-          last_offline_at = ?,
-          last_notification_at = ?,
-          updated_at = current_timestamp
-        where device_id = ?
-      `,
-      [status, happenedAtSql, happenedAtSql, deviceId],
-    );
+    if (result.affectedRows > 0) {
+      await connection.query<ResultSetHeader>(
+        `insert into monitored_device_offline_periods (id, device_id, offline_at) values (?, ?, ?)`,
+        [makeId("mon-offline"), deviceId, happenedAtSql],
+      );
+    }
     return;
   }
 
-  if (trackedStatus === "offline" && status !== "offline") {
-    await connection.query<ResultSetHeader>(
-      `
-        update monitored_device_offline_periods
-        set online_at = ?
-        where device_id = ? and online_at is null
-        order by offline_at desc
-        limit 1
-      `,
+  // Online/error: atomically update only if status actually changed.
+  const [result] = await connection.query<ResultSetHeader>(
+    `update monitored_devices
+     set last_status = ?, updated_at = current_timestamp
+     where device_id = ? and is_active = true and (last_status is null or last_status != ?)`,
+    [status, deviceId, status],
+  );
+  if (result.affectedRows > 0) {
+    // Close any open offline period (idempotent — no-op if none is open).
+    await connection.query(
+      `update monitored_device_offline_periods
+       set online_at = ?
+       where device_id = ? and online_at is null
+       order by offline_at desc limit 1`,
       [happenedAtSql, deviceId],
-    );
-  }
-
-  if (trackedStatus !== status) {
-    await connection.query<ResultSetHeader>(
-      `
-        update monitored_devices
-        set last_status = ?, updated_at = current_timestamp
-        where device_id = ?
-      `,
-      [status, deviceId],
     );
   }
 }
@@ -4380,6 +4315,88 @@ async function upsertTaskForProblemReport(
   }
 }
 
+export async function getAuditLogs(opts: {
+  page?: number;
+  pageSize?: number;
+  action?: string;
+  entityType?: string;
+  userId?: string;
+  from?: string;
+  to?: string;
+}): Promise<AuditLogsResult> {
+  const page = Math.max(1, opts.page ?? 1);
+  const pageSize = Math.min(100, Math.max(10, opts.pageSize ?? 50));
+  const offset = (page - 1) * pageSize;
+
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (opts.action) {
+    conditions.push("al.action like ?");
+    params.push(`%${opts.action}%`);
+  }
+  if (opts.entityType) {
+    conditions.push("al.entity_type = ?");
+    params.push(opts.entityType);
+  }
+  if (opts.userId) {
+    conditions.push("al.user_id = ?");
+    params.push(opts.userId);
+  }
+  if (opts.from) {
+    conditions.push("al.created_at >= ?");
+    params.push(opts.from);
+  }
+  if (opts.to) {
+    conditions.push("al.created_at <= ?");
+    params.push(`${opts.to} 23:59:59`);
+  }
+
+  const where = conditions.length ? `where ${conditions.join(" and ")}` : "";
+
+  const countRows = await queryRows<RowDataPacket>(
+    `select count(*) as total from audit_logs al ${where}`,
+    params,
+  );
+  const total = Number(((countRows ?? [])[0] as RowDataPacket | undefined)?.total ?? 0);
+
+  const rows = await queryRows<RowDataPacket>(
+    `
+      select
+        al.id, al.user_id, al.action, al.entity_type, al.entity_id,
+        al.metadata, al.ip_address, al.user_agent,
+        al.created_at,
+        u.name as user_name, u.email as user_email, r.name as user_role
+      from audit_logs al
+      left join users u on u.id = al.user_id
+      left join roles r on r.id = u.role_id
+      ${where}
+      order by al.created_at desc
+      limit ? offset ?
+    `,
+    [...params, pageSize, offset],
+  );
+
+  const entries: AuditLogEntry[] = (rows as RowDataPacket[]).map((row) => ({
+    id: String(row.id),
+    userId: String(row.user_id),
+    action: String(row.action),
+    entityType: String(row.entity_type),
+    entityId: row.entity_id ? String(row.entity_id) : undefined,
+    metadata: row.metadata ?? undefined,
+    createdAt: row.created_at instanceof Date
+      ? row.created_at.toISOString()
+      : String(row.created_at),
+    userName: String(row.user_name ?? "—"),
+    userEmail: String(row.user_email ?? "—"),
+    userRole: String(row.user_role ?? "—"),
+    ipAddress: row.ip_address ? String(row.ip_address) : undefined,
+    userAgent: row.user_agent ? String(row.user_agent) : undefined,
+  }));
+
+  return { entries, total, page, pageSize };
+}
+
 export async function updateTaskStatus(
   id: string,
   status: TaskStatus,
@@ -4399,4 +4416,10 @@ export async function updateTaskStatus(
 
   const task = mockTasks.find((item) => item.id === id);
   return task ? { ...task, status } : null;
+}
+
+// Kick off schema migration as soon as this module is first imported so the
+// 200-400ms DDL cost is paid in the background, not blocking the first request.
+if (!isBuildTime()) {
+  void ensureOperationalSchema();
 }

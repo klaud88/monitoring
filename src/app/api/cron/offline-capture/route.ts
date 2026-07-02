@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
-import { captureDailyOfflineSnapshot } from "@/lib/repositories";
+import { captureDailyOfflineSnapshot, syncBiostarDevices } from "@/lib/repositories";
 
 export async function POST(request: NextRequest) {
   const user = await verifySessionToken(
@@ -14,6 +14,12 @@ export async function POST(request: NextRequest) {
 
   if (!hasCronSecret && !hasPermission(user, "offline_records.create")) {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    await syncBiostarDevices({ force: true });
+  } catch (error) {
+    console.warn(`[biostar] ${error instanceof Error ? error.message : "Sync failed"}`);
   }
 
   const snapshot = await captureDailyOfflineSnapshot();

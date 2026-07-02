@@ -1,6 +1,5 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { AppShell } from "@/components/layout/app-shell";
 import { OfflineRecordsDashboard } from "@/components/offline-records/offline-records-dashboard";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { getFirstAllowedPath } from "@/lib/navigation";
@@ -18,8 +17,8 @@ export default async function OfflineRecordsPage() {
     redirect(getFirstAllowedPath(user));
   }
 
-  await ensureTodayOfflineSnapshot();
-  const [devices, snapshots, monitoredDevices] = await Promise.all([
+  const [, devices, snapshots, monitoredDevices] = await Promise.all([
+    ensureTodayOfflineSnapshot(),
     getDevices(),
     getOfflineSnapshots(),
     getMonitoredDevices({ includeInactive: true }),
@@ -27,12 +26,10 @@ export default async function OfflineRecordsPage() {
   const activeDevices = devices.filter((device) => !device.isExcluded);
 
   return (
-    <AppShell>
-      <OfflineRecordsDashboard
-        initialDevices={activeDevices}
-        initialSnapshots={snapshots}
-        initialMonitoredDevices={monitoredDevices}
-      />
-    </AppShell>
+    <OfflineRecordsDashboard
+      initialDevices={activeDevices}
+      initialSnapshots={snapshots}
+      initialMonitoredDevices={monitoredDevices}
+    />
   );
 }

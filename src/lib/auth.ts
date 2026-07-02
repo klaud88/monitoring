@@ -1,6 +1,5 @@
 import bcrypt from "bcryptjs";
 import { jwtVerify, SignJWT } from "jose";
-import { getUserById } from "./repositories";
 import { SESSION_COOKIE } from "./session";
 import type { AppUser, PermissionKey, SessionUser } from "./types";
 
@@ -46,6 +45,10 @@ export async function createSessionToken(user: AppUser | SessionUser) {
     .sign(getSecret());
 }
 
+// Reads user data directly from the signed JWT payload — no DB query needed.
+// Security trade-off: if a user is deleted or their permissions change,
+// the session remains valid until the JWT expires (10 hours).
+// Emergency invalidation: rotate AUTH_SECRET to invalidate all sessions instantly.
 export async function verifySessionToken(token?: string): Promise<SessionUser | null> {
   if (!token) {
     return null;
@@ -57,12 +60,21 @@ export async function verifySessionToken(token?: string): Promise<SessionUser | 
       return null;
     }
 
-    const dbUser = await getUserById(payload.sub).catch(() => null);
-    if (!dbUser) {
-      return null;
-    }
-
-    return dbUser;
+    return {
+      id: payload.sub,
+      name: String(payload.name),
+      email: String(payload.email),
+      role: String(payload.role),
+      initials: String(payload.initials ?? ""),
+      color: String(payload.color ?? "#2563eb"),
+      permissions: Array.isArray(payload.permissions)
+        ? (payload.permissions as PermissionKey[])
+        : [],
+      deviceGroupCode: payload.deviceGroupCode
+        ? String(payload.deviceGroupCode)
+        : undefined,
+      mustChangePassword: Boolean(payload.mustChangePassword),
+    };
   } catch {
     return null;
   }
