@@ -142,10 +142,10 @@ export async function AppShell({
 
           <div className="account-actions">
             <ThemeToggle />
-            {hasPermission(user, "offline_records.view") ||
+            {hasPermission(user, "offline_records.alerts") ||
             hasPermission(user, "form_one.view") ? (
               <NotificationsBell
-                canOfflineMonitor={hasPermission(user, "offline_records.view")}
+                canOfflineMonitor={hasPermission(user, "offline_records.alerts")}
                 canFormOne={hasPermission(user, "form_one.view")}
                 canRespondToCompletion={hasPermission(user, "form_one.completion_response")}
               />

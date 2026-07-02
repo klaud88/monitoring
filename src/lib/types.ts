@@ -23,6 +23,7 @@ export type PermissionAction =
   | "delete"
   | "assign"
   | "approve"
+  | "alerts"
   | "comment_edit"
   | "completion_request"
   | "completion_response"

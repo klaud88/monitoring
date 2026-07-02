@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
   const user = await verifySessionToken(
     request.cookies.get(SESSION_COOKIE)?.value,
   );
-  if (!hasPermission(user, "offline_records.view")) {
+  if (!hasPermission(user, "offline_records.alerts")) {
     return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   }
 

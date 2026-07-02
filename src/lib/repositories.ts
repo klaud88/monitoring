@@ -305,10 +305,23 @@ const TASK_TAG_PERMISSIONS: {
     roles: ["admin"],
   },
 ];
+const OFFLINE_MONITOR_PERMISSIONS: {
+  code: PermissionKey;
+  label: string;
+  roles: string[];
+}[] = [
+  {
+    code: "offline_records.alerts",
+    label: "Offline მონიტორინგი: შეტყობინებები",
+    roles: ["admin", "technician"],
+  },
+];
+
 const ACCESS_PERMISSIONS = [
   ...PROBLEM_REPORT_PERMISSIONS,
   ...FORM_ONE_PERMISSIONS,
   ...TASK_TAG_PERMISSIONS,
+  ...OFFLINE_MONITOR_PERMISSIONS,
 ];
 let lastBiostarSyncAt = 0;
 let nextBiostarSyncAllowedAt = 0;
@@ -606,6 +619,13 @@ async function ensureOperationalSchema() {
 
   if (!operationalSchemaPromise) {
     operationalSchemaPromise = withConnection(async (connection) => {
+      // Revoke offline_records.alerts from all non-admin/non-technician roles
+      await connection.query(
+        `delete rp from role_permissions rp
+         join roles r on r.id = rp.role_id
+         join permissions p on p.id = rp.permission_id
+         where p.code = 'offline_records.alerts' and r.name not in ('admin', 'technician')`,
+      );
       // Revoke form_one.comment_edit from all non-admin roles (admin-only permission)
       await connection.query(
         `delete rp from role_permissions rp
