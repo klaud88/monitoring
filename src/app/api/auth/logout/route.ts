@@ -17,7 +17,8 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const response = NextResponse.redirect(new URL("/login", request.url), 303);
+  const base = process.env.APP_URL?.replace(/\/+$/, "") || request.nextUrl.origin;
+  const response = NextResponse.redirect(new URL("/login", base), 303);
   response.cookies.set(SESSION_COOKIE, "", {
     httpOnly: true,
     sameSite: "strict",
