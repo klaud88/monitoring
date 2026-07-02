@@ -414,7 +414,7 @@ export function NotificationsBell({
       </div>
 
       {selected ? (
-        <div className="quick-task-modal-backdrop-bell" role="presentation">
+        <div className="quick-task-modal-backdrop" role="presentation">
           <section
             className="quick-task-modal form-one-notification-modal"
             role="dialog"
