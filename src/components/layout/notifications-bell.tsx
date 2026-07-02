@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Bell,
   BellRing,
@@ -413,7 +414,7 @@ export function NotificationsBell({
         ) : null}
       </div>
 
-      {selected ? (
+      {selected ? createPortal(
         <div className="quick-task-modal-backdrop" role="presentation">
           <section
             className="quick-task-modal form-one-notification-modal"
@@ -491,7 +492,8 @@ export function NotificationsBell({
               ) : null}
             </div>
           </section>
-        </div>
+        </div>,
+        document.body,
       ) : null}
     </>
   );
