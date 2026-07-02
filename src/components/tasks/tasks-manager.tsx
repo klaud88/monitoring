@@ -9,6 +9,7 @@ import {
   Edit3,
   Filter,
   MapPin,
+  Minus,
   Plus,
   Save,
   Search,
@@ -105,6 +106,7 @@ export function TasksManager({
   const [editDraft, setEditDraft] = useState<TaskDraft | null>(null);
   const [savingTaskId, setSavingTaskId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
   const { confirm, confirmationDialog } = useConfirmDialog();
   const initialEditHandledRef = useRef<string | null>(null);
   const [draft, setDraft] = useState(() => ({
@@ -474,143 +476,151 @@ export function TasksManager({
       <section className="content-grid task-admin-grid">
         {permissions.create ? (
           <form className="surface admin-form task-create-form" onSubmit={createTask}>
-            <div className="section-title">
+            <button
+              type="button"
+              className="section-title"
+              onClick={() => setCreateOpen((o) => !o)}
+            >
               <h2>ახალი ტასკი</h2>
-              <Plus size={20} />
-            </div>
-            <label>
-              <span>დავაისი</span>
-              <input
-                list="new-task-device-options"
-                value={draft.deviceQuery}
-                onChange={(event) => {
-                  const deviceQuery = event.target.value;
-                  const selectedDevice = findDeviceByName(
-                    sortedDevices,
-                    deviceQuery,
-                  );
-                  setDraft((current) => ({
-                    ...current,
-                    deviceQuery,
-                    deviceId: selectedDevice?.id ?? "",
-                  }));
-                }}
-                required
-              />
-              <datalist id="new-task-device-options">
-                {sortedDevices.map((device) => (
-                  <option key={device.id} value={device.name} />
-                ))}
-              </datalist>
-            </label>
-            <label>
-              <span>სათაური</span>
-              <input
-                value={draft.title}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    title: event.target.value,
-                  }))
-                }
-                required
-              />
-            </label>
-            <label>
-              <span>საკითხი</span>
-              <textarea
-                value={draft.issue}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    issue: event.target.value,
-                  }))
-                }
-                rows={4}
-                required
-              />
-            </label>
-            <label>
-              <span>ტელეფონი</span>
-              <input
-                value={draft.phone}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    phone: event.target.value,
-                  }))
-                }
-                inputMode="tel"
-              />
-            </label>
-            <div className="task-assignee-edit">
-              <span>მომხმარებლები</span>
-              <div className="row-tags">
-                {assignableUsers.map((user) => (
-                  <button
-                    key={user.id}
-                    type="button"
-                    className={`tag-toggle compact ${draft.assigneeIds.includes(user.id) ? "active" : ""}`}
-                    onClick={() =>
+              {createOpen ? <Minus size={20} /> : <Plus size={20} />}
+            </button>
+            {createOpen && (
+              <>
+                <label>
+                  <span>დავაისი</span>
+                  <input
+                    list="new-task-device-options"
+                    value={draft.deviceQuery}
+                    onChange={(event) => {
+                      const deviceQuery = event.target.value;
+                      const selectedDevice = findDeviceByName(
+                        sortedDevices,
+                        deviceQuery,
+                      );
                       setDraft((current) => ({
                         ...current,
-                        assigneeIds: current.assigneeIds.includes(user.id)
-                          ? current.assigneeIds.filter((id) => id !== user.id)
-                          : [...current.assigneeIds, user.id],
+                        deviceQuery,
+                        deviceId: selectedDevice?.id ?? "",
+                      }));
+                    }}
+                    required
+                  />
+                  <datalist id="new-task-device-options">
+                    {sortedDevices.map((device) => (
+                      <option key={device.id} value={device.name} />
+                    ))}
+                  </datalist>
+                </label>
+                <label>
+                  <span>სათაური</span>
+                  <input
+                    value={draft.title}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        title: event.target.value,
                       }))
                     }
-                  >
-                    {user.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="form-row">
-              <label>
-                <span>პრიორიტეტი</span>
-                <select
-                  value={draft.priority}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      priority: event.target.value as TaskPriority,
-                    }))
-                  }
-                >
-                  {Object.entries(priorityLabels).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span>ვადა</span>
-                <input
-                  type="date"
-                  value={draft.dueDate}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      dueDate: event.target.value,
-                    }))
-                  }
+                    required
+                  />
+                </label>
+                <label>
+                  <span>საკითხი</span>
+                  <textarea
+                    value={draft.issue}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        issue: event.target.value,
+                      }))
+                    }
+                    rows={4}
+                    required
+                  />
+                </label>
+                <label>
+                  <span>ტელეფონი</span>
+                  <input
+                    value={draft.phone}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        phone: event.target.value,
+                      }))
+                    }
+                    inputMode="tel"
+                  />
+                </label>
+                <div className="task-assignee-edit">
+                  <span>მომხმარებლები</span>
+                  <div className="row-tags">
+                    {assignableUsers.map((user) => (
+                      <button
+                        key={user.id}
+                        type="button"
+                        className={`tag-toggle compact ${draft.assigneeIds.includes(user.id) ? "active" : ""}`}
+                        onClick={() =>
+                          setDraft((current) => ({
+                            ...current,
+                            assigneeIds: current.assigneeIds.includes(user.id)
+                              ? current.assigneeIds.filter((id) => id !== user.id)
+                              : [...current.assigneeIds, user.id],
+                          }))
+                        }
+                      >
+                        {user.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="form-row">
+                  <label>
+                    <span>პრიორიტეტი</span>
+                    <select
+                      value={draft.priority}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          priority: event.target.value as TaskPriority,
+                        }))
+                      }
+                    >
+                      {Object.entries(priorityLabels).map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>ვადა</span>
+                    <input
+                      type="date"
+                      value={draft.dueDate}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          dueDate: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                </div>
+                <TaskTagPicker
+                  availableTags={availableTags}
+                  selectedTags={draft.tags}
+                  canCreateTags={permissions.createTags}
+                  canDeleteTags={permissions.deleteTags}
+                  onToggle={toggleDraftTag}
+                  onCreateTag={createAvailableTag}
+                  onDeleteTag={removeAvailableTag}
                 />
-              </label>
-            </div>
-            <TaskTagPicker
-              availableTags={availableTags}
-              selectedTags={draft.tags}
-              canCreateTags={permissions.createTags}
-              canDeleteTags={permissions.deleteTags}
-              onToggle={toggleDraftTag}
-              onCreateTag={createAvailableTag}
-              onDeleteTag={removeAvailableTag}
-            />
-            <button className="primary-button" type="submit">
-              <Plus size={18} />
-              <span>დამატება</span>
-            </button>
+                <button className="primary-button" type="submit">
+                  <Plus size={18} />
+                  <span>დამატება</span>
+                </button>
+              </>
+            )}
           </form>
         ) : (
           <section className="surface empty-state">დამატების უფლება არ გაქვთ.</section>

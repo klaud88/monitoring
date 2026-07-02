@@ -10,6 +10,7 @@ import {
   Hash,
   MapPin,
   MessageSquare,
+  Minus,
   Phone,
   Plus,
   Save,
@@ -313,6 +314,7 @@ export function FormOneManager({
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
   const { confirm, confirmationDialog } = useConfirmDialog();
 
   const selectedGarden = gardenOptions.find(
@@ -838,7 +840,18 @@ export function FormOneManager({
 
       {error ? <p className="form-error page-error">{error}</p> : null}
 
-      {showForm ? (
+      {permissions.create && !isEditing ? (
+        <button
+          type="button"
+          className="surface section-title"
+          onClick={() => setCreateOpen((o) => !o)}
+        >
+          <h2>ახალი ფორმა ერთი</h2>
+          {createOpen ? <Minus size={20} /> : <Plus size={20} />}
+        </button>
+      ) : null}
+
+      {(permissions.create && createOpen) || isEditing ? (
         <form
           className="surface form-one-surface form-one-attention"
           onSubmit={saveFormOneRecord}

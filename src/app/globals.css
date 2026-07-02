@@ -1227,6 +1227,31 @@ textarea:focus {
   margin-bottom: 12px;
 }
 
+.dashboard-tag-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.dashboard-tag-filters .tag-filter {
+  margin-bottom: 8px;
+}
+
+.dashboard-tag-filters .tag-filter:last-child {
+  margin-bottom: 14px;
+}
+
+.tag-filter-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+  align-self: center;
+  padding-right: 2px;
+}
+
 .search-field {
   min-width: 260px;
   flex: 1 1 260px;
@@ -1830,6 +1855,22 @@ button.pin-shell {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+button.section-title {
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  border-radius: 0;
+  transition: opacity 0.15s;
+}
+button.section-title:hover {
+  opacity: 0.7;
 }
 
 .rail-header h2,

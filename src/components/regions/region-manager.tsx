@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import {
   Edit3,
   MapPinned,
+  Minus,
   Plus,
   Save,
   Search,
@@ -94,6 +95,8 @@ export function RegionManager({
   const [deviceEdit, setDeviceEdit] = useState<DeviceDraft | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [regionsOpen, setRegionsOpen] = useState(false);
+  const [deviceOpen, setDeviceOpen] = useState(false);
   const { confirm, confirmationDialog } = useConfirmDialog();
 
   const regionNames = regions.map((region) => region.name);
@@ -552,12 +555,12 @@ export function RegionManager({
       <section className="content-grid region-grid">
         <aside className="region-left-column">
           <section className="surface">
-          <div className="section-title">
+          <button type="button" className="section-title" onClick={() => setRegionsOpen((o) => !o)}>
             <h2>რაიონები</h2>
-            <MapPinned size={20} />
-          </div>
+            {regionsOpen ? <Minus size={20} /> : <MapPinned size={20} />}
+          </button>
 
-          {permissions.createRegion ? (
+          {regionsOpen && permissions.createRegion ? (
             <form className="region-admin-form" onSubmit={createRegion}>
               <input
                 value={newRegion.name}
@@ -587,7 +590,7 @@ export function RegionManager({
             </form>
           ) : null}
 
-          <div className="region-admin-list">
+          {regionsOpen && <div className="region-admin-list">
             {regionSummary.map((item) => (
               <div key={item.region.id} className="region-admin-row">
                 {editingRegionId === item.region.id ? (
@@ -672,7 +675,7 @@ export function RegionManager({
                 )}
               </div>
             ))}
-          </div>
+          </div>}
           </section>
 
           {permissions.createDevice ? (
@@ -680,27 +683,31 @@ export function RegionManager({
               className="surface admin-form device-create-form"
               onSubmit={createDevice}
             >
-              <div className="section-title">
+              <button type="button" className="section-title" onClick={() => setDeviceOpen((o) => !o)}>
                 <h2>ახალი X-Station</h2>
-                <Plus size={20} />
-              </div>
-              <DeviceDraftFields
-                draft={draft}
-                onChange={(partial) =>
-                  setDraft((current) => ({ ...current, ...partial }))
-                }
-                regionNames={regionNames}
-                availableTags={availableTags}
-                toggleTag={toggleDraftTag}
-                canCreateTags={permissions.createTags}
-                canDeleteTags={permissions.deleteTags}
-                onCreateTag={createAvailableTag}
-                onDeleteTag={removeAvailableTag}
-              />
-              <button className="primary-button" type="submit" disabled={saving}>
-                <Plus size={18} />
-                <span>X-Station-ის დამატება</span>
+                {deviceOpen ? <Minus size={20} /> : <Plus size={20} />}
               </button>
+              {deviceOpen && (
+                <>
+                  <DeviceDraftFields
+                    draft={draft}
+                    onChange={(partial) =>
+                      setDraft((current) => ({ ...current, ...partial }))
+                    }
+                    regionNames={regionNames}
+                    availableTags={availableTags}
+                    toggleTag={toggleDraftTag}
+                    canCreateTags={permissions.createTags}
+                    canDeleteTags={permissions.deleteTags}
+                    onCreateTag={createAvailableTag}
+                    onDeleteTag={removeAvailableTag}
+                  />
+                  <button className="primary-button" type="submit" disabled={saving}>
+                    <Plus size={18} />
+                    <span>X-Station-ის დამატება</span>
+                  </button>
+                </>
+              )}
             </form>
           ) : null}
         </aside>

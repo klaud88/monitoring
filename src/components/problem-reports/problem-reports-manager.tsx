@@ -9,6 +9,7 @@ import {
   Edit3,
   Filter,
   MapPin,
+  Minus,
   Phone,
   Plus,
   Save,
@@ -103,6 +104,7 @@ export function ProblemReportsManager({
   const [editDraft, setEditDraft] = useState<ReportDraft | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
   const { confirm, confirmationDialog } = useConfirmDialog();
   const [draft, setDraft] = useState<ReportDraft>({
     deviceId: devices[0]?.id || "",
@@ -407,30 +409,38 @@ export function ProblemReportsManager({
             className="surface admin-form problem-report-form"
             onSubmit={createReport}
           >
-            <div className="section-title">
+            <button
+              type="button"
+              className="section-title"
+              onClick={() => setCreateOpen((o) => !o)}
+            >
               <h2>ახალი პრობლემა</h2>
-              <Plus size={20} />
-            </div>
-            <ReportFields
-              draft={draft}
-              devices={devices}
-              gardenOptions={gardenOptions}
-              availableTags={availableTags}
-              permissions={permissions}
-              users={assignableUsers}
-              onChange={(updater) =>
-                setDraft((current) => updater(current) ?? current)
-              }
-              onToggleTag={toggleDraftTag}
-              onCreateTag={createAvailableTag}
-              onDeleteTag={removeAvailableTag}
-              onToggleAssignee={toggleDraftAssignee}
-              mode="create"
-            />
-            <button className="primary-button" type="submit" disabled={saving}>
-              <Plus size={18} />
-              <span>{saving ? "ინახება..." : "რეგისტრაცია"}</span>
+              {createOpen ? <Minus size={20} /> : <Plus size={20} />}
             </button>
+            {createOpen && (
+              <>
+                <ReportFields
+                  draft={draft}
+                  devices={devices}
+                  gardenOptions={gardenOptions}
+                  availableTags={availableTags}
+                  permissions={permissions}
+                  users={assignableUsers}
+                  onChange={(updater) =>
+                    setDraft((current) => updater(current) ?? current)
+                  }
+                  onToggleTag={toggleDraftTag}
+                  onCreateTag={createAvailableTag}
+                  onDeleteTag={removeAvailableTag}
+                  onToggleAssignee={toggleDraftAssignee}
+                  mode="create"
+                />
+                <button className="primary-button" type="submit" disabled={saving}>
+                  <Plus size={18} />
+                  <span>{saving ? "ინახება..." : "რეგისტრაცია"}</span>
+                </button>
+              </>
+            )}
           </form>
         ) : (
           <section className="surface empty-state">

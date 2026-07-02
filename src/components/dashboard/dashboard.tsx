@@ -106,7 +106,6 @@ export function Dashboard({
   const [userFilter, setUserFilter] = useState("all");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedDeviceTags, setSelectedDeviceTags] = useState<string[]>([]);
-  const [deviceTagQuery, setDeviceTagQuery] = useState("");
   const [query, setQuery] = useState("");
   const [showCreateTask, setShowCreateTask] = useState(false);
   const [showOfflineDevices, setShowOfflineDevices] = useState(false);
@@ -161,13 +160,6 @@ export function Dashboard({
   const deviceTagOptions = useMemo(
     () => mergeTags(activeDevices.flatMap((device) => device.tags)),
     [activeDevices],
-  );
-  const availableDeviceTagOptions = useMemo(
-    () =>
-      deviceTagOptions.filter(
-        (tagName) => !selectedDeviceTags.includes(tagName),
-      ),
-    [deviceTagOptions, selectedDeviceTags],
   );
 
   const refreshDevices = useCallback(
@@ -370,35 +362,11 @@ export function Dashboard({
     });
   }
 
-  function addDeviceTagFilter() {
-    const normalized = deviceTagQuery.trim().replace(/\s+/g, " ");
-    if (!normalized) {
-      return;
-    }
-
-    const selectedTag = deviceTagOptions.find(
-      (tagName) => tagName.toLowerCase() === normalized.toLowerCase(),
-    );
-    if (!selectedTag) {
-      return;
-    }
-
+  function toggleDeviceTag(tagName: string) {
     setSelectedDeviceTags((current) => {
-      if (current.includes(selectedTag)) {
-        return current;
-      }
-      const next = [...current, selectedTag];
-      recordAudit("dashboard.filter", "device_tag", selectedTag, {
-        selectedDeviceTags: next,
-      });
-      return next;
-    });
-    setDeviceTagQuery("");
-  }
-
-  function removeDeviceTagFilter(tagName: string) {
-    setSelectedDeviceTags((current) => {
-      const next = current.filter((tag) => tag !== tagName);
+      const next = current.includes(tagName)
+        ? current.filter((tag) => tag !== tagName)
+        : [...current, tagName];
       recordAudit("dashboard.filter", "device_tag", tagName, {
         selectedDeviceTags: next,
       });
@@ -422,7 +390,6 @@ export function Dashboard({
     setUserFilter("all");
     setSelectedTags([]);
     setSelectedDeviceTags([]);
-    setDeviceTagQuery("");
     setQuery("");
     recordAudit("dashboard.filter_reset", "dashboard");
   }
@@ -790,58 +757,6 @@ export function Dashboard({
           </select>
         </label>
 
-        {deviceTagOptions.length ? (
-          <div className="device-tag-filter-control">
-            <div className="search-field device-tag-search-field">
-              <Tag size={17} />
-              <input
-                list="dashboard-device-tag-options"
-                value={deviceTagQuery}
-                onChange={(event) => setDeviceTagQuery(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    addDeviceTagFilter();
-                  }
-                }}
-                placeholder="X-Station ტეგით ძიება"
-              />
-              <datalist id="dashboard-device-tag-options">
-                {availableDeviceTagOptions.map((tagName) => (
-                  <option key={tagName} value={tagName} />
-                ))}
-              </datalist>
-              <button
-                className="ghost-button compact-add-button"
-                type="button"
-                onClick={addDeviceTagFilter}
-                disabled={!deviceTagQuery.trim()}
-              >
-                <Plus size={15} />
-                <span>დამატება</span>
-              </button>
-            </div>
-            {selectedDeviceTags.length ? (
-              <div
-                className="selected-device-tag-filter"
-                aria-label="არჩეული X-Station ტეგები"
-              >
-                {selectedDeviceTags.map((tagName) => (
-                  <button
-                    key={tagName}
-                    className="tag-toggle active"
-                    type="button"
-                    onClick={() => removeDeviceTagFilter(tagName)}
-                  >
-                    <Tag size={14} />
-                    <span>{tagName}</span>
-                    <X size={13} />
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
 
         <button className="ghost-button" type="button" onClick={resetFilters}>
           <RotateCcw size={16} />
@@ -867,19 +782,42 @@ export function Dashboard({
         ) : null}
       </section>
 
-      <section className="tag-filter" aria-label="დავალების ტეგები">
-        {availableTags.map((tagName) => (
-          <button
-            key={tagName}
-            className={`tag-toggle ${selectedTags.includes(tagName) ? "active" : ""}`}
-            type="button"
-            onClick={() => toggleTag(tagName)}
-          >
-            <Tag size={14} />
-            <span>{tagName}</span>
-          </button>
-        ))}
-      </section>
+      {availableTags.length || deviceTagOptions.length ? (
+        <div className="dashboard-tag-filters">
+          {availableTags.length ? (
+            <section className="tag-filter" aria-label="ტასკების ტეგები">
+              <span className="tag-filter-label">ტასკები:</span>
+              {availableTags.map((tagName) => (
+                <button
+                  key={tagName}
+                  className={`tag-toggle ${selectedTags.includes(tagName) ? "active" : ""}`}
+                  type="button"
+                  onClick={() => toggleTag(tagName)}
+                >
+                  <Tag size={14} />
+                  <span>{tagName}</span>
+                </button>
+              ))}
+            </section>
+          ) : null}
+          {deviceTagOptions.length ? (
+            <section className="tag-filter" aria-label="X-Station ტეგები">
+              <span className="tag-filter-label">X-Station:</span>
+              {deviceTagOptions.map((tagName) => (
+                <button
+                  key={tagName}
+                  className={`tag-toggle ${selectedDeviceTags.includes(tagName) ? "active" : ""}`}
+                  type="button"
+                  onClick={() => toggleDeviceTag(tagName)}
+                >
+                  <Tag size={14} />
+                  <span>{tagName}</span>
+                </button>
+              ))}
+            </section>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="dashboard-grid">
         <section className="map-surface" aria-label="თბილისის რუკა">
