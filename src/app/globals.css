@@ -2109,7 +2109,7 @@ button.pin-shell {
 }
 
 .content-grid {
-  display: grid;
+  display: block;
   gap: 16px;
 }
 
