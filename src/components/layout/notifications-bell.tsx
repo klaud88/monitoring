@@ -43,7 +43,9 @@ export function NotificationsBell({
   canRespondToCompletion: boolean;
 }) {
   // Form-one state
-  const [formOneNotifications, setFormOneNotifications] = useState<FormOneNotification[]>([]);
+  const [formOneNotifications, setFormOneNotifications] = useState<
+    FormOneNotification[]
+  >([]);
   const [seenIds, setSeenIds] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<FormOneNotification | null>(null);
   const [comment, setComment] = useState("");
@@ -51,7 +53,9 @@ export function NotificationsBell({
   const [formOneError, setFormOneError] = useState("");
 
   // Monitoring state
-  const [monitoringNotifications, setMonitoringNotifications] = useState<MonitoringNotification[]>([]);
+  const [monitoringNotifications, setMonitoringNotifications] = useState<
+    MonitoringNotification[]
+  >([]);
   const [hasUnseenMonitoring, setHasUnseenMonitoring] = useState(false);
   const seenMonitoringKeys = useRef<Set<string>>(new Set());
   const alarm = useRef<AlarmHandle | null>(null);
@@ -66,15 +70,22 @@ export function NotificationsBell({
     let cancelled = false;
 
     async function refresh() {
-      const res = await fetch("/api/form-one/notifications", { cache: "no-store" }).catch(() => null);
+      const res = await fetch("/api/form-one/notifications", {
+        cache: "no-store",
+      }).catch(() => null);
       if (!res?.ok || cancelled) return;
-      const payload = (await res.json()) as { notifications?: FormOneNotification[] };
+      const payload = (await res.json()) as {
+        notifications?: FormOneNotification[];
+      };
       setFormOneNotifications(payload.notifications ?? []);
     }
 
     void refresh();
     const id = window.setInterval(refresh, 60000);
-    return () => { cancelled = true; window.clearInterval(id); };
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
   }, [canFormOne]);
 
   // Monitoring polling + broadcast event from dashboard
@@ -95,15 +106,21 @@ export function NotificationsBell({
     }
 
     function handleMonitoringData(event: Event) {
-      const detail = (event as CustomEvent<{ notifications?: MonitoringNotification[] }>).detail;
+      const detail = (
+        event as CustomEvent<{ notifications?: MonitoringNotification[] }>
+      ).detail;
       applyMonitoring(detail.notifications ?? []);
     }
     window.addEventListener("monitoring-data", handleMonitoringData);
 
     async function refresh() {
-      const res = await fetch("/api/offline-records/monitoring", { cache: "no-store" }).catch(() => null);
+      const res = await fetch("/api/offline-records/monitoring", {
+        cache: "no-store",
+      }).catch(() => null);
       if (!res?.ok || cancelled) return;
-      const payload = (await res.json()) as { notifications?: MonitoringNotification[] };
+      const payload = (await res.json()) as {
+        notifications?: MonitoringNotification[];
+      };
       applyMonitoring(payload.notifications ?? []);
     }
 
@@ -147,8 +164,9 @@ export function NotificationsBell({
 
   // ── Form-one actions ──────────────────────────────────────────────────────
 
-  const unseenFormOneCount = formOneNotifications.filter((n) => !seenIds.has(n.id)).length;
-
+  const unseenFormOneCount = formOneNotifications.filter(
+    (n) => !seenIds.has(n.id),
+  ).length;
 
   async function openNotification(notification: FormOneNotification) {
     setSeenIds((prev) => new Set([...prev, notification.id]));
@@ -156,8 +174,13 @@ export function NotificationsBell({
     setComment("");
     setFormOneError("");
     setOpen(false);
-    if (notification.type === "rejection" || notification.type === "new_record") {
-      await fetch(`/api/form-one/notifications/${notification.id}`, { method: "PATCH" }).catch(() => null);
+    if (
+      notification.type === "rejection" ||
+      notification.type === "new_record"
+    ) {
+      await fetch(`/api/form-one/notifications/${notification.id}`, {
+        method: "PATCH",
+      }).catch(() => null);
     }
   }
 
@@ -181,11 +204,14 @@ export function NotificationsBell({
     }
     setSaving(true);
     setFormOneError("");
-    const res = await fetch(`/api/form-one/${selected.recordId}/completion-response`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, comment }),
-    }).catch(() => null);
+    const res = await fetch(
+      `/api/form-one/${selected.recordId}/completion-response`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, comment }),
+      },
+    ).catch(() => null);
     setSaving(false);
     if (!res?.ok) {
       setFormOneError("მოქმედების შესრულება ვერ მოხერხდა.");
@@ -215,21 +241,32 @@ export function NotificationsBell({
     if (alarm.current || typeof window === "undefined") return;
     const Ctx =
       window.AudioContext ||
-      (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      (window as typeof window & { webkitAudioContext?: typeof AudioContext })
+        .webkitAudioContext;
     if (!Ctx) return;
 
     const context = new Ctx();
     const timeoutIds: number[] = [];
 
-    const playTone = (frequency: number, delayMs: number, durationMs: number) => {
+    const playTone = (
+      frequency: number,
+      delayMs: number,
+      durationMs: number,
+    ) => {
       const id = window.setTimeout(() => {
         const osc = context.createOscillator();
         const gain = context.createGain();
         osc.type = "sine";
         osc.frequency.value = frequency;
         gain.gain.setValueAtTime(0.0001, context.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.18, context.currentTime + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + durationMs / 1000);
+        gain.gain.exponentialRampToValueAtTime(
+          0.18,
+          context.currentTime + 0.02,
+        );
+        gain.gain.exponentialRampToValueAtTime(
+          0.0001,
+          context.currentTime + durationMs / 1000,
+        );
         osc.connect(gain);
         gain.connect(context.destination);
         osc.start();
@@ -254,7 +291,8 @@ export function NotificationsBell({
   function stopAlarm() {
     if (!alarm.current) return;
     window.clearInterval(alarm.current.intervalId);
-    if (alarm.current.stopTimeoutId) window.clearTimeout(alarm.current.stopTimeoutId);
+    if (alarm.current.stopTimeoutId)
+      window.clearTimeout(alarm.current.stopTimeoutId);
     alarm.current.timeoutIds.forEach((id) => window.clearTimeout(id));
     void alarm.current.context.close().catch(() => undefined);
     alarm.current = null;
@@ -262,9 +300,12 @@ export function NotificationsBell({
 
   // ── Render ────────────────────────────────────────────────────────────────
 
-  const totalUnseen = unseenFormOneCount + (hasUnseenMonitoring ? monitoringNotifications.length : 0);
+  const totalUnseen =
+    unseenFormOneCount +
+    (hasUnseenMonitoring ? monitoringNotifications.length : 0);
   const hasAnyUnseen = totalUnseen > 0;
-  const hasAnyNotifications = formOneNotifications.length > 0 || monitoringNotifications.length > 0;
+  const hasAnyNotifications =
+    formOneNotifications.length > 0 || monitoringNotifications.length > 0;
 
   return (
     <>
@@ -315,9 +356,14 @@ export function NotificationsBell({
                 <>
                   {canOfflineMonitor && monitoringNotifications.length > 0 ? (
                     <div className="notification-section">
-                      <p className="notification-section-label">Offline მონიტორინგი</p>
+                      <p className="notification-section-label">
+                        Offline მონიტორინგი
+                      </p>
                       {monitoringNotifications.map((n) => (
-                        <div key={getMonitoringKey(n)} className="notification-item">
+                        <div
+                          key={getMonitoringKey(n)}
+                          className="notification-item"
+                        >
                           <WifiOff size={16} />
                           <span>
                             <strong>{n.deviceName}</strong>
@@ -368,7 +414,7 @@ export function NotificationsBell({
       </div>
 
       {selected ? (
-        <div className="quick-task-modal-backdrop" role="presentation">
+        <div className="quick-task-modal-backdrop-bell" role="presentation">
           <section
             className="quick-task-modal form-one-notification-modal"
             role="dialog"
@@ -378,9 +424,16 @@ export function NotificationsBell({
             <header>
               <div>
                 <p className="eyebrow">ფორმა ერთი</p>
-                <h2 id="form-one-notification-title">{selected.record.gardenLabel}</h2>
+                <h2 id="form-one-notification-title">
+                  {selected.record.gardenLabel}
+                </h2>
               </div>
-              <button className="icon-button" type="button" aria-label="დახურვა" onClick={closeModal}>
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="დახურვა"
+                onClick={closeModal}
+              >
                 <X size={18} />
               </button>
             </header>
@@ -413,7 +466,8 @@ export function NotificationsBell({
                 <ExternalLink size={16} />
                 <span>ფორმაზე გადასვლა</span>
               </Link>
-              {selected.type === "completion_request" && canRespondToCompletion ? (
+              {selected.type === "completion_request" &&
+              canRespondToCompletion ? (
                 <>
                   <button
                     className="primary-button danger"
@@ -444,7 +498,10 @@ export function NotificationsBell({
 }
 
 function FormOneNotificationDetails({ record }: { record: FormOneRecord }) {
-  const totalQuantity = record.items.reduce((sum, item) => sum + item.quantity, 0);
+  const totalQuantity = record.items.reduce(
+    (sum, item) => sum + item.quantity,
+    0,
+  );
   const dueDateClassName =
     record.dueDates.length > 1 ? "form-one-due-date-value changed" : undefined;
 
@@ -457,7 +514,9 @@ function FormOneNotificationDetails({ record }: { record: FormOneRecord }) {
         <span className={dueDateClassName}>
           შესრულება:{" "}
           {record.dueDates.length
-            ? record.dueDates.map((entry) => formatDisplayDate(entry.date)).join(", ")
+            ? record.dueDates
+                .map((entry) => formatDisplayDate(entry.date))
+                .join(", ")
             : "არ არის მითითებული"}
         </span>
       </div>
@@ -487,7 +546,11 @@ function FormOneNotificationDetails({ record }: { record: FormOneRecord }) {
 }
 
 function getMonitoringKey(n: MonitoringNotification) {
-  return [n.deviceId, n.lastNotificationAt || n.lastOfflineAt || "", n.offlineCount].join(":");
+  return [
+    n.deviceId,
+    n.lastNotificationAt || n.lastOfflineAt || "",
+    n.offlineCount,
+  ].join(":");
 }
 
 function readSeenKeys() {
