@@ -1885,7 +1885,7 @@ button.pin-shell {
 }
 
 .quick-task-modal-backdrop {
-  position: fixed;
+  position: sticky;
   inset: 0;
   z-index: 10010;
   display: flex;
@@ -4757,15 +4757,7 @@ button.monitor-count-pill {
   }
 
   .quick-task-modal-backdrop {
-    /* padding: 10px; */
-    position: fixed;
-    inset: 0;
-    z-index: 10010;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(8, 16, 28, 0.5);
-    padding: 18px;
+    padding: 10px;
   }
 
   .quick-task-form,
