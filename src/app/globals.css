@@ -2343,6 +2343,7 @@ button.pin-shell {
 }
 
 .task-create-form {
+  display: block;
   align-self: start;
   align-content: start;
 }
@@ -3227,6 +3228,7 @@ button.pin-shell {
   gap: 7px;
   color: var(--muted);
   font-size: 13px;
+  padding-bottom: 5px;
 }
 
 .tag-chip-control {
