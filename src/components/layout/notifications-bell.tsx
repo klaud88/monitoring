@@ -156,7 +156,7 @@ export function NotificationsBell({
     setComment("");
     setFormOneError("");
     setOpen(false);
-    if (notification.type === "rejection") {
+    if (notification.type === "rejection" || notification.type === "new_record") {
       await fetch(`/api/form-one/notifications/${notification.id}`, { method: "PATCH" }).catch(() => null);
     }
   }
@@ -199,7 +199,7 @@ export function NotificationsBell({
   }
 
   function closeModal() {
-    if (selected?.type === "rejection") {
+    if (selected?.type === "rejection" || selected?.type === "new_record") {
       setFormOneNotifications((current) =>
         current.filter((n) => n.id !== selected.id),
       );
@@ -350,7 +350,9 @@ export function NotificationsBell({
                               <small>
                                 {notification.type === "rejection"
                                   ? "ბაღმა უარყო დასრულება"
-                                  : "დასრულების დადასტურება"}
+                                  : notification.type === "new_record"
+                                    ? "ახალი ფორმა წარდგენილია"
+                                    : "დასრულების დადასტურება"}
                               </small>
                             </span>
                           </button>
@@ -389,7 +391,7 @@ export function NotificationsBell({
               <p className="form-one-notification-comment">
                 {selected.comment || "კომენტარი არ არის მითითებული."}
               </p>
-            ) : (
+            ) : selected.type === "completion_request" ? (
               <label className="form-one-notification-comment-field">
                 <span>კომენტარი უარყოფის შემთხვევაში</span>
                 <textarea
@@ -398,7 +400,7 @@ export function NotificationsBell({
                   placeholder="ჩაწერეთ უარყოფის მიზეზი"
                 />
               </label>
-            )}
+            ) : null}
 
             {formOneError ? <p className="form-error">{formOneError}</p> : null}
 

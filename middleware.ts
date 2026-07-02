@@ -6,7 +6,9 @@ import { isLoginRateLimited } from "@/lib/rate-limit";
 const publicRoutes = ["/login", "/api/auth/login", "/api/auth/change-password", "/api/cron/offline-capture"];
 
 const MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
-const ALLOWED_ORIGINS = process.env.APP_URL ? [process.env.APP_URL] : [];
+const ALLOWED_ORIGINS = process.env.APP_URL
+  ? [process.env.APP_URL.replace(/\/+$/, "")]
+  : [];
 
 function getSecret() {
   const secret = process.env.AUTH_SECRET;

@@ -3564,6 +3564,16 @@ export async function createFormOneRecord(
       },
     });
 
+    await transaction.form_one_notifications.create({
+      data: {
+        id: makeId("formonenotification"),
+        record_id: recordId,
+        type: "new_record",
+        recipient_role: OUTSOURCING_ROLE_NAME,
+        created_by: options.createdBy ?? null,
+      },
+    });
+
     return mapPrismaFormOneRecord(record);
   });
 }
@@ -4129,7 +4139,9 @@ function normalizeFormOneStatus(value: unknown): FormOneStatus {
 function normalizeFormOneNotificationType(
   value: unknown,
 ): FormOneNotificationType {
-  return value === "rejection" ? "rejection" : "completion_request";
+  if (value === "rejection") return "rejection";
+  if (value === "new_record") return "new_record";
+  return "completion_request";
 }
 
 function normalizeFormOneDueDates(value: unknown): FormOneDueDateEntry[] {

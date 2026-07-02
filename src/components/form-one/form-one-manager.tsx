@@ -368,12 +368,10 @@ export function FormOneManager({
     isEditing
       ? permissions.edit && permissions.quantityEdit
       : permissions.create;
-  const canEditCurrentDueDate =
-    isEditing
-      ? permissions.edit && permissions.dueDateEdit
-      : permissions.create;
-  const canChangeEditingDueDate =
-    canEditCurrentDueDate;
+  const canEditCurrentDueDate = permissions.dueDateEdit;
+  const canChangeEditingDueDate = isEditing
+    ? permissions.edit && permissions.dueDateEdit
+    : permissions.dueDateEdit;
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);

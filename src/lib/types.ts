@@ -171,7 +171,7 @@ export type FormOneRecord = {
   updatedAt: string;
 };
 
-export type FormOneNotificationType = "completion_request" | "rejection";
+export type FormOneNotificationType = "new_record" | "completion_request" | "rejection";
 
 export type FormOneNotification = {
   id: string;
