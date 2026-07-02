@@ -271,7 +271,7 @@ const FORM_ONE_PERMISSIONS: {
   {
     code: "form_one.comment_edit",
     label: "ფორმა ერთი: კომენტარის რედაქტირება",
-    roles: ["admin", "dispatcher", OUTSOURCING_ROLE_NAME],
+    roles: ["admin"],
   },
   {
     code: "form_one.delete",
@@ -606,6 +606,13 @@ async function ensureOperationalSchema() {
 
   if (!operationalSchemaPromise) {
     operationalSchemaPromise = withConnection(async (connection) => {
+      // Revoke form_one.comment_edit from all non-admin roles (admin-only permission)
+      await connection.query(
+        `delete rp from role_permissions rp
+         join roles r on r.id = rp.role_id
+         join permissions p on p.id = rp.permission_id
+         where p.code = 'form_one.comment_edit' and r.name != 'admin'`,
+      );
       // Drop FK on audit_logs.user_id so unknown/deleted user IDs are accepted
       const [auditFkRows] = await connection.query<RowDataPacket[]>(
         `select 1 from information_schema.TABLE_CONSTRAINTS
