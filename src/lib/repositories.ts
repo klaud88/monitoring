@@ -606,6 +606,18 @@ async function ensureOperationalSchema() {
 
   if (!operationalSchemaPromise) {
     operationalSchemaPromise = withConnection(async (connection) => {
+      // Drop FK on audit_logs.user_id so unknown/deleted user IDs are accepted
+      const [auditFkRows] = await connection.query<RowDataPacket[]>(
+        `select 1 from information_schema.TABLE_CONSTRAINTS
+         where TABLE_SCHEMA = database() and TABLE_NAME = 'audit_logs'
+           and CONSTRAINT_NAME = 'fk_audit_logs_user' and CONSTRAINT_TYPE = 'FOREIGN KEY'
+         limit 1`,
+      );
+      if (auditFkRows.length > 0) {
+        await connection.query(
+          "alter table audit_logs drop foreign key fk_audit_logs_user",
+        );
+      }
       await connection.query(
         "alter table devices modify status enum('online', 'offline', 'error') not null default 'online'",
       );

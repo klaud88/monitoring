@@ -12,25 +12,30 @@ type AuditInput = {
 
 export async function logAudit(input: AuditInput) {
   const id = `audit-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const inserted = await queryRows(
-    `
-      insert into audit_logs
-        (id, user_id, action, entity_type, entity_id, metadata, ip_address, user_agent)
-      values (?, ?, ?, ?, ?, cast(? as json), ?, ?)
-    `,
-    [
+  try {
+    await queryRows(
+      `
+        insert into audit_logs
+          (id, user_id, action, entity_type, entity_id, metadata, ip_address, user_agent)
+        values (?, ?, ?, ?, ?, cast(? as json), ?, ?)
+      `,
+      [
+        id,
+        input.userId,
+        input.action,
+        input.entityType,
+        input.entityId ?? null,
+        JSON.stringify(input.metadata ?? {}),
+        input.ipAddress ?? null,
+        input.userAgent ?? null,
+      ],
+    );
+  } catch (error) {
+    console.warn("[audit] DB insert failed", {
       id,
-      input.userId,
-      input.action,
-      input.entityType,
-      input.entityId ?? null,
-      JSON.stringify(input.metadata ?? {}),
-      input.ipAddress ?? null,
-      input.userAgent ?? null
-    ]
-  );
-
-  if (!inserted) {
-    console.warn("[audit] DB insert failed", { id, action: input.action, entityType: input.entityType });
+      action: input.action,
+      entityType: input.entityType,
+      error,
+    });
   }
 }
