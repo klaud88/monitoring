@@ -1896,7 +1896,7 @@ button.pin-shell {
 }
 .quick-task-modal-backdrop-bell {
   position: fixed;
-  top: 150px;
+  top: 0px;
   inset: 0;
   z-index: 10010;
   display: flex;
