@@ -2,11 +2,13 @@
 
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import {
+  Ban,
   CalendarDays,
   CheckCircle2,
   ClipboardList,
   Clock3,
   Edit3,
+  FlagOff,
   Hash,
   MapPin,
   MessageSquare,
@@ -63,6 +65,7 @@ type Props = {
     create: boolean;
     dueDateEdit: boolean;
     edit: boolean;
+    flag: boolean;
     gardenEdit: boolean;
     modelAdd: boolean;
     modelEdit: boolean;
@@ -315,6 +318,13 @@ export function FormOneManager({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [flaggingRecordId, setFlaggingRecordId] = useState<string | null>(null);
+  const [flagComment, setFlagComment] = useState("");
+  const [flagSubmitting, setFlagSubmitting] = useState(false);
+  const [flagError, setFlagError] = useState("");
+  const [completionRequestRecordId, setCompletionRequestRecordId] = useState<
+    string | null
+  >(null);
   const { confirm, confirmationDialog } = useConfirmDialog();
 
   const selectedGarden = gardenOptions.find(
@@ -336,6 +346,9 @@ export function FormOneManager({
   const formDateLabel = formatDisplayDate(submittedDate) || todayLabel;
   const selectedRecord = selectedRecordId
     ? records.find((record) => record.id === selectedRecordId) ?? null
+    : null;
+  const completionRequestRecord = completionRequestRecordId
+    ? records.find((record) => record.id === completionRequestRecordId) ?? null
     : null;
   const isEditing = Boolean(editingRecordId);
   const hasEditableExistingField = hasEditableFormOneFields(permissions);
@@ -463,7 +476,7 @@ export function FormOneManager({
     setPhone(record.phone ?? "");
     setSubmittedDate(record.submittedDate);
     setDueDate(record.dueDate ?? "");
-    setModelLines(createModelLinesFromRecord(record));
+    setModelLines(createModelLinesFromItems(record.items));
     setSelectedRecordId(null);
     setError("");
   }
@@ -496,31 +509,38 @@ export function FormOneManager({
     }
   }
 
-  async function requestCompletion(recordId: string) {
+  function openCompletionRequestModal(recordId: string) {
     if (!permissions.completionRequest) {
       return;
     }
 
-    const confirmed = await confirm({
-      title: "ფორმა ერთის გაგზავნა",
-      message: "ნამდვილად გინდათ ფორმა ერთის გადაგზავნა დადასტურებაზე?",
-      confirmLabel: "კი",
-      cancelLabel: "არა",
-    });
-    if (!confirmed) {
-      return;
+    setSelectedRecordId(null);
+    setCompletionRequestRecordId(recordId);
+  }
+
+  function closeCompletionRequestModal() {
+    setCompletionRequestRecordId(null);
+  }
+
+  async function submitCompletionRequest(
+    recordId: string,
+    completedItems: FormOneRecordItem[],
+  ) {
+    if (!permissions.completionRequest) {
+      return false;
     }
 
     setSaving(true);
     setError("");
     const response = await fetch(`/api/form-one/${recordId}/completion-request`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ completedItems }),
     }).catch(() => null);
     setSaving(false);
 
     if (!response?.ok) {
-      setError("დასრულებისთვის გადაგზავნა ვერ მოხერხდა.");
-      return;
+      return false;
     }
 
     const data = (await response.json()) as { record: FormOneRecord };
@@ -529,7 +549,9 @@ export function FormOneManager({
         record.id === data.record.id ? data.record : record,
       ),
     );
+    setCompletionRequestRecordId(null);
     setSelectedRecordId(data.record.id);
+    return true;
   }
 
   async function respondToCompletion(
@@ -601,6 +623,188 @@ export function FormOneManager({
       ),
     );
     return true;
+  }
+
+  function openFlagPrompt(recordId: string) {
+    if (!permissions.flag) {
+      return;
+    }
+
+    setFlaggingRecordId(recordId);
+    setFlagComment("");
+    setFlagError("");
+  }
+
+  function closeFlagPrompt() {
+    setFlaggingRecordId(null);
+    setFlagComment("");
+    setFlagError("");
+  }
+
+  async function submitFlag() {
+    if (!flaggingRecordId || !permissions.flag) {
+      return;
+    }
+
+    const comment = flagComment.trim();
+    if (!comment) {
+      setFlagError("კომენტარის დაწერა სავალდებულოა.");
+      return;
+    }
+
+    setFlagSubmitting(true);
+    setFlagError("");
+    const response = await fetch(`/api/form-one/${flaggingRecordId}/flag`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ comment }),
+    }).catch(() => null);
+    setFlagSubmitting(false);
+
+    if (!response?.ok) {
+      setFlagError("დახარვეზება ვერ მოხერხდა.");
+      return;
+    }
+
+    const data = (await response.json()) as { record: FormOneRecord };
+    setRecords((current) =>
+      current.map((record) =>
+        record.id === data.record.id ? data.record : record,
+      ),
+    );
+    closeFlagPrompt();
+  }
+
+  async function unflagRecord(recordId: string) {
+    if (!permissions.flag) {
+      return;
+    }
+
+    const confirmed = await confirm({
+      title: "დახარვეზების მოხსნა",
+      message: "ნამდვილად გსურთ დახარვეზების მოხსნა?",
+      confirmLabel: "კი",
+      cancelLabel: "არა",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    const response = await fetch(`/api/form-one/${recordId}/flag`, {
+      method: "DELETE",
+    }).catch(() => null);
+    setSaving(false);
+
+    if (!response?.ok) {
+      setError("დახარვეზების მოხსნა ვერ მოხერხდა.");
+      return;
+    }
+
+    const data = (await response.json()) as { record: FormOneRecord };
+    setRecords((current) =>
+      current.map((record) =>
+        record.id === data.record.id ? data.record : record,
+      ),
+    );
+  }
+
+  async function respondToEditReview(
+    recordId: string,
+    action: "approve" | "reject",
+    comment: string,
+  ) {
+    if (!permissions.completionResponse) {
+      return false;
+    }
+
+    setSaving(true);
+    setError("");
+    const response = await fetch(
+      `/api/form-one/${recordId}/edit-review/respond`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, comment }),
+      },
+    ).catch(() => null);
+    setSaving(false);
+
+    if (!response?.ok) {
+      setError("მოქმედების შესრულება ვერ მოხერხდა.");
+      return false;
+    }
+
+    const data = (await response.json()) as { record: FormOneRecord };
+    setRecords((current) =>
+      current.map((record) =>
+        record.id === data.record.id ? data.record : record,
+      ),
+    );
+    setSelectedRecordId(null);
+    return true;
+  }
+
+  async function resendEditReview(recordId: string) {
+    if (!permissions.edit) {
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    const response = await fetch(
+      `/api/form-one/${recordId}/edit-review/resend`,
+      { method: "POST" },
+    ).catch(() => null);
+    setSaving(false);
+
+    if (!response?.ok) {
+      setError("ცვლილების ხელახლა გაგზავნა ვერ მოხერხდა.");
+      return;
+    }
+
+    const data = (await response.json()) as { record: FormOneRecord };
+    setRecords((current) =>
+      current.map((record) =>
+        record.id === data.record.id ? data.record : record,
+      ),
+    );
+  }
+
+  async function cancelEditReview(recordId: string) {
+    if (!permissions.edit) {
+      return;
+    }
+
+    const confirmed = await confirm({
+      title: "ცვლილების გაუქმება",
+      message: "ნამდვილად გსურთ შემოთავაზებული ცვლილების გაუქმება?",
+      confirmLabel: "კი",
+      cancelLabel: "არა",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    const response = await fetch(`/api/form-one/${recordId}/edit-review`, {
+      method: "DELETE",
+    }).catch(() => null);
+    setSaving(false);
+
+    if (!response?.ok) {
+      setError("ცვლილების გაუქმება ვერ მოხერხდა.");
+      return;
+    }
+
+    const data = (await response.json()) as { record: FormOneRecord };
+    setRecords((current) =>
+      current.map((record) =>
+        record.id === data.record.id ? data.record : record,
+      ),
+    );
   }
 
   function addModelLine() {
@@ -814,6 +1018,56 @@ export function FormOneManager({
   return (
     <div className="form-one-page">
       {confirmationDialog}
+      {flaggingRecordId ? (
+        <div className="quick-task-modal-backdrop" role="presentation">
+          <section
+            className="quick-task-modal form-one-flag-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="form-one-flag-title"
+          >
+            <header>
+              <div>
+                <p className="eyebrow">ფორმა ერთი</p>
+                <h2 id="form-one-flag-title">დახარვეზება</h2>
+              </div>
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="დახურვა"
+                onClick={closeFlagPrompt}
+              >
+                <X size={18} />
+              </button>
+            </header>
+            <label className="form-one-response-comment-field">
+              <span>კომენტარი</span>
+              <textarea
+                value={flagComment}
+                onChange={(event) => setFlagComment(event.target.value)}
+                placeholder="ჩაწერეთ დახარვეზების მიზეზი"
+                autoFocus
+              />
+            </label>
+            {flagError ? <p className="form-error">{flagError}</p> : null}
+            <div className="form-one-detail-actions">
+              <button
+                className="primary-button flag"
+                type="button"
+                disabled={flagSubmitting || !flagComment.trim()}
+                onClick={submitFlag}
+              >
+                <Ban size={17} />
+                <span>{flagSubmitting ? "ინახება..." : "დახარვეზება"}</span>
+              </button>
+              <button className="ghost-button" type="button" onClick={closeFlagPrompt}>
+                <X size={17} />
+                <span>გაუქმება</span>
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
       <section className="page-header">
         <div>
           <p className="eyebrow">ფორმაერთი</p>
@@ -1022,7 +1276,9 @@ export function FormOneManager({
                 onOpen={() => setSelectedRecordId(record.id)}
                 onEdit={() => startEdit(record)}
                 onDelete={() => removeRecord(record.id)}
-                onRequestCompletion={() => requestCompletion(record.id)}
+                onRequestCompletion={() => openCompletionRequestModal(record.id)}
+                onFlag={() => openFlagPrompt(record.id)}
+                onUnflag={() => unflagRecord(record.id)}
               />
             ))}
           </div>
@@ -1039,11 +1295,28 @@ export function FormOneManager({
           onClose={() => setSelectedRecordId(null)}
           onEdit={() => startEdit(selectedRecord)}
           onDelete={() => removeRecord(selectedRecord.id)}
-          onRequestCompletion={() => requestCompletion(selectedRecord.id)}
+          onRequestCompletion={() => openCompletionRequestModal(selectedRecord.id)}
           onRespondCompletion={(action, comment) =>
             respondToCompletion(selectedRecord.id, action, comment)
           }
           onUpdateComment={updateRejectionComment}
+          onFlag={() => openFlagPrompt(selectedRecord.id)}
+          onUnflag={() => unflagRecord(selectedRecord.id)}
+          onRespondEditReview={(action, comment) =>
+            respondToEditReview(selectedRecord.id, action, comment)
+          }
+          onResendEditReview={() => resendEditReview(selectedRecord.id)}
+          onCancelEditReview={() => cancelEditReview(selectedRecord.id)}
+        />
+      ) : null}
+
+      {completionRequestRecord ? (
+        <FormOneCompletionRequestModal
+          record={completionRequestRecord}
+          onClose={closeCompletionRequestModal}
+          onSubmit={(completedItems) =>
+            submitCompletionRequest(completionRequestRecord.id, completedItems)
+          }
         />
       ) : null}
     </div>
@@ -1059,6 +1332,7 @@ function ModelLineRows({
   canEditModel,
   canEditService,
   canEditQuantity,
+  allowCustomService = true,
   onAddService,
   onRemoveModel,
   onUpdateModel,
@@ -1075,6 +1349,7 @@ function ModelLineRows({
   canEditModel: boolean;
   canEditService: boolean;
   canEditQuantity: boolean;
+  allowCustomService?: boolean;
   onAddService: () => void;
   onRemoveModel: () => void;
   onUpdateModel: (modelId: string) => void;
@@ -1094,8 +1369,10 @@ function ModelLineRows({
         const availableServices = getSelectableServices(
           line,
           service.serviceId,
+          allowCustomService,
         );
-        const hasCustomService = Boolean(service.customServiceLabel.trim());
+        const hasCustomService =
+          allowCustomService && Boolean(service.customServiceLabel.trim());
 
         return (
           <tr key={service.id}>
@@ -1149,14 +1426,16 @@ function ModelLineRows({
                     ))}
                   </select>
                 )}
-                <input
-                  value={service.customServiceLabel}
-                  onChange={(event) =>
-                    onUpdateCustomService(service.id, event.target.value)
-                  }
-                  placeholder="ან ჩაწერეთ მომსახურება"
-                  disabled={!canEditService}
-                />
+                {allowCustomService ? (
+                  <input
+                    value={service.customServiceLabel}
+                    onChange={(event) =>
+                      onUpdateCustomService(service.id, event.target.value)
+                    }
+                    placeholder="ან ჩაწერეთ მომსახურება"
+                    disabled={!canEditService}
+                  />
+                ) : null}
               </div>
               <div className="form-one-service-actions">
                 {serviceIndex === line.services.length - 1 ? (
@@ -1209,6 +1488,8 @@ function FormOneRecordCard({
   onEdit,
   onDelete,
   onRequestCompletion,
+  onFlag,
+  onUnflag,
 }: {
   record: FormOneRecord;
   permissions: Props["permissions"];
@@ -1217,6 +1498,8 @@ function FormOneRecordCard({
   onEdit: () => void;
   onDelete: () => void;
   onRequestCompletion: () => void;
+  onFlag: () => void;
+  onUnflag: () => void;
 }) {
   const totalQuantity = record.items.reduce(
     (total, item) => total + item.quantity,
@@ -1226,15 +1509,22 @@ function FormOneRecordCard({
   const status = getRecordDisplayStatus(record, todayValue);
   const isPendingApproval = record.status === "completion_requested";
   const showCompletionButton =
-    permissions.completionRequest && record.status !== "completed";
-  const canEditRecord = canEditFormOneRecord(permissions);
+    permissions.completionRequest &&
+    record.status !== "completed" &&
+    !record.isFlagged;
+  const canEditRecord =
+    canEditFormOneRecord(permissions) &&
+    !record.isFlagged &&
+    record.editReviewStatus === "none";
   const dueDateClassName = `form-one-due-date-list${
     record.dueDates.length > 1 ? " changed" : ""
   }`;
 
   return (
     <article
-      className={`form-one-record form-one-record-${status.key}`}
+      className={`form-one-record form-one-record-${status.key}${
+        record.isFlagged ? " form-one-record-flagged" : ""
+      }`}
       role="button"
       tabIndex={0}
       onClick={onOpen}
@@ -1314,8 +1604,47 @@ function FormOneRecordCard({
               <Trash2 size={17} />
             </button>
           ) : null}
+          {permissions.flag && !record.isFlagged ? (
+            <button
+              className="icon-button flag"
+              type="button"
+              aria-label="დახარვეზება"
+              title="დახარვეზება"
+              onClick={onFlag}
+            >
+              <Ban size={17} />
+            </button>
+          ) : null}
+          {permissions.flag && record.isFlagged ? (
+            <button
+              className="icon-button flag"
+              type="button"
+              aria-label="დახარვეზების მოხსნა"
+              title="დახარვეზების მოხსნა"
+              onClick={onUnflag}
+            >
+              <FlagOff size={17} />
+            </button>
+          ) : null}
         </div>
       </div>
+      {record.isFlagged ? (
+        <p className="form-one-flag-banner">
+          დახარვეზებულია{record.flaggedByName ? ` - ${record.flaggedByName} მიერ` : ""}
+          {record.flagComment ? `: ${record.flagComment}` : ""}
+        </p>
+      ) : null}
+      {record.editReviewStatus === "pending" ? (
+        <p className="form-one-edit-review-comment">
+          ცვლილება საჭიროებს ბაღის დადასტურებას
+          {record.editRequestedByName ? ` - ${record.editRequestedByName} მიერ` : ""}
+        </p>
+      ) : null}
+      {record.editReviewStatus === "rejected" ? (
+        <p className="form-one-edit-review-comment">
+          ბაღმა უარყო ცვლილება{record.editReviewComment ? `: ${record.editReviewComment}` : ""}
+        </p>
+      ) : null}
       <div className="form-one-record-foot">
         <span>{totalQuantity} საერთო რაოდენობა</span>
         {record.rejectionComments.length ? (
@@ -1338,6 +1667,11 @@ function FormOneRecordModal({
   onRequestCompletion,
   onRespondCompletion,
   onUpdateComment,
+  onFlag,
+  onUnflag,
+  onRespondEditReview,
+  onResendEditReview,
+  onCancelEditReview,
 }: {
   record: FormOneRecord;
   permissions: Props["permissions"];
@@ -1352,12 +1686,20 @@ function FormOneRecordModal({
     commentId: string,
     comment: string,
   ) => Promise<boolean>;
+  onFlag: () => void;
+  onUnflag: () => void;
+  onRespondEditReview: (action: "approve" | "reject", comment: string) => Promise<boolean>;
+  onResendEditReview: () => void;
+  onCancelEditReview: () => void;
 }) {
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [commentDraft, setCommentDraft] = useState("");
   const [responseComment, setResponseComment] = useState("");
   const [responding, setResponding] = useState(false);
   const [responseError, setResponseError] = useState("");
+  const [editReviewComment, setEditReviewComment] = useState("");
+  const [editReviewResponding, setEditReviewResponding] = useState(false);
+  const [editReviewError, setEditReviewError] = useState("");
   const status = getRecordDisplayStatus(record, todayValue);
   const totalQuantity = record.items.reduce(
     (total, item) => total + item.quantity,
@@ -1366,12 +1708,25 @@ function FormOneRecordModal({
   const modelCount = new Set(record.items.map((item) => item.modelLabel)).size;
   const isPendingApprovalModal = record.status === "completion_requested";
   const showCompletionButtonModal =
-    permissions.completionRequest && record.status !== "completed";
+    permissions.completionRequest &&
+    record.status !== "completed" &&
+    !record.isFlagged;
   const canRespondToCompletion =
-    permissions.completionResponse && isPendingApprovalModal;
-  const canEditRecord = canEditFormOneRecord(permissions);
+    permissions.completionResponse &&
+    isPendingApprovalModal &&
+    !record.isFlagged;
+  const canEditRecord =
+    canEditFormOneRecord(permissions) &&
+    !record.isFlagged &&
+    record.editReviewStatus === "none";
+  const canRespondToEditReview =
+    permissions.completionResponse && record.editReviewStatus === "pending";
+  const canManageEditReview =
+    permissions.edit && record.editReviewStatus === "rejected";
   const dueDateClassName =
     record.dueDates.length > 1 ? "form-one-due-date-value changed" : undefined;
+  const pendingEditTotalQuantity =
+    record.pendingEdit?.items.reduce((total, item) => total + item.quantity, 0) ?? 0;
 
   return (
     <div className="quick-task-modal-backdrop" role="presentation">
@@ -1398,6 +1753,7 @@ function FormOneRecordModal({
           </button>
         </header>
 
+        <div className="form-one-modal-body">
         <div className="form-one-detail-summary">
           <span className={`form-one-status-badge ${status.key}`}>
             {status.label}
@@ -1416,6 +1772,110 @@ function FormOneRecordModal({
           </span>
         </div>
 
+        {record.isFlagged ? (
+          <p className="form-one-flag-banner">
+            დახარვეზებულია{record.flaggedByName ? ` - ${record.flaggedByName} მიერ` : ""}
+            {record.flagComment ? `: ${record.flagComment}` : ""}
+          </p>
+        ) : null}
+        {record.editReviewStatus === "pending" ? (
+          <p className="form-one-edit-review-comment">
+            ცვლილება საჭიროებს ბაღის დადასტურებას
+            {record.editRequestedByName ? ` - ${record.editRequestedByName} მიერ` : ""}
+          </p>
+        ) : null}
+        {record.editReviewStatus === "rejected" ? (
+          <p className="form-one-edit-review-comment">
+            ბაღმა უარყო ცვლილება{record.editReviewComment ? `: ${record.editReviewComment}` : ""}
+          </p>
+        ) : null}
+
+        {canRespondToEditReview && record.pendingEdit ? (
+          <div className="form-one-edit-review-section">
+            <p className="form-one-edit-review-question">
+              ეთანხმებით ფორმა ერთის ცვლილებას?
+            </p>
+            <div className="form-one-detail-summary">
+              <span>ბაღი: {formatGardenLabel(record.pendingEdit.gardenLabel) || "—"}</span>
+              <span>ტელეფონი: {record.pendingEdit.phone || "არ არის მითითებული"}</span>
+              <span>
+                შესრულება:{" "}
+                {record.pendingEdit.dueDate
+                  ? formatDisplayDate(record.pendingEdit.dueDate)
+                  : "არ არის მითითებული"}
+              </span>
+              <span>რაოდენობა: {pendingEditTotalQuantity}</span>
+            </div>
+            <div className="form-one-record-items modal-items">
+              <div className="form-one-record-item head">
+                <span>№</span>
+                <span>მოდელი</span>
+                <span>მომსახურება</span>
+                <span>რაოდ.</span>
+              </div>
+              {record.pendingEdit.items.map((item, index) => (
+                <div
+                  className="form-one-record-item"
+                  key={`${record.id}-pending-${index}-${item.serviceLabel}`}
+                >
+                  <span>{index + 1}</span>
+                  <strong>{item.modelLabel}</strong>
+                  <span>{item.serviceLabel}</span>
+                  <span>{item.quantity}</span>
+                </div>
+              ))}
+            </div>
+            <label className="form-one-response-comment-field">
+              <span>კომენტარი (უარყოფის შემთხვევაში)</span>
+              <textarea
+                value={editReviewComment}
+                onChange={(event) => setEditReviewComment(event.target.value)}
+                placeholder="ჩაწერეთ უარყოფის მიზეზი"
+              />
+            </label>
+            {editReviewError ? <p className="form-error">{editReviewError}</p> : null}
+            <div className="form-one-detail-actions">
+              <button
+                className="primary-button danger"
+                type="button"
+                disabled={editReviewResponding || !editReviewComment.trim()}
+                onClick={async () => {
+                  setEditReviewResponding(true);
+                  setEditReviewError("");
+                  const ok = await onRespondEditReview("reject", editReviewComment);
+                  setEditReviewResponding(false);
+                  if (!ok) {
+                    setEditReviewError("მოქმედების შესრულება ვერ მოხერხდა.");
+                  }
+                }}
+              >
+                <XCircle size={17} />
+                <span>არა</span>
+              </button>
+              <button
+                className="primary-button success"
+                type="button"
+                disabled={editReviewResponding}
+                onClick={async () => {
+                  setEditReviewResponding(true);
+                  setEditReviewError("");
+                  const ok = await onRespondEditReview("approve", editReviewComment);
+                  setEditReviewResponding(false);
+                  if (!ok) {
+                    setEditReviewError("მოქმედების შესრულება ვერ მოხერხდა.");
+                  }
+                }}
+              >
+                <CheckCircle2 size={17} />
+                <span>დიახ</span>
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {record.completedItems.length ? (
+          <h3 className="form-one-block-title">შეკვეთა</h3>
+        ) : null}
         <div className="form-one-record-items modal-items">
           <div className="form-one-record-item head">
             <span>№</span>
@@ -1435,6 +1895,31 @@ function FormOneRecordModal({
             </div>
           ))}
         </div>
+
+        {record.completedItems.length ? (
+          <>
+            <h3 className="form-one-block-title">შესრულებული სამუშაოები</h3>
+            <div className="form-one-record-items modal-items">
+              <div className="form-one-record-item head">
+                <span>№</span>
+                <span>მოდელი</span>
+                <span>მომსახურება</span>
+                <span>რაოდ.</span>
+              </div>
+              {record.completedItems.map((item, index) => (
+                <div
+                  className="form-one-record-item"
+                  key={`${record.id}-completed-${index}-${item.serviceLabel}`}
+                >
+                  <span>{index + 1}</span>
+                  <strong>{item.modelLabel}</strong>
+                  <span>{item.serviceLabel}</span>
+                  <span>{item.quantity}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : null}
 
         {record.rejectionComments.length ? (
           <div className="form-one-record-comments">
@@ -1529,6 +2014,7 @@ function FormOneRecordModal({
             ) : null}
           </div>
         ) : null}
+        </div>
 
         <div className="form-one-detail-actions">
           {canRespondToCompletion ? (
@@ -1592,6 +2078,319 @@ function FormOneRecordModal({
               <span>წაშლა</span>
             </button>
           ) : null}
+          {permissions.flag && !record.isFlagged ? (
+            <button className="primary-button flag" type="button" onClick={onFlag}>
+              <Ban size={17} />
+              <span>დახარვეზება</span>
+            </button>
+          ) : null}
+          {permissions.flag && record.isFlagged ? (
+            <button className="primary-button flag" type="button" onClick={onUnflag}>
+              <FlagOff size={17} />
+              <span>დახარვეზების მოხსნა</span>
+            </button>
+          ) : null}
+          {canManageEditReview ? (
+            <>
+              <button className="ghost-button" type="button" onClick={onCancelEditReview}>
+                <X size={17} />
+                <span>გაუქმება</span>
+              </button>
+              <button className="primary-button" type="button" onClick={onResendEditReview}>
+                <Send size={17} />
+                <span>გადაგზავნა</span>
+              </button>
+            </>
+          ) : null}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function FormOneCompletionRequestModal({
+  record,
+  onClose,
+  onSubmit,
+}: {
+  record: FormOneRecord;
+  onClose: () => void;
+  onSubmit: (completedItems: FormOneRecordItem[]) => Promise<boolean>;
+}) {
+  const [completedLines, setCompletedLines] = useState<ModelLine[]>(() =>
+    record.completedItems.length
+      ? createModelLinesFromItems(record.completedItems)
+      : createInitialModelLines(),
+  );
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  const completedItemsPreview = buildRecordItems(completedLines);
+  const canSubmit = completedItemsPreview.length > 0;
+
+  function addModelLine() {
+    setCompletedLines((current) => [
+      ...current,
+      {
+        id: makeClientId("model-line"),
+        modelId: initialModelId,
+        services: [
+          {
+            id: makeClientId("service-line"),
+            serviceId: initialServiceId,
+            customServiceLabel: "",
+            quantity: 1,
+          },
+        ],
+      },
+    ]);
+  }
+
+  function removeModelLine(lineId: string) {
+    setCompletedLines((current) =>
+      current.length === 1
+        ? current
+        : current.filter((line) => line.id !== lineId),
+    );
+  }
+
+  function updateModel(lineId: string, modelId: string) {
+    const firstServiceId = getDefaultServiceId(modelId);
+    setCompletedLines((current) =>
+      current.map((line) =>
+        line.id === lineId
+          ? {
+              ...line,
+              modelId,
+              services: [
+                {
+                  id: line.services[0]?.id ?? makeClientId("service-line"),
+                  serviceId: firstServiceId,
+                  customServiceLabel: "",
+                  quantity: line.services[0]?.quantity ?? 1,
+                },
+              ],
+            }
+          : line,
+      ),
+    );
+  }
+
+  function addServiceLine(lineId: string) {
+    setCompletedLines((current) =>
+      current.map((line) => {
+        if (line.id !== lineId) {
+          return line;
+        }
+
+        const nextServiceId = getNextAvailableServiceId(line, false);
+
+        return {
+          ...line,
+          services: [
+            ...line.services,
+            {
+              id: makeClientId("service-line"),
+              serviceId: nextServiceId,
+              customServiceLabel: "",
+              quantity: 1,
+            },
+          ],
+        };
+      }),
+    );
+  }
+
+  function removeServiceLine(lineId: string, serviceLineId: string) {
+    setCompletedLines((current) =>
+      current.map((line) => {
+        if (line.id !== lineId || line.services.length === 1) {
+          return line;
+        }
+
+        return {
+          ...line,
+          services: line.services.filter(
+            (service) => service.id !== serviceLineId,
+          ),
+        };
+      }),
+    );
+  }
+
+  function updateService(
+    lineId: string,
+    serviceLineId: string,
+    serviceId: string,
+  ) {
+    setCompletedLines((current) =>
+      current.map((line) =>
+        line.id === lineId
+          ? {
+              ...line,
+              services: line.services.map((service) =>
+                service.id === serviceLineId
+                  ? { ...service, serviceId, customServiceLabel: "" }
+                  : service,
+              ),
+            }
+          : line,
+      ),
+    );
+  }
+
+  function updateQuantity(
+    lineId: string,
+    serviceLineId: string,
+    quantity: number,
+  ) {
+    setCompletedLines((current) =>
+      current.map((line) =>
+        line.id === lineId
+          ? {
+              ...line,
+              services: line.services.map((service) =>
+                service.id === serviceLineId
+                  ? { ...service, quantity: Math.max(1, quantity || 1) }
+                  : service,
+              ),
+            }
+          : line,
+      ),
+    );
+  }
+
+  async function handleSubmit() {
+    if (!canSubmit) {
+      return;
+    }
+
+    setSubmitting(true);
+    setError("");
+    const ok = await onSubmit(completedItemsPreview);
+    setSubmitting(false);
+    if (!ok) {
+      setError("დასრულებისთვის გადაგზავნა ვერ მოხერხდა.");
+    }
+  }
+
+  return (
+    <div className="quick-task-modal-backdrop" role="presentation">
+      <section
+        className="quick-task-modal form-one-completion-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="form-one-completion-title"
+      >
+        <header>
+          <div>
+            <p className="eyebrow">ფორმა ერთი</p>
+            <h2 id="form-one-completion-title">დასრულებისთვის გაგზავნა</h2>
+          </div>
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="დახურვა"
+            onClick={onClose}
+          >
+            <X size={18} />
+          </button>
+        </header>
+
+        <div className="form-one-modal-body">
+        <div className="form-one-completion-section">
+          <h3 className="form-one-block-title">შეკვეთა</h3>
+          <div className="form-one-record-items modal-items">
+            <div className="form-one-record-item head">
+              <span>№</span>
+              <span>მოდელი</span>
+              <span>მომსახურება</span>
+              <span>რაოდ.</span>
+            </div>
+            {record.items.map((item, index) => (
+              <div
+                className="form-one-record-item"
+                key={`order-${index}-${item.serviceLabel}`}
+              >
+                <span>{index + 1}</span>
+                <strong>{item.modelLabel}</strong>
+                <span>{item.serviceLabel}</span>
+                <span>{item.quantity}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="form-one-completion-section">
+          <h3 className="form-one-block-title">შესრულებული სამუშაოები</h3>
+          <div className="form-one-table-wrap">
+            <table className="form-one-table">
+              <thead>
+                <tr>
+                  <th>№</th>
+                  <th>მოდელი</th>
+                  <th>მომსახურება</th>
+                  <th>რაოდ.</th>
+                </tr>
+              </thead>
+              {completedLines.map((line) => (
+                <ModelLineRows
+                  key={line.id}
+                  line={line}
+                  lineCount={completedLines.length}
+                  startNumber={getLineStartNumber(completedLines, line.id)}
+                  canAddService
+                  canDeleteService
+                  canEditModel
+                  canEditService
+                  canEditQuantity
+                  allowCustomService={false}
+                  onAddService={() => addServiceLine(line.id)}
+                  onRemoveModel={() => removeModelLine(line.id)}
+                  onUpdateModel={(modelId) => updateModel(line.id, modelId)}
+                  onRemoveService={(serviceLineId) =>
+                    removeServiceLine(line.id, serviceLineId)
+                  }
+                  onUpdateService={(serviceLineId, serviceId) =>
+                    updateService(line.id, serviceLineId, serviceId)
+                  }
+                  onUpdateCustomService={() => {}}
+                  onUpdateQuantity={(serviceLineId, quantity) =>
+                    updateQuantity(line.id, serviceLineId, quantity)
+                  }
+                />
+              ))}
+            </table>
+          </div>
+          <button
+            className="ghost-button form-one-add-model"
+            type="button"
+            onClick={addModelLine}
+          >
+            <Plus size={18} />
+            <span>მომსახურების დამატება</span>
+          </button>
+        </div>
+
+        {error ? (
+          <p className="form-error form-one-completion-section">{error}</p>
+        ) : null}
+        </div>
+
+        <div className="form-one-detail-actions">
+          <button className="ghost-button" type="button" onClick={onClose}>
+            <X size={17} />
+            <span>გაუქმება</span>
+          </button>
+          <button
+            className="primary-button success"
+            type="button"
+            disabled={!canSubmit || submitting}
+            onClick={handleSubmit}
+          >
+            <Send size={17} />
+            <span>{submitting ? "იგზავნება..." : "გადაგზავნა ბაღთან"}</span>
+          </button>
         </div>
       </section>
     </div>
@@ -1640,10 +2439,10 @@ function buildRecordItems(lines: ModelLine[]): FormOneRecordItem[] {
     .filter((item) => item.modelLabel && item.serviceLabel);
 }
 
-function createModelLinesFromRecord(record: FormOneRecord): ModelLine[] {
+function createModelLinesFromItems(items: FormOneRecordItem[]): ModelLine[] {
   const linesByModel = new Map<string, ModelLine>();
 
-  record.items.forEach((item) => {
+  items.forEach((item) => {
     const modelId = resolveModelId(item);
     let line = linesByModel.get(modelId);
     if (!line) {
@@ -1753,21 +2552,30 @@ function getDefaultServiceId(modelId: string) {
   return getModelOption(modelId)?.services[0]?.id ?? CUSTOM_SERVICE_ID;
 }
 
-function getNextAvailableServiceId(line: ModelLine) {
+function getNextAvailableServiceId(line: ModelLine, includeCustom = true) {
   const selectedServiceIds = new Set(
     line.services
       .map((service) => service.serviceId)
       .filter((serviceId) => serviceId !== CUSTOM_SERVICE_ID),
   );
 
-  return (
-    getModelOption(line.modelId)?.services.find(
-      (service) => !selectedServiceIds.has(service.id),
-    )?.id ?? CUSTOM_SERVICE_ID
-  );
+  const nextCatalogServiceId = getModelOption(line.modelId)?.services.find(
+    (service) => !selectedServiceIds.has(service.id),
+  )?.id;
+  if (nextCatalogServiceId) {
+    return nextCatalogServiceId;
+  }
+
+  return includeCustom
+    ? CUSTOM_SERVICE_ID
+    : (getModelOption(line.modelId)?.services[0]?.id ?? CUSTOM_SERVICE_ID);
 }
 
-function getSelectableServices(line: ModelLine, currentServiceId: string) {
+function getSelectableServices(
+  line: ModelLine,
+  currentServiceId: string,
+  includeCustom = true,
+) {
   const selectedServiceIds = new Set(
     line.services
       .map((service) => service.serviceId)
@@ -1782,7 +2590,7 @@ function getSelectableServices(line: ModelLine, currentServiceId: string) {
       (service) => !selectedServiceIds.has(service.id),
     ) ?? [];
 
-  return [...catalogServices, customServiceOption];
+  return includeCustom ? [...catalogServices, customServiceOption] : catalogServices;
 }
 
 function getLineStartNumber(lines: ModelLine[], lineId: string) {
@@ -1863,6 +2671,18 @@ function hasEditableFormOneFields(permissions: Props["permissions"]) {
 }
 
 function getRecordDisplayStatus(record: FormOneRecord, todayValue: string) {
+  if (record.isFlagged) {
+    return { key: "flagged", label: "დახარვეზებულია" };
+  }
+
+  if (record.editReviewStatus === "pending") {
+    return { key: "edit-review", label: "საჭიროებს დადასტურებას" };
+  }
+
+  if (record.editReviewStatus === "rejected") {
+    return { key: "edit-rejected", label: "ცვლილება უარყოფილია" };
+  }
+
   if (record.status === "completed") {
     return { key: "completed", label: "დასრულებული" };
   }

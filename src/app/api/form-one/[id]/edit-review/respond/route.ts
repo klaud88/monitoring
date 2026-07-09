@@ -4,7 +4,7 @@ import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import {
   getFormOneRecordById,
   normalizeDeviceGroupCode,
-  respondToFormOneCompletion,
+  respondToFormOneEditReview,
 } from "@/lib/repositories";
 
 export async function POST(
@@ -12,7 +12,7 @@ export async function POST(
   context: { params: Promise<{ id: string }> },
 ) {
   const user = await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
-  if (!user || !hasPermission(user, "form_one.completion_response")) {
+  if (!hasPermission(user, "form_one.completion_response")) {
     return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   }
 
@@ -20,9 +20,6 @@ export async function POST(
   const existing = await getFormOneRecordById(id);
   if (!existing || !canAccessRecord(user, existing.deviceGroupCode)) {
     return NextResponse.json({ message: "Form one record not found" }, { status: 404 });
-  }
-  if (existing.isFlagged) {
-    return NextResponse.json({ message: "Form one record is flagged" }, { status: 403 });
   }
 
   const body = await request.json().catch(() => null);
@@ -32,11 +29,11 @@ export async function POST(
     return NextResponse.json({ message: "Comment is required" }, { status: 400 });
   }
 
-  const record = await respondToFormOneCompletion(
+  const record = await respondToFormOneEditReview(
     id,
     { action, comment },
     {
-      userId: user.id,
+      userId: user?.id,
       allowedDeviceGroupCode: getScopedDeviceGroupCode(user),
     },
   );
@@ -46,11 +43,11 @@ export async function POST(
   }
 
   await logAudit({
-    userId: user.id,
+    userId: user!.id,
     action:
       action === "approve"
-        ? "form_one.completion_approve"
-        : "form_one.completion_reject",
+        ? "form_one.edit_review_approve"
+        : "form_one.edit_review_reject",
     entityType: "form_one_record",
     entityId: id,
     metadata: { comment: action === "reject" ? comment : undefined },

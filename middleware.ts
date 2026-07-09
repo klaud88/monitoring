@@ -3,7 +3,12 @@ import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE } from "@/lib/session";
 import { isLoginRateLimited } from "@/lib/rate-limit";
 
-const publicRoutes = ["/login", "/api/auth/login", "/api/auth/change-password", "/api/cron/offline-capture"];
+const publicRoutes = [
+  "/login",
+  "/api/auth/login",
+  "/api/auth/change-password",
+  "/api/cron/offline-capture",
+];
 
 const MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const ALLOWED_ORIGINS = process.env.APP_URL
@@ -41,7 +46,9 @@ async function isValidSession(token?: string) {
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const isPublic = publicRoutes.some((route) => pathname === route || pathname.startsWith(`${route}/`));
+  const isPublic = publicRoutes.some(
+    (route) => pathname === route || pathname.startsWith(`${route}/`),
+  );
   const token = request.cookies.get(SESSION_COOKIE)?.value;
   const valid = await isValidSession(token);
   const ip = getClientIp(request);
@@ -75,7 +82,11 @@ export async function middleware(request: NextRequest) {
   // CSRF: reject cross-origin mutation requests
   if (MUTATION_METHODS.has(request.method) && pathname.startsWith("/api")) {
     const origin = request.headers.get("origin");
-    if (origin && ALLOWED_ORIGINS.length > 0 && !ALLOWED_ORIGINS.includes(origin)) {
+    if (
+      origin &&
+      ALLOWED_ORIGINS.length > 0 &&
+      !ALLOWED_ORIGINS.includes(origin)
+    ) {
       return NextResponse.json({ message: "Forbidden" }, { status: 403 });
     }
   }

@@ -8,8 +8,10 @@ import {
   BellRing,
   CheckCircle2,
   ClipboardList,
+  Edit3,
   ExternalLink,
   MessageSquare,
+  Send,
   Trash2,
   WifiOff,
   X,
@@ -38,10 +40,12 @@ export function NotificationsBell({
   canOfflineMonitor,
   canFormOne,
   canRespondToCompletion,
+  canEditFormOne,
 }: {
   canOfflineMonitor: boolean;
   canFormOne: boolean;
   canRespondToCompletion: boolean;
+  canEditFormOne: boolean;
 }) {
   // Form-one state
   const [formOneNotifications, setFormOneNotifications] = useState<
@@ -205,14 +209,15 @@ export function NotificationsBell({
     }
     setSaving(true);
     setFormOneError("");
-    const res = await fetch(
-      `/api/form-one/${selected.recordId}/completion-response`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, comment }),
-      },
-    ).catch(() => null);
+    const endpoint =
+      selected.type === "edit_request"
+        ? `/api/form-one/${selected.recordId}/edit-review/respond`
+        : `/api/form-one/${selected.recordId}/completion-response`;
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, comment }),
+    }).catch(() => null);
     setSaving(false);
     if (!res?.ok) {
       setFormOneError("მოქმედების შესრულება ვერ მოხერხდა.");
@@ -223,6 +228,44 @@ export function NotificationsBell({
     );
     setSelected(null);
     setComment("");
+  }
+
+  async function resendEdit() {
+    if (!selected) return;
+    setSaving(true);
+    setFormOneError("");
+    const res = await fetch(
+      `/api/form-one/${selected.recordId}/edit-review/resend`,
+      { method: "POST" },
+    ).catch(() => null);
+    setSaving(false);
+    if (!res?.ok) {
+      setFormOneError("ცვლილების ხელახლა გაგზავნა ვერ მოხერხდა.");
+      return;
+    }
+    setFormOneNotifications((current) =>
+      current.filter((n) => n.id !== selected.id),
+    );
+    setSelected(null);
+  }
+
+  async function cancelEdit() {
+    if (!selected) return;
+    setSaving(true);
+    setFormOneError("");
+    const res = await fetch(
+      `/api/form-one/${selected.recordId}/edit-review`,
+      { method: "DELETE" },
+    ).catch(() => null);
+    setSaving(false);
+    if (!res?.ok) {
+      setFormOneError("ცვლილების გაუქმება ვერ მოხერხდა.");
+      return;
+    }
+    setFormOneNotifications((current) =>
+      current.filter((n) => n.id !== selected.id),
+    );
+    setSelected(null);
   }
 
   function closeModal() {
@@ -380,6 +423,7 @@ export function NotificationsBell({
                       <p className="notification-section-label">ფორმა ერთი</p>
                       {formOneNotifications.map((notification) => {
                         const isSeen = seenIds.has(notification.id);
+                        const meta = getFormOneNotificationMeta(notification.type);
                         return (
                           <button
                             key={notification.id}
@@ -387,20 +431,10 @@ export function NotificationsBell({
                             type="button"
                             onClick={() => openNotification(notification)}
                           >
-                            {notification.type === "rejection" ? (
-                              <XCircle size={16} />
-                            ) : (
-                              <ClipboardList size={16} />
-                            )}
+                            <meta.Icon size={16} />
                             <span>
                               <strong>{notification.record.gardenLabel}</strong>
-                              <small>
-                                {notification.type === "rejection"
-                                  ? "ბაღმა უარყო დასრულება"
-                                  : notification.type === "new_record"
-                                    ? "ახალი ფორმა წარდგენილია"
-                                    : "დასრულების დადასტურება"}
-                              </small>
+                              <small>{meta.label}</small>
                             </span>
                           </button>
                         );
@@ -439,13 +473,25 @@ export function NotificationsBell({
               </button>
             </header>
 
+            <div className="form-one-modal-body">
             <FormOneNotificationDetails record={selected.record} />
+
+            {selected.type === "edit_request" && selected.record.pendingEdit ? (
+              <FormOnePendingEditDetails pendingEdit={selected.record.pendingEdit} />
+            ) : null}
 
             {selected.type === "rejection" ? (
               <p className="form-one-notification-comment">
                 {selected.comment || "კომენტარი არ არის მითითებული."}
               </p>
-            ) : selected.type === "completion_request" ? (
+            ) : selected.type === "edit_rejection" ? (
+              <p className="form-one-edit-review-comment">
+                {selected.record.editReviewComment ||
+                  selected.comment ||
+                  "კომენტარი არ არის მითითებული."}
+              </p>
+            ) : selected.type === "completion_request" ||
+              selected.type === "edit_request" ? (
               <label className="form-one-notification-comment-field">
                 <span>კომენტარი უარყოფის შემთხვევაში</span>
                 <textarea
@@ -457,6 +503,7 @@ export function NotificationsBell({
             ) : null}
 
             {formOneError ? <p className="form-error">{formOneError}</p> : null}
+            </div>
 
             <div className="form-one-notification-actions">
               <Link
@@ -487,6 +534,50 @@ export function NotificationsBell({
                   >
                     <CheckCircle2 size={17} />
                     <span>დადასტურება</span>
+                  </button>
+                </>
+              ) : null}
+              {selected.type === "edit_request" && canRespondToCompletion ? (
+                <>
+                  <button
+                    className="primary-button danger"
+                    type="button"
+                    onClick={() => respond("reject")}
+                    disabled={saving}
+                  >
+                    <XCircle size={17} />
+                    <span>არა</span>
+                  </button>
+                  <button
+                    className="primary-button success"
+                    type="button"
+                    onClick={() => respond("approve")}
+                    disabled={saving}
+                  >
+                    <CheckCircle2 size={17} />
+                    <span>დიახ</span>
+                  </button>
+                </>
+              ) : null}
+              {selected.type === "edit_rejection" && canEditFormOne ? (
+                <>
+                  <button
+                    className="ghost-button"
+                    type="button"
+                    onClick={cancelEdit}
+                    disabled={saving}
+                  >
+                    <X size={16} />
+                    <span>გაუქმება</span>
+                  </button>
+                  <button
+                    className="primary-button"
+                    type="button"
+                    onClick={resendEdit}
+                    disabled={saving}
+                  >
+                    <Send size={16} />
+                    <span>გადაგზავნა</span>
                   </button>
                 </>
               ) : null}
@@ -522,6 +613,9 @@ function FormOneNotificationDetails({ record }: { record: FormOneRecord }) {
             : "არ არის მითითებული"}
         </span>
       </div>
+      {record.completedItems.length ? (
+        <h3 className="form-one-block-title">შეკვეთა</h3>
+      ) : null}
       <div className="form-one-notification-items">
         {record.items.map((item, index) => (
           <div key={`${record.id}-${index}-${item.serviceLabel}`}>
@@ -531,6 +625,20 @@ function FormOneNotificationDetails({ record }: { record: FormOneRecord }) {
           </div>
         ))}
       </div>
+      {record.completedItems.length ? (
+        <>
+          <h3 className="form-one-block-title">შესრულებული სამუშაოები</h3>
+          <div className="form-one-notification-items">
+            {record.completedItems.map((item, index) => (
+              <div key={`${record.id}-completed-${index}-${item.serviceLabel}`}>
+                <strong>{item.modelLabel}</strong>
+                <span>{item.serviceLabel}</span>
+                <small>{item.quantity}</small>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : null}
       {record.rejectionComments.length ? (
         <div className="form-one-record-comments">
           {record.rejectionComments.map((item) => (
@@ -545,6 +653,58 @@ function FormOneNotificationDetails({ record }: { record: FormOneRecord }) {
       ) : null}
     </div>
   );
+}
+
+function FormOnePendingEditDetails({
+  pendingEdit,
+}: {
+  pendingEdit: NonNullable<FormOneRecord["pendingEdit"]>;
+}) {
+  const totalQuantity = pendingEdit.items.reduce(
+    (sum, item) => sum + item.quantity,
+    0,
+  );
+
+  return (
+    <div className="form-one-notification-details">
+      <p className="form-one-edit-review-question">შემოთავაზებული ცვლილება</p>
+      <div className="form-one-notification-stats">
+        <span>ბაღი: {pendingEdit.gardenLabel || "—"}</span>
+        <span>ტელეფონი: {pendingEdit.phone || "არ არის მითითებული"}</span>
+        <span>რაოდენობა: {totalQuantity}</span>
+        <span>
+          შესრულება:{" "}
+          {pendingEdit.dueDate
+            ? formatDisplayDate(pendingEdit.dueDate)
+            : "არ არის მითითებული"}
+        </span>
+      </div>
+      <div className="form-one-notification-items">
+        {pendingEdit.items.map((item, index) => (
+          <div key={`pending-${index}-${item.serviceLabel}`}>
+            <strong>{item.modelLabel}</strong>
+            <span>{item.serviceLabel}</span>
+            <small>{item.quantity}</small>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function getFormOneNotificationMeta(type: FormOneNotification["type"]) {
+  switch (type) {
+    case "rejection":
+      return { Icon: XCircle, label: "ბაღმა უარყო დასრულება" };
+    case "new_record":
+      return { Icon: ClipboardList, label: "ახალი ფორმა წარდგენილია" };
+    case "edit_request":
+      return { Icon: Edit3, label: "ცვლილება საჭიროებს დადასტურებას" };
+    case "edit_rejection":
+      return { Icon: XCircle, label: "ბაღმა უარყო ცვლილება" };
+    default:
+      return { Icon: ClipboardList, label: "დასრულების დადასტურება" };
+  }
 }
 
 function getMonitoringKey(n: MonitoringNotification) {

@@ -4,7 +4,7 @@ import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import {
   getFormOneRecordById,
   normalizeDeviceGroupCode,
-  respondToFormOneCompletion,
+  resendFormOneEditReview,
 } from "@/lib/repositories";
 
 export async function POST(
@@ -12,7 +12,7 @@ export async function POST(
   context: { params: Promise<{ id: string }> },
 ) {
   const user = await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
-  if (!user || !hasPermission(user, "form_one.completion_response")) {
+  if (!hasPermission(user, "form_one.edit")) {
     return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   }
 
@@ -21,39 +21,22 @@ export async function POST(
   if (!existing || !canAccessRecord(user, existing.deviceGroupCode)) {
     return NextResponse.json({ message: "Form one record not found" }, { status: 404 });
   }
-  if (existing.isFlagged) {
-    return NextResponse.json({ message: "Form one record is flagged" }, { status: 403 });
-  }
 
-  const body = await request.json().catch(() => null);
-  const action = body?.action === "approve" ? "approve" : "reject";
-  const comment = String(body?.comment || "").trim();
-  if (action === "reject" && !comment) {
-    return NextResponse.json({ message: "Comment is required" }, { status: 400 });
-  }
-
-  const record = await respondToFormOneCompletion(
-    id,
-    { action, comment },
-    {
-      userId: user.id,
-      allowedDeviceGroupCode: getScopedDeviceGroupCode(user),
-    },
-  );
+  const record = await resendFormOneEditReview(id, {
+    requestedBy: user?.id,
+    requestedByName: user?.name,
+    allowedDeviceGroupCode: getScopedDeviceGroupCode(user),
+  });
 
   if (!record) {
     return NextResponse.json({ message: "Form one record not found" }, { status: 404 });
   }
 
   await logAudit({
-    userId: user.id,
-    action:
-      action === "approve"
-        ? "form_one.completion_approve"
-        : "form_one.completion_reject",
+    userId: user!.id,
+    action: "form_one.edit_review_resend",
     entityType: "form_one_record",
     entityId: id,
-    metadata: { comment: action === "reject" ? comment : undefined },
     ipAddress: request.headers.get("x-forwarded-for") ?? undefined,
     userAgent: request.headers.get("user-agent") ?? undefined,
   });

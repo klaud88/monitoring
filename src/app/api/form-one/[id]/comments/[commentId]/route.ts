@@ -21,6 +21,9 @@ export async function PATCH(
   if (!existing || !canAccessRecord(user, existing.deviceGroupCode)) {
     return NextResponse.json({ message: "Form one record not found" }, { status: 404 });
   }
+  if (existing.isFlagged) {
+    return NextResponse.json({ message: "Form one record is flagged" }, { status: 403 });
+  }
 
   const body = await request.json().catch(() => null);
   const comment = String(body?.comment || "").trim();

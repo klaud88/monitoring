@@ -148,6 +148,7 @@ export async function AppShell({
                 canOfflineMonitor={hasPermission(user, "offline_records.alerts")}
                 canFormOne={hasPermission(user, "form_one.view")}
                 canRespondToCompletion={hasPermission(user, "form_one.completion_response")}
+                canEditFormOne={hasPermission(user, "form_one.edit")}
               />
             ) : null}
             <Link

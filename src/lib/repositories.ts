@@ -14,8 +14,10 @@ import type {
   Device,
   DeviceStatus,
   FormOneDueDateEntry,
+  FormOneEditReviewStatus,
   FormOneNotification,
   FormOneNotificationType,
+  FormOnePendingEdit,
   FormOneRecord,
   FormOneRecordItem,
   FormOneRejectionComment,
@@ -278,6 +280,11 @@ const FORM_ONE_PERMISSIONS: {
     label: "ფორმა ერთი: წაშლა",
     roles: ["admin"],
   },
+  {
+    code: "form_one.flag",
+    label: "ფორმა ერთი: დახარვეზება",
+    roles: ["admin"],
+  },
 ];
 const TASK_TAG_PERMISSIONS: {
   code: PermissionKey;
@@ -382,7 +389,19 @@ type FormOneRecordRow = {
   completed_at: DatabaseDate | null;
   completed_by: string | null;
   rejection_comments: unknown;
+  is_flagged: boolean | number | null;
+  flag_comment: string | null;
+  flagged_at: DatabaseDate | null;
+  flagged_by: string | null;
+  flagged_by_name: string | null;
+  edit_review_status: FormOneEditReviewStatus | string | null;
+  pending_edit: unknown;
+  edit_requested_at: DatabaseDate | null;
+  edit_requested_by: string | null;
+  edit_requested_by_name: string | null;
+  edit_review_comment: string | null;
   items: unknown;
+  completed_items: unknown;
   created_by: string | null;
   created_at: DatabaseDate;
   updated_at: DatabaseDate;
@@ -958,6 +977,93 @@ async function ensureOperationalSchema() {
         "form_one_records",
         "rejection_comments",
         "rejection_comments json null after completed_by",
+      );
+      await addColumnIfMissing(
+        connection,
+        formOneColumns,
+        "form_one_records",
+        "is_flagged",
+        "is_flagged tinyint(1) not null default 0 after rejection_comments",
+      );
+      await addColumnIfMissing(
+        connection,
+        formOneColumns,
+        "form_one_records",
+        "flag_comment",
+        "flag_comment text null after is_flagged",
+      );
+      await addColumnIfMissing(
+        connection,
+        formOneColumns,
+        "form_one_records",
+        "flagged_at",
+        "flagged_at datetime null after flag_comment",
+      );
+      await addColumnIfMissing(
+        connection,
+        formOneColumns,
+        "form_one_records",
+        "flagged_by",
+        "flagged_by varchar(64) null after flagged_at",
+      );
+      await addColumnIfMissing(
+        connection,
+        formOneColumns,
+        "form_one_records",
+        "flagged_by_name",
+        "flagged_by_name varchar(160) null after flagged_by",
+      );
+      await addColumnIfMissing(
+        connection,
+        formOneColumns,
+        "form_one_records",
+        "edit_review_status",
+        "edit_review_status enum('none', 'pending', 'rejected') not null default 'none' after flagged_by_name",
+      );
+      await connection.query(
+        "alter table form_one_records modify edit_review_status enum('none', 'pending', 'rejected') not null default 'none'",
+      );
+      await addColumnIfMissing(
+        connection,
+        formOneColumns,
+        "form_one_records",
+        "pending_edit",
+        "pending_edit json null after edit_review_status",
+      );
+      await addColumnIfMissing(
+        connection,
+        formOneColumns,
+        "form_one_records",
+        "edit_requested_at",
+        "edit_requested_at datetime null after pending_edit",
+      );
+      await addColumnIfMissing(
+        connection,
+        formOneColumns,
+        "form_one_records",
+        "edit_requested_by",
+        "edit_requested_by varchar(64) null after edit_requested_at",
+      );
+      await addColumnIfMissing(
+        connection,
+        formOneColumns,
+        "form_one_records",
+        "edit_requested_by_name",
+        "edit_requested_by_name varchar(160) null after edit_requested_by",
+      );
+      await addColumnIfMissing(
+        connection,
+        formOneColumns,
+        "form_one_records",
+        "edit_review_comment",
+        "edit_review_comment text null after edit_requested_by_name",
+      );
+      await addColumnIfMissing(
+        connection,
+        formOneColumns,
+        "form_one_records",
+        "completed_items",
+        "completed_items json null after items",
       );
       await connection.query(`
         create table if not exists form_one_notifications (
@@ -1627,6 +1733,7 @@ let fallbackRoles: AppRole[] = [
       "form_one.completion_response",
       "form_one.delete",
       "form_one.comment_edit",
+      "form_one.flag",
       "regions.view",
       "regions.create",
       "regions.edit",
@@ -3718,6 +3825,371 @@ export async function updateFormOneRecord(
   });
 }
 
+export async function requestFormOneEditReview(
+  id: string,
+  input: {
+    deviceId: string;
+    gardenLabel: string;
+    phone?: string;
+    submittedDate: string;
+    dueDate?: string;
+    items: FormOneRecordItem[];
+  },
+  options: {
+    requestedBy?: string;
+    requestedByName?: string;
+    allowedDeviceGroupCode?: string;
+  } = {},
+): Promise<FormOneRecord | null> {
+  if (isBuildTime()) {
+    return null;
+  }
+
+  const items = normalizeFormOneRecordItems(input.items);
+  const submittedDate = normalizeDateInput(input.submittedDate);
+  const dueDate = normalizeOptionalDateInput(input.dueDate);
+  if (!items.length) {
+    return null;
+  }
+
+  await ensureOperationalSchema();
+
+  return prisma.$transaction(async (transaction) => {
+    const existing = await transaction.form_one_records.findUnique({
+      where: { id },
+    });
+    if (!existing) {
+      return null;
+    }
+
+    const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
+    if (allowedGroup && existing.device_group_code !== allowedGroup) {
+      return null;
+    }
+    if (
+      normalizeFormOneEditReviewStatus(existing.edit_review_status) !== "none"
+    ) {
+      return null;
+    }
+
+    const device = await transaction.devices.findUnique({
+      select: { code: true, id: true, name: true },
+      where: { id: input.deviceId },
+    });
+    if (!device) {
+      return null;
+    }
+
+    const deviceGroupCode = getDeviceGroupCode(device);
+    if (allowedGroup && deviceGroupCode !== allowedGroup) {
+      return null;
+    }
+
+    const pendingEdit: FormOnePendingEdit = {
+      deviceId: input.deviceId,
+      gardenLabel: input.gardenLabel || device.name || deviceGroupCode,
+      ...(input.phone ? { phone: input.phone } : {}),
+      submittedDate,
+      ...(dueDate ? { dueDate } : {}),
+      items,
+    };
+
+    const record = await transaction.form_one_records.update({
+      data: {
+        edit_review_status: "pending",
+        pending_edit: pendingEdit as unknown as Prisma.InputJsonValue,
+        edit_requested_at: new Date(),
+        edit_requested_by: options.requestedBy ?? null,
+        edit_requested_by_name: options.requestedByName ?? null,
+        edit_review_comment: null,
+      },
+      where: { id },
+    });
+
+    await transaction.form_one_notifications.create({
+      data: {
+        id: makeId("formonenotification"),
+        record_id: id,
+        type: "edit_request",
+        recipient_device_group_code: existing.device_group_code,
+        created_by: options.requestedBy ?? null,
+      },
+    });
+
+    return mapPrismaFormOneRecord(record);
+  });
+}
+
+export async function respondToFormOneEditReview(
+  id: string,
+  input: { action: "approve" | "reject"; comment?: string },
+  options: { userId?: string; allowedDeviceGroupCode?: string } = {},
+): Promise<FormOneRecord | null> {
+  if (isBuildTime()) {
+    return null;
+  }
+
+  const comment = String(input.comment || "").trim();
+  if (input.action === "reject" && !comment) {
+    return null;
+  }
+
+  await ensureOperationalSchema();
+
+  return prisma.$transaction(async (transaction) => {
+    const existing = await transaction.form_one_records.findUnique({
+      where: { id },
+    });
+    if (!existing) {
+      return null;
+    }
+
+    const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
+    if (allowedGroup && existing.device_group_code !== allowedGroup) {
+      return null;
+    }
+    if (
+      normalizeFormOneEditReviewStatus(existing.edit_review_status) !==
+      "pending"
+    ) {
+      return null;
+    }
+
+    const pendingEdit = normalizeFormOnePendingEdit(existing.pending_edit);
+    if (!pendingEdit) {
+      return null;
+    }
+
+    await transaction.form_one_notifications.updateMany({
+      data: { read_at: new Date() },
+      where: {
+        record_id: id,
+        type: "edit_request",
+        read_at: null,
+      },
+    });
+
+    if (input.action === "reject") {
+      const record = await transaction.form_one_records.update({
+        data: {
+          edit_review_status: "rejected",
+          edit_review_comment: comment,
+        },
+        where: { id },
+      });
+
+      if (existing.edit_requested_by) {
+        await transaction.form_one_notifications.create({
+          data: {
+            id: makeId("formonenotification"),
+            record_id: id,
+            type: "edit_rejection",
+            recipient_user_id: existing.edit_requested_by,
+            comment_text: comment,
+            created_by: options.userId ?? null,
+          },
+        });
+      }
+
+      return mapPrismaFormOneRecord(record);
+    }
+
+    const device = await transaction.devices.findUnique({
+      select: { code: true, id: true, name: true },
+      where: { id: pendingEdit.deviceId },
+    });
+    if (!device) {
+      return null;
+    }
+
+    const deviceGroupCode = getDeviceGroupCode(device);
+    const submittedDate = normalizeDateInput(pendingEdit.submittedDate);
+    const dueDate = normalizeOptionalDateInput(pendingEdit.dueDate);
+
+    const existingDueDate = existing.due_date
+      ? toDateString(existing.due_date)
+      : undefined;
+    const dueDateChanged = (dueDate || "") !== (existingDueDate || "");
+    const dueDateChangeCount = existing.due_date_change_count ?? 0;
+    const countsAsDueDateChange = dueDateChanged && Boolean(existingDueDate);
+    const existingDueDates = normalizeFormOneDueDates(existing.due_dates);
+    const dueDateHistoryBase =
+      existingDueDates.length || !existingDueDate
+        ? existingDueDates
+        : [
+            {
+              id: makeStableId("formonedue", `${id}:${existingDueDate}`),
+              date: existingDueDate,
+              changedAt: "",
+            },
+          ];
+    const dueDates = dueDateChanged
+      ? [
+          ...dueDateHistoryBase,
+          ...(dueDate
+            ? [
+                {
+                  id: makeId("formonedue"),
+                  date: dueDate,
+                  changedAt: new Date().toISOString(),
+                  changedBy: existing.edit_requested_by ?? undefined,
+                },
+              ]
+            : []),
+        ]
+      : dueDateHistoryBase;
+
+    const record = await transaction.form_one_records.update({
+      data: {
+        device_id: pendingEdit.deviceId,
+        device_group_code: deviceGroupCode,
+        garden_label: pendingEdit.gardenLabel || device.name || deviceGroupCode,
+        phone: pendingEdit.phone || null,
+        submitted_date: toPrismaDateOnly(submittedDate),
+        due_date: dueDate ? toPrismaDateOnly(dueDate) : null,
+        due_dates: dueDates.length
+          ? (dueDates as unknown as Prisma.InputJsonValue)
+          : Prisma.JsonNull,
+        due_date_change_count: countsAsDueDateChange
+          ? dueDateChangeCount + 1
+          : dueDateChangeCount,
+        items: pendingEdit.items as unknown as Prisma.InputJsonValue,
+        edit_review_status: "none",
+        pending_edit: Prisma.JsonNull,
+        edit_requested_at: null,
+        edit_requested_by: null,
+        edit_requested_by_name: null,
+        edit_review_comment: null,
+      },
+      where: { id },
+    });
+
+    return mapPrismaFormOneRecord(record);
+  });
+}
+
+export async function resendFormOneEditReview(
+  id: string,
+  options: {
+    requestedBy?: string;
+    requestedByName?: string;
+    allowedDeviceGroupCode?: string;
+  } = {},
+): Promise<FormOneRecord | null> {
+  if (isBuildTime()) {
+    return null;
+  }
+
+  await ensureOperationalSchema();
+
+  return prisma.$transaction(async (transaction) => {
+    const existing = await transaction.form_one_records.findUnique({
+      where: { id },
+    });
+    if (!existing) {
+      return null;
+    }
+
+    const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
+    if (allowedGroup && existing.device_group_code !== allowedGroup) {
+      return null;
+    }
+    if (
+      normalizeFormOneEditReviewStatus(existing.edit_review_status) !==
+      "rejected"
+    ) {
+      return null;
+    }
+
+    await transaction.form_one_notifications.updateMany({
+      data: { read_at: new Date() },
+      where: {
+        record_id: id,
+        type: "edit_rejection",
+        read_at: null,
+      },
+    });
+
+    const record = await transaction.form_one_records.update({
+      data: {
+        edit_review_status: "pending",
+        edit_requested_at: new Date(),
+        edit_requested_by: options.requestedBy ?? existing.edit_requested_by,
+        edit_requested_by_name:
+          options.requestedByName ?? existing.edit_requested_by_name,
+        edit_review_comment: null,
+      },
+      where: { id },
+    });
+
+    await transaction.form_one_notifications.create({
+      data: {
+        id: makeId("formonenotification"),
+        record_id: id,
+        type: "edit_request",
+        recipient_device_group_code: existing.device_group_code,
+        created_by: options.requestedBy ?? null,
+      },
+    });
+
+    return mapPrismaFormOneRecord(record);
+  });
+}
+
+export async function cancelFormOneEditReview(
+  id: string,
+  options: { allowedDeviceGroupCode?: string } = {},
+): Promise<FormOneRecord | null> {
+  if (isBuildTime()) {
+    return null;
+  }
+
+  await ensureOperationalSchema();
+
+  return prisma.$transaction(async (transaction) => {
+    const existing = await transaction.form_one_records.findUnique({
+      where: { id },
+    });
+    if (!existing) {
+      return null;
+    }
+
+    const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
+    if (allowedGroup && existing.device_group_code !== allowedGroup) {
+      return null;
+    }
+    if (
+      normalizeFormOneEditReviewStatus(existing.edit_review_status) !==
+      "rejected"
+    ) {
+      return null;
+    }
+
+    await transaction.form_one_notifications.updateMany({
+      data: { read_at: new Date() },
+      where: {
+        record_id: id,
+        type: "edit_rejection",
+        read_at: null,
+      },
+    });
+
+    const record = await transaction.form_one_records.update({
+      data: {
+        edit_review_status: "none",
+        pending_edit: Prisma.JsonNull,
+        edit_requested_at: null,
+        edit_requested_by: null,
+        edit_requested_by_name: null,
+        edit_review_comment: null,
+      },
+      where: { id },
+    });
+
+    return mapPrismaFormOneRecord(record);
+  });
+}
+
 export async function deleteFormOneRecord(
   id: string,
   options: { allowedDeviceGroupCode?: string } = {},
@@ -3749,9 +4221,15 @@ export async function deleteFormOneRecord(
 
 export async function requestFormOneCompletion(
   id: string,
+  input: { completedItems: FormOneRecordItem[] },
   options: { requestedBy?: string; allowedDeviceGroupCode?: string } = {},
 ): Promise<FormOneRecord | null> {
   if (isBuildTime()) {
+    return null;
+  }
+
+  const completedItems = normalizeFormOneRecordItems(input.completedItems);
+  if (!completedItems.length) {
     return null;
   }
 
@@ -3790,6 +4268,7 @@ export async function requestFormOneCompletion(
         completion_requested_by: options.requestedBy ?? null,
         completed_at: null,
         completed_by: null,
+        completed_items: completedItems as unknown as Prisma.InputJsonValue,
       },
       where: { id },
     });
@@ -3914,6 +4393,92 @@ export async function respondToFormOneCompletion(
   });
 }
 
+export async function flagFormOneRecord(
+  id: string,
+  input: { comment: string },
+  options: {
+    userId?: string;
+    userName?: string;
+    allowedDeviceGroupCode?: string;
+  } = {},
+): Promise<FormOneRecord | null> {
+  if (isBuildTime()) {
+    return null;
+  }
+
+  const comment = String(input.comment || "").trim();
+  if (!comment) {
+    return null;
+  }
+
+  await ensureOperationalSchema();
+
+  return prisma.$transaction(async (transaction) => {
+    const existing = await transaction.form_one_records.findUnique({
+      where: { id },
+    });
+    if (!existing) {
+      return null;
+    }
+
+    const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
+    if (allowedGroup && existing.device_group_code !== allowedGroup) {
+      return null;
+    }
+
+    const record = await transaction.form_one_records.update({
+      data: {
+        is_flagged: true,
+        flag_comment: comment,
+        flagged_at: new Date(),
+        flagged_by: options.userId ?? null,
+        flagged_by_name: options.userName ?? null,
+      },
+      where: { id },
+    });
+
+    return mapPrismaFormOneRecord(record);
+  });
+}
+
+export async function unflagFormOneRecord(
+  id: string,
+  options: { allowedDeviceGroupCode?: string } = {},
+): Promise<FormOneRecord | null> {
+  if (isBuildTime()) {
+    return null;
+  }
+
+  await ensureOperationalSchema();
+
+  return prisma.$transaction(async (transaction) => {
+    const existing = await transaction.form_one_records.findUnique({
+      where: { id },
+    });
+    if (!existing) {
+      return null;
+    }
+
+    const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
+    if (allowedGroup && existing.device_group_code !== allowedGroup) {
+      return null;
+    }
+
+    const record = await transaction.form_one_records.update({
+      data: {
+        is_flagged: false,
+        flag_comment: null,
+        flagged_at: null,
+        flagged_by: null,
+        flagged_by_name: null,
+      },
+      where: { id },
+    });
+
+    return mapPrismaFormOneRecord(record);
+  });
+}
+
 export async function updateFormOneRejectionComment(
   recordId: string,
   commentId: string,
@@ -4008,7 +4573,19 @@ export async function getFormOneNotifications(
         r.completed_at,
         r.completed_by,
         r.rejection_comments,
+        r.is_flagged,
+        r.flag_comment,
+        r.flagged_at,
+        r.flagged_by,
+        r.flagged_by_name,
+        r.edit_review_status,
+        r.pending_edit,
+        r.edit_requested_at,
+        r.edit_requested_by,
+        r.edit_requested_by_name,
+        r.edit_review_comment,
         r.items,
+        r.completed_items,
         r.created_by,
         r.created_at,
         r.updated_at
@@ -4127,7 +4704,21 @@ function mapPrismaFormOneRecord(row: FormOneRecordRow): FormOneRecord {
     rejectionComments: normalizeFormOneRejectionComments(
       row.rejection_comments,
     ),
+    isFlagged: toBoolean(row.is_flagged),
+    flagComment: row.flag_comment ?? undefined,
+    flaggedAt: row.flagged_at ? toDateTimeString(row.flagged_at) : undefined,
+    flaggedBy: row.flagged_by ?? undefined,
+    flaggedByName: row.flagged_by_name ?? undefined,
+    editReviewStatus: normalizeFormOneEditReviewStatus(row.edit_review_status),
+    pendingEdit: normalizeFormOnePendingEdit(row.pending_edit),
+    editRequestedAt: row.edit_requested_at
+      ? toDateTimeString(row.edit_requested_at)
+      : undefined,
+    editRequestedBy: row.edit_requested_by ?? undefined,
+    editRequestedByName: row.edit_requested_by_name ?? undefined,
+    editReviewComment: row.edit_review_comment ?? undefined,
     items: normalizeFormOneRecordItems(row.items),
+    completedItems: normalizeFormOneRecordItems(row.completed_items),
     createdBy: row.created_by ?? undefined,
     createdAt: toDateTimeString(row.created_at),
     updatedAt: toDateTimeString(row.updated_at),
@@ -4163,11 +4754,49 @@ function normalizeFormOneStatus(value: unknown): FormOneStatus {
     : "in_progress";
 }
 
+function normalizeFormOneEditReviewStatus(
+  value: unknown,
+): FormOneEditReviewStatus {
+  return value === "pending" || value === "rejected" ? value : "none";
+}
+
+function normalizeFormOnePendingEdit(
+  value: unknown,
+): FormOnePendingEdit | undefined {
+  const source =
+    typeof value === "object" && value !== null
+      ? (value as Record<string, unknown>)
+      : null;
+  if (!source) {
+    return undefined;
+  }
+
+  const deviceId = String(source.deviceId || "").trim();
+  const items = normalizeFormOneRecordItems(source.items);
+  if (!deviceId || !items.length) {
+    return undefined;
+  }
+
+  const phone = String(source.phone || "").trim();
+  const dueDate = String(source.dueDate || "").trim();
+
+  return {
+    deviceId,
+    gardenLabel: String(source.gardenLabel || "").trim(),
+    ...(phone ? { phone } : {}),
+    submittedDate: String(source.submittedDate || "").trim(),
+    ...(dueDate ? { dueDate } : {}),
+    items,
+  };
+}
+
 function normalizeFormOneNotificationType(
   value: unknown,
 ): FormOneNotificationType {
   if (value === "rejection") return "rejection";
   if (value === "new_record") return "new_record";
+  if (value === "edit_request") return "edit_request";
+  if (value === "edit_rejection") return "edit_rejection";
   return "completion_request";
 }
 

@@ -28,6 +28,7 @@ export type PermissionAction =
   | "completion_request"
   | "completion_response"
   | "due_date_edit"
+  | "flag"
   | "garden_edit"
   | "model_add"
   | "model_edit"
@@ -150,6 +151,17 @@ export type FormOneRejectionComment = {
   rejectedBy?: string;
 };
 
+export type FormOneEditReviewStatus = "none" | "pending" | "rejected";
+
+export type FormOnePendingEdit = {
+  deviceId: string;
+  gardenLabel: string;
+  phone?: string;
+  submittedDate: string;
+  dueDate?: string;
+  items: FormOneRecordItem[];
+};
+
 export type FormOneRecord = {
   id: string;
   deviceId: string;
@@ -166,13 +178,30 @@ export type FormOneRecord = {
   completedAt?: string;
   completedBy?: string;
   rejectionComments: FormOneRejectionComment[];
+  isFlagged: boolean;
+  flagComment?: string;
+  flaggedAt?: string;
+  flaggedBy?: string;
+  flaggedByName?: string;
+  editReviewStatus: FormOneEditReviewStatus;
+  pendingEdit?: FormOnePendingEdit;
+  editRequestedAt?: string;
+  editRequestedBy?: string;
+  editRequestedByName?: string;
+  editReviewComment?: string;
   items: FormOneRecordItem[];
+  completedItems: FormOneRecordItem[];
   createdBy?: string;
   createdAt: string;
   updatedAt: string;
 };
 
-export type FormOneNotificationType = "new_record" | "completion_request" | "rejection";
+export type FormOneNotificationType =
+  | "new_record"
+  | "completion_request"
+  | "rejection"
+  | "edit_request"
+  | "edit_rejection";
 
 export type FormOneNotification = {
   id: string;

@@ -27,6 +27,7 @@ const permissionActions = new Set<PermissionAction>([
   "completion_request",
   "completion_response",
   "due_date_edit",
+  "flag",
   "garden_edit",
   "model_add",
   "model_edit",

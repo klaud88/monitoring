@@ -668,6 +668,10 @@ textarea:focus {
   color: var(--orange);
 }
 
+.icon-button.flag {
+  color: #7c3aed;
+}
+
 .icon-button:hover,
 .profile-button:hover {
   border-color: var(--line-strong);
@@ -872,6 +876,10 @@ textarea:focus {
 
 .primary-button.warning {
   background: linear-gradient(135deg, #f59e0b, #d97706);
+}
+
+.primary-button.flag {
+  background: linear-gradient(135deg, #7c3aed, #6d28d9);
 }
 
 .ghost-button {
@@ -2854,6 +2862,17 @@ button.section-title:hover {
   border-color: rgba(18, 161, 80, 0.34);
 }
 
+.form-one-record-flagged {
+  border-color: rgba(124, 58, 237, 0.55);
+  background: rgba(124, 58, 237, 0.06);
+}
+
+.form-one-record-edit-review,
+.form-one-record-edit-rejected {
+  border-color: rgba(37, 99, 235, 0.5);
+  background: rgba(37, 99, 235, 0.05);
+}
+
 .form-one-record-summary {
   display: grid;
   grid-template-columns:
@@ -2929,6 +2948,50 @@ button.section-title:hover {
   border-color: rgba(220, 38, 38, 0.5);
   background: var(--danger-soft);
   color: var(--red);
+}
+
+.form-one-status-badge.flagged {
+  border-color: rgba(124, 58, 237, 0.6);
+  background: rgba(124, 58, 237, 0.12);
+  color: #6d28d9;
+}
+
+.form-one-flag-banner {
+  margin: 0;
+  color: #6d28d9;
+  font-weight: 850;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.form-one-status-badge.edit-review,
+.form-one-status-badge.edit-rejected {
+  border-color: rgba(37, 99, 235, 0.55);
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+}
+
+.form-one-edit-review-comment {
+  margin: 0;
+  color: #1d4ed8;
+  font-weight: 850;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.form-one-edit-review-section {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(37, 99, 235, 0.4);
+  border-radius: 8px;
+  background: rgba(37, 99, 235, 0.05);
+  padding: 14px;
+}
+
+.form-one-edit-review-question {
+  margin: 0;
+  color: #1d4ed8;
+  font-weight: 900;
 }
 
 .form-one-comment-count strong,
@@ -3034,10 +3097,45 @@ button.section-title:hover {
 }
 
 .form-one-detail-modal,
-.form-one-notification-modal {
-  grid-template-rows: auto;
-  width: min(860px, 100%);
+.form-one-notification-modal,
+.form-one-completion-modal {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(1040px, 96vw);
+}
+
+.form-one-modal-body {
   overflow-y: auto;
+  min-height: 0;
+}
+
+.form-one-modal-body > .form-one-flag-banner,
+.form-one-modal-body > .form-one-edit-review-comment,
+.form-one-modal-body > .form-one-edit-review-section,
+.form-one-modal-body > .form-error {
+  margin: 0 16px;
+}
+
+.form-one-detail-actions,
+.form-one-notification-actions {
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.form-one-block-title {
+  margin: 14px 16px 0;
+  text-align: left;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.form-one-completion-section {
+  display: grid;
+  gap: 10px;
+  margin: 14px 16px 0;
+}
+
+.form-one-completion-section .form-one-block-title {
+  margin: 0;
 }
 
 .form-one-detail-summary,

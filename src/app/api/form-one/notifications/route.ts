@@ -12,12 +12,21 @@ export async function GET(request: NextRequest) {
     user,
     "form_one.completion_response",
   );
+  const canEditFormOne = hasPermission(user, "form_one.edit");
   const notifications = await getFormOneNotifications(user);
 
   return NextResponse.json({
-    notifications: notifications.filter(
-      (notification) =>
-        notification.type !== "completion_request" || canRespondToCompletion,
-    ),
+    notifications: notifications.filter((notification) => {
+      if (notification.type === "completion_request") {
+        return canRespondToCompletion;
+      }
+      if (notification.type === "edit_request") {
+        return canRespondToCompletion;
+      }
+      if (notification.type === "edit_rejection") {
+        return canEditFormOne;
+      }
+      return true;
+    }),
   });
 }

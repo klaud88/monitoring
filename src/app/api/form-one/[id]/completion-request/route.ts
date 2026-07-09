@@ -6,6 +6,7 @@ import {
   normalizeDeviceGroupCode,
   requestFormOneCompletion,
 } from "@/lib/repositories";
+import type { FormOneRecordItem } from "@/lib/types";
 
 export async function POST(
   request: NextRequest,
@@ -21,11 +22,27 @@ export async function POST(
   if (!existing || !canAccessRecord(user, existing.deviceGroupCode)) {
     return NextResponse.json({ message: "Form one record not found" }, { status: 404 });
   }
+  if (existing.isFlagged) {
+    return NextResponse.json({ message: "Form one record is flagged" }, { status: 403 });
+  }
 
-  const record = await requestFormOneCompletion(id, {
-    requestedBy: user?.id,
-    allowedDeviceGroupCode: getScopedDeviceGroupCode(user),
-  });
+  const body = await request.json().catch(() => null);
+  const completedItems = normalizeApiItems(body?.completedItems);
+  if (!completedItems.length) {
+    return NextResponse.json(
+      { message: "Completed works are required" },
+      { status: 400 },
+    );
+  }
+
+  const record = await requestFormOneCompletion(
+    id,
+    { completedItems },
+    {
+      requestedBy: user?.id,
+      allowedDeviceGroupCode: getScopedDeviceGroupCode(user),
+    },
+  );
 
   if (!record) {
     return NextResponse.json({ message: "Form one record not found" }, { status: 404 });
@@ -59,4 +76,30 @@ function canAccessRecord(
     !scopedDeviceGroupCode ||
     normalizeDeviceGroupCode(recordDeviceGroupCode) === scopedDeviceGroupCode
   );
+}
+
+function normalizeApiItems(value: unknown): FormOneRecordItem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      const source =
+        typeof item === "object" && item !== null
+          ? (item as Record<string, unknown>)
+          : {};
+      const serviceLabel = String(source.serviceLabel || "").trim();
+      const customServiceLabel = String(source.customServiceLabel || "").trim();
+
+      return {
+        modelId: String(source.modelId || "").trim(),
+        modelLabel: String(source.modelLabel || "").trim(),
+        serviceId: String(source.serviceId || "").trim(),
+        serviceLabel: serviceLabel || customServiceLabel,
+        customServiceLabel: customServiceLabel || undefined,
+        quantity: Math.max(1, Number(source.quantity) || 1),
+      };
+    })
+    .filter((item) => item.modelLabel && item.serviceLabel);
 }

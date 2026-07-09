@@ -265,7 +265,19 @@ model form_one_records {
   completed_at            DateTime?               @db.DateTime(0)
   completed_by            String?                 @db.VarChar(64)
   rejection_comments      Json?
+  is_flagged              Boolean                 @default(false)
+  flag_comment            String?                 @db.Text
+  flagged_at              DateTime?               @db.DateTime(0)
+  flagged_by              String?                 @db.VarChar(64)
+  flagged_by_name         String?                 @db.VarChar(160)
+  edit_review_status      form_one_records_edit_review_status @default(none)
+  pending_edit            Json?
+  edit_requested_at       DateTime?               @db.DateTime(0)
+  edit_requested_by       String?                 @db.VarChar(64)
+  edit_requested_by_name  String?                 @db.VarChar(160)
+  edit_review_comment     String?                 @db.Text
   items                   Json
+  completed_items         Json?
   created_by              String?                 @db.VarChar(64)
   created_at              DateTime                @default(now()) @db.Timestamp(0)
   updated_at              DateTime                @default(now()) @updatedAt @db.Timestamp(0)
@@ -376,6 +388,12 @@ enum form_one_records_status {
   in_progress
   completion_requested
   completed
+}
+
+enum form_one_records_edit_review_status {
+  none
+  pending
+  rejected
 }
 
 enum tasks_priority {

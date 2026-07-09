@@ -5,6 +5,7 @@ import {
   deleteFormOneRecord,
   getFormOneRecordById,
   normalizeDeviceGroupCode,
+  requestFormOneEditReview,
   updateFormOneRecord,
 } from "@/lib/repositories";
 import type { FormOneRecord, FormOneRecordItem } from "@/lib/types";
@@ -22,6 +23,15 @@ export async function PATCH(
   const existing = await getFormOneRecordById(id);
   if (!existing || !canAccessRecord(user, existing.deviceGroupCode)) {
     return NextResponse.json({ message: "Form one record not found" }, { status: 404 });
+  }
+  if (existing.isFlagged) {
+    return NextResponse.json({ message: "Form one record is flagged" }, { status: 403 });
+  }
+  if (user?.role === "outsourcing" && existing.editReviewStatus !== "none") {
+    return NextResponse.json(
+      { message: "Edit review already pending; cancel or resend it first." },
+      { status: 409 },
+    );
   }
 
   const body = await request.json().catch(() => null);
@@ -53,21 +63,25 @@ export async function PATCH(
     return NextResponse.json({ message: permissionError }, { status: 403 });
   }
 
-  const record = await updateFormOneRecord(
-    id,
-    {
-      deviceId,
-      gardenLabel,
-      phone,
-      submittedDate,
-      dueDate,
-      items,
-    },
-    {
-      allowedDeviceGroupCode: getScopedDeviceGroupCode(user),
-      updatedBy: user?.id,
-    },
-  );
+  const isOutsourcingEdit = user?.role === "outsourcing";
+  const record = isOutsourcingEdit
+    ? await requestFormOneEditReview(
+        id,
+        { deviceId, gardenLabel, phone, submittedDate, dueDate, items },
+        {
+          requestedBy: user?.id,
+          requestedByName: user?.name,
+          allowedDeviceGroupCode: getScopedDeviceGroupCode(user),
+        },
+      )
+    : await updateFormOneRecord(
+        id,
+        { deviceId, gardenLabel, phone, submittedDate, dueDate, items },
+        {
+          allowedDeviceGroupCode: getScopedDeviceGroupCode(user),
+          updatedBy: user?.id,
+        },
+      );
 
   if (!record) {
     return NextResponse.json({ message: "Form one record not found" }, { status: 404 });
@@ -75,7 +89,7 @@ export async function PATCH(
 
   await logAudit({
     userId: user!.id,
-    action: "form_one.update",
+    action: isOutsourcingEdit ? "form_one.edit_review_request" : "form_one.update",
     entityType: "form_one_record",
     entityId: id,
     metadata: { deviceId: record.deviceId, itemCount: record.items.length },

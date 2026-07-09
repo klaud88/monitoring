@@ -62,6 +62,7 @@ const formOneActions: ActionDef[] = [
   { key: "completion_response", label: "დადასტურება/გაუქმება" },
   { key: "comment_edit", label: "კომენტარი" },
   { key: "delete", label: "ფორმა ერთის წაშლა" },
+  { key: "flag", label: "დახარვეზება (ჩართვა/გამორთვა)" },
 ];
 
 const pages: {

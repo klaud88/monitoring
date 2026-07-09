@@ -41,6 +41,7 @@ export default async function FormOnePage() {
         create: hasPermission(user, "form_one.create"),
         dueDateEdit: hasPermission(user, "form_one.due_date_edit"),
         edit: hasPermission(user, "form_one.edit"),
+        flag: hasPermission(user, "form_one.flag"),
         gardenEdit: hasPermission(user, "form_one.garden_edit"),
         modelAdd: hasPermission(user, "form_one.model_add"),
         modelEdit: hasPermission(user, "form_one.model_edit"),
