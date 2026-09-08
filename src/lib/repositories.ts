@@ -161,22 +161,22 @@ const PROBLEM_REPORT_PERMISSIONS: {
 }[] = [
   {
     code: "problem_reports.view",
-    label: "განაცხადები: ნახვა",
+    label: "პრობლემის დაფიქსირება: ნახვა",
     roles: ["admin", "dispatcher", GARDEN_ROLE_NAME],
   },
   {
     code: "problem_reports.create",
-    label: "განაცხადები: დამატება",
+    label: "პრობლემის დაფიქსირება: დამატება",
     roles: ["admin", "dispatcher", GARDEN_ROLE_NAME],
   },
   {
     code: "problem_reports.edit",
-    label: "განაცხადები: რედაქტირება",
+    label: "პრობლემის დაფიქსირება: რედაქტირება",
     roles: ["admin", "dispatcher"],
   },
   {
     code: "problem_reports.delete",
-    label: "განაცხადები: წაშლა",
+    label: "პრობლემის დაფიქსირება: წაშლა",
     roles: ["admin"],
   },
   {
@@ -303,12 +303,12 @@ const TASK_TAG_PERMISSIONS: {
   },
   {
     code: "problem_reports.tag_create",
-    label: "განაცხადები: ახალი ტეგის დამატება",
+    label: "პრობლემის დაფიქსირება: ახალი ტეგის დამატება",
     roles: ["admin", "dispatcher"],
   },
   {
     code: "problem_reports.tag_delete",
-    label: "განაცხადები: ტეგის წაშლა",
+    label: "პრობლემის დაფიქსირება: ტეგის წაშლა",
     roles: ["admin"],
   },
 ];
@@ -2368,6 +2368,32 @@ async function getRegionIdByName(
   return (rows as { id: string }[])[0]?.id ?? null;
 }
 
+/** Manual links only — the name-prefix siblings are derived, never stored. */
+async function replaceAssociatedDevices(
+  connection: PoolConnection,
+  deviceId: string,
+  names: string[],
+) {
+  const uniqueNames = [...new Set(names.map((name) => name.trim()))].filter(
+    Boolean,
+  );
+
+  await connection.query("delete from associated_devices where device_id = ?", [
+    deviceId,
+  ]);
+
+  for (const name of uniqueNames) {
+    await connection.query<ResultSetHeader>(
+      `
+        insert into associated_devices (id, device_id, name)
+        values (?, ?, ?)
+        on duplicate key update name = values(name)
+      `,
+      [makeStableId("assoc", `${deviceId}:${name}`), deviceId, name],
+    );
+  }
+}
+
 async function replaceDeviceTags(
   connection: PoolConnection,
   deviceId: string,
@@ -2500,6 +2526,8 @@ export async function updateDevice(
     region?: string | null;
     position: LatLng;
     tags: string[];
+    /** Left undefined the stored links are untouched. */
+    associatedDevices?: string[];
   },
 ): Promise<Device | null> {
   await ensureOperationalSchema();
@@ -2540,6 +2568,9 @@ export async function updateDevice(
       }
 
       await replaceDeviceTags(connection, id, input.tags);
+      if (input.associatedDevices !== undefined) {
+        await replaceAssociatedDevices(connection, id, input.associatedDevices);
+      }
       if (input.isExcluded) {
         await connection.query(
           "update monitored_devices set is_active = false where device_id = ?",
@@ -2613,6 +2644,258 @@ export async function ensureTodayOfflineSnapshot() {
   }
 
   return captureDailyOfflineSnapshot();
+}
+
+/* ── Daily offline grading ────────────────────────────────────────────────
+   A kindergarten only cares about downtime while it is open, so both rules
+   are measured inside the working window. Two failure modes are graded apart:
+   a real outage (long) and flapping (short but repeated).                  */
+export const OFFLINE_WINDOW_START_HOUR = 8;
+export const OFFLINE_WINDOW_END_HOUR = 18;
+/** One unbroken drop this long inside the window is an outage. */
+export const OUTAGE_CONTINUOUS_MINUTES = 30;
+/** Several shorter drops adding up to this are an outage too. */
+export const OUTAGE_CUMULATIVE_MINUTES = 60;
+/** This many separate drops in the window means the link is unstable. */
+export const FLAPPING_MIN_EVENTS = 3;
+/** Drops split by less than this much uptime are one drop, not two. */
+const FLAP_MERGE_MINUTES = 5;
+const DEFAULT_OFFLINE_LEVEL_WINDOW_DAYS = 90;
+
+export type DailyOfflineLevel = "outage" | "flapping" | "brief";
+
+export type DailyOfflineEntry = {
+  deviceId: string;
+  date: string;
+  level: DailyOfflineLevel;
+  minutes: number;
+  events: number;
+};
+
+type OfflinePeriodRow = {
+  device_id: string;
+  offline_at: string;
+  online_at: string | null;
+};
+
+/** "YYYY-MM-DD HH:MM:SS" of Tbilisi wall time → a comparable timestamp. */
+function wallClockToMs(value: string) {
+  const match = value.match(
+    /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/,
+  );
+  if (!match) {
+    return Number.NaN;
+  }
+  const [, year, month, day, hour, minute, second] = match;
+  return Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second),
+  );
+}
+
+function dayKeyFromMs(value: number) {
+  return new Date(value).toISOString().slice(0, 10);
+}
+
+function windowBoundsForDay(dayMs: number) {
+  return {
+    start: dayMs + OFFLINE_WINDOW_START_HOUR * 3600_000,
+    end: dayMs + OFFLINE_WINDOW_END_HOUR * 3600_000,
+  };
+}
+
+/**
+ * Grades every device-day in the range. Only device-days with something to
+ * report come back, so the payload stays small.
+ */
+export async function getDailyOfflineLevels({
+  from,
+  to,
+}: {
+  from?: string;
+  to?: string;
+} = {}): Promise<DailyOfflineEntry[]> {
+  if (isBuildTime()) {
+    return [];
+  }
+
+  await ensureOperationalSchema();
+
+  const toKey = to ?? getTbilisiDateKey();
+  const fallbackFrom = new Date(`${toKey}T00:00:00Z`);
+  fallbackFrom.setUTCDate(
+    fallbackFrom.getUTCDate() - DEFAULT_OFFLINE_LEVEL_WINDOW_DAYS,
+  );
+  const fromKey = from ?? fallbackFrom.toISOString().slice(0, 10);
+
+  const rows = await queryRows<OfflinePeriodRow>(
+    `
+      select
+        device_id,
+        date_format(offline_at, '%Y-%m-%d %H:%i:%s') as offline_at,
+        date_format(online_at, '%Y-%m-%d %H:%i:%s') as online_at
+      from monitored_device_offline_periods
+      where offline_at < date_add(?, interval 1 day)
+        and (online_at is null or online_at >= ?)
+      order by device_id, offline_at
+    `,
+    [toKey, fromKey],
+  );
+
+  if (!rows?.length) {
+    return [];
+  }
+
+  const nowMs = wallClockToMs(toSqlDateTime(new Date()));
+  const byDevice = new Map<string, { start: number; end: number }[]>();
+
+  for (const row of rows) {
+    const start = wallClockToMs(row.offline_at);
+    const end = row.online_at ? wallClockToMs(row.online_at) : nowMs;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+      continue;
+    }
+
+    const periods = byDevice.get(row.device_id) ?? [];
+    const previous = periods[periods.length - 1];
+    // Flap damping: a blink of uptime does not split one drop into two.
+    if (previous && start - previous.end < FLAP_MERGE_MINUTES * 60_000) {
+      previous.end = Math.max(previous.end, end);
+    } else {
+      periods.push({ start, end });
+    }
+    byDevice.set(row.device_id, periods);
+  }
+
+  type DayTally = { minutes: number; longest: number; events: number };
+  const entries: DailyOfflineEntry[] = [];
+
+  byDevice.forEach((periods, deviceId) => {
+    const days = new Map<string, DayTally>();
+
+    for (const period of periods) {
+      let cursor = Date.UTC(
+        new Date(period.start).getUTCFullYear(),
+        new Date(period.start).getUTCMonth(),
+        new Date(period.start).getUTCDate(),
+      );
+
+      while (cursor <= period.end) {
+        const { start: windowStart, end: windowEnd } =
+          windowBoundsForDay(cursor);
+        const segmentStart = Math.max(period.start, windowStart);
+        const segmentEnd = Math.min(period.end, windowEnd);
+
+        if (segmentEnd > segmentStart) {
+          const dayKey = dayKeyFromMs(cursor);
+          const minutes = (segmentEnd - segmentStart) / 60_000;
+          const tally = days.get(dayKey) ?? {
+            minutes: 0,
+            longest: 0,
+            events: 0,
+          };
+          tally.minutes += minutes;
+          tally.longest = Math.max(tally.longest, minutes);
+          tally.events += 1;
+          days.set(dayKey, tally);
+        }
+
+        cursor += 24 * 3600_000;
+      }
+    }
+
+    days.forEach((tally, date) => {
+      if (date < fromKey || date > toKey) {
+        return;
+      }
+
+      const level: DailyOfflineLevel =
+        tally.longest >= OUTAGE_CONTINUOUS_MINUTES ||
+        tally.minutes >= OUTAGE_CUMULATIVE_MINUTES
+          ? "outage"
+          : tally.events >= FLAPPING_MIN_EVENTS
+            ? "flapping"
+            : "brief";
+
+      entries.push({
+        deviceId,
+        date,
+        level,
+        minutes: Math.round(tally.minutes),
+        events: tally.events,
+      });
+    });
+  });
+
+  return entries;
+}
+
+const DEFAULT_OFFLINE_PERIOD_RETENTION_DAYS = 365;
+
+const getOfflinePeriodRetentionDays = () => {
+  const configured = Number(process.env.OFFLINE_PERIOD_RETENTION_DAYS);
+  return Number.isFinite(configured) && configured > 0
+    ? Math.trunc(configured)
+    : DEFAULT_OFFLINE_PERIOD_RETENTION_DAYS;
+};
+
+/**
+ * Keeps a rolling window of offline history — anything older than a year is
+ * dropped, so the table never grows without bound. Open periods are never
+ * touched, however old, because they are still the device's current state.
+ */
+/** The only thing that erases a device's offline history, on explicit request. */
+export async function clearDeviceOfflineHistory(deviceId: string) {
+  await ensureOperationalSchema();
+
+  await withConnection(async (connection) => {
+    await connection.beginTransaction();
+    try {
+      await connection.query<ResultSetHeader>(
+        "delete from monitored_device_offline_periods where device_id = ?",
+        [deviceId],
+      );
+      await connection.query<ResultSetHeader>(
+        `update monitored_devices
+         set offline_count = 0, last_offline_at = null, updated_at = current_timestamp
+         where device_id = ?`,
+        [deviceId],
+      );
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    }
+  });
+
+  return refreshMonitoredDeviceStatuses({ includeInactive: true });
+}
+
+export async function purgeOldOfflinePeriods(value = new Date()) {
+  if (isBuildTime()) {
+    return 0;
+  }
+
+  await ensureOperationalSchema();
+
+  const cutoff = new Date(value.getTime());
+  cutoff.setDate(cutoff.getDate() - getOfflinePeriodRetentionDays());
+  const cutoffSql = toSqlDateTime(cutoff);
+
+  const deleted = await withConnection(async (connection) => {
+    const [result] = await connection.query<ResultSetHeader>(
+      `delete from monitored_device_offline_periods
+       where online_at is not null and online_at < ?`,
+      [cutoffSql],
+    );
+    return result.affectedRows;
+  });
+
+  return deleted ?? 0;
 }
 
 export async function captureDailyOfflineSnapshot(value = new Date()) {
@@ -2827,6 +3110,8 @@ export async function getMonitoredDevices({
     return [];
   }
 
+  // The full history: switching monitoring off and on again must not hide it.
+  // Only the explicit "clear" action removes rows.
   const periodRows = rows.length
     ? await queryRows<MonitoredOfflinePeriodRow>(
         `
@@ -2906,13 +3191,9 @@ export async function setDeviceMonitoring(
       if (!activeDevices.length) {
         return;
       }
-      const activeDeviceIds = activeDevices.map((device) => device.id);
-
-      await connection.query<ResultSetHeader>(
-        "delete from monitored_device_offline_periods where device_id in (?)",
-        [activeDeviceIds],
-      );
-
+      // Periods are now the shared offline history of every device, so enabling
+      // monitoring must not wipe them; the counter below restarts instead, and
+      // the monitoring view reads only periods since enabled_at.
       await connection.query<ResultSetHeader>(
         `
           insert into monitored_devices
@@ -2982,7 +3263,13 @@ function mapMonitoredOfflinePeriodRow(
   };
 }
 
-async function updateMonitoredDeviceStatus(
+/**
+ * Offline periods are recorded for EVERY device, not just the monitored ones,
+ * so the daily matrix can reason about duration and flapping. The open-period
+ * row is the state, which makes this idempotent under concurrent polls: a
+ * second "still offline" poll finds an open row and inserts nothing.
+ */
+async function recordDeviceOfflinePeriod(
   connection: PoolConnection,
   deviceId: string,
   status: DeviceStatus,
@@ -2991,8 +3278,45 @@ async function updateMonitoredDeviceStatus(
   const happenedAtSql = toSqlDateTime(happenedAt);
 
   if (status === "offline") {
+    const [openRows] = await connection.query<RowDataPacket[]>(
+      `select id from monitored_device_offline_periods
+       where device_id = ? and online_at is null
+       limit 1`,
+      [deviceId],
+    );
+
+    if (!openRows.length) {
+      await connection.query<ResultSetHeader>(
+        `insert into monitored_device_offline_periods (id, device_id, offline_at)
+         values (?, ?, ?)`,
+        [makeId("offline-period"), deviceId, happenedAtSql],
+      );
+    }
+    return;
+  }
+
+  // Back online (or error): close whatever period is still open.
+  await connection.query(
+    `update monitored_device_offline_periods
+     set online_at = ?
+     where device_id = ? and online_at is null`,
+    [happenedAtSql, deviceId],
+  );
+}
+
+async function updateMonitoredDeviceStatus(
+  connection: PoolConnection,
+  deviceId: string,
+  status: DeviceStatus,
+  happenedAt: Date,
+) {
+  const happenedAtSql = toSqlDateTime(happenedAt);
+
+  await recordDeviceOfflinePeriod(connection, deviceId, status, happenedAt);
+
+  if (status === "offline") {
     // Atomic: only increment if NOT already offline — prevents double-counting under concurrent polls.
-    const [result] = await connection.query<ResultSetHeader>(
+    await connection.query<ResultSetHeader>(
       `update monitored_devices
        set offline_count = offline_count + 1,
            last_status = 'offline',
@@ -3004,32 +3328,16 @@ async function updateMonitoredDeviceStatus(
          and (last_status is null or last_status != 'offline')`,
       [happenedAtSql, happenedAtSql, deviceId],
     );
-    if (result.affectedRows > 0) {
-      await connection.query<ResultSetHeader>(
-        `insert into monitored_device_offline_periods (id, device_id, offline_at) values (?, ?, ?)`,
-        [makeId("mon-offline"), deviceId, happenedAtSql],
-      );
-    }
     return;
   }
 
   // Online/error: atomically update only if status actually changed.
-  const [result] = await connection.query<ResultSetHeader>(
+  await connection.query<ResultSetHeader>(
     `update monitored_devices
      set last_status = ?, updated_at = current_timestamp
      where device_id = ? and is_active = true and (last_status is null or last_status != ?)`,
     [status, deviceId, status],
   );
-  if (result.affectedRows > 0) {
-    // Close any open offline period (idempotent — no-op if none is open).
-    await connection.query(
-      `update monitored_device_offline_periods
-       set online_at = ?
-       where device_id = ? and online_at is null
-       order by offline_at desc limit 1`,
-      [happenedAtSql, deviceId],
-    );
-  }
 }
 
 function getMockOfflineSnapshots(): OfflineSnapshot[] {
@@ -4993,6 +5301,55 @@ async function upsertTaskForProblemReport(
       input.assigneeIds.flatMap((userId) => [input.taskId, userId]),
     );
   }
+}
+
+export type EntityAuditEntry = {
+  id: string;
+  action: string;
+  createdAt: string;
+  userId: string;
+  userName?: string;
+  userRole?: string;
+};
+
+/**
+ * Every audit row for one entity, oldest first. Returns an empty list when the
+ * database is unavailable, so callers fall back to the record's own timestamps.
+ */
+export async function getEntityAuditTrail(
+  entityType: string,
+  entityId: string,
+): Promise<EntityAuditEntry[]> {
+  const rows = await queryRows<RowDataPacket>(
+    `
+      select
+        al.id, al.user_id, al.action, al.created_at,
+        u.name as user_name, r.name as user_role
+      from audit_logs al
+      left join users u on u.id = al.user_id
+      left join roles r on r.id = u.role_id
+      where al.entity_type = ? and al.entity_id = ?
+      order by al.created_at asc
+      limit 200
+    `,
+    [entityType, entityId],
+  );
+
+  if (!rows) {
+    return [];
+  }
+
+  return (rows as RowDataPacket[]).map((row) => ({
+    id: String(row.id),
+    action: String(row.action),
+    createdAt:
+      row.created_at instanceof Date
+        ? row.created_at.toISOString()
+        : String(row.created_at),
+    userId: String(row.user_id),
+    userName: row.user_name ? String(row.user_name) : undefined,
+    userRole: row.user_role ? String(row.user_role) : undefined,
+  }));
 }
 
 export async function getAuditLogs(opts: {

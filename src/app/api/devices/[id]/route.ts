@@ -59,6 +59,12 @@ export async function PATCH(
     body?.position === undefined
       ? existingDevice.position
       : parseDevicePosition(body.position) ?? existingDevice.position;
+  const associatedDevices =
+    body?.associatedDevices === undefined
+      ? undefined
+      : Array.isArray(body.associatedDevices)
+        ? body.associatedDevices.map(String)
+        : [];
 
   if (!name) {
     return NextResponse.json({ message: "Device name is required" }, { status: 400 });
@@ -72,6 +78,7 @@ export async function PATCH(
     region,
     tags,
     position,
+    associatedDevices,
   });
   if (!device) {
     return NextResponse.json({ message: "Device not found" }, { status: 404 });

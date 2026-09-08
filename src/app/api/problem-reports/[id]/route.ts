@@ -11,6 +11,7 @@ import {
   updateProblemReport,
 } from "@/lib/repositories";
 import { filterAssignableTaskUserIds } from "@/lib/task-assignees";
+import { canChooseDueDate } from "@/lib/working-days";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
 
 const taskStatuses: TaskStatus[] = ["planned", "in_progress", "blocked", "done"];
@@ -60,9 +61,11 @@ export async function PATCH(
   const deviceId = canEdit
     ? String(body?.deviceId ?? existing.deviceId).trim()
     : existing.deviceId;
-  const dueDate = canEdit
-    ? String(body?.dueDate ?? existing.dueDate).trim()
-    : existing.dueDate;
+  /* The deadline stays where it is unless the editor is allowed to move it. */
+  const dueDate =
+    canEdit && canChooseDueDate(user?.role)
+      ? String(body?.dueDate ?? existing.dueDate).trim()
+      : existing.dueDate;
   const assigneeIds =
     canAssign && Array.isArray(body?.assigneeIds)
       ? filterAssignableTaskUserIds(

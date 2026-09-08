@@ -10,6 +10,7 @@ import {
   normalizeDeviceGroupCode,
 } from "@/lib/repositories";
 import { filterAssignableTaskUserIds } from "@/lib/task-assignees";
+import { canChooseDueDate, workingDayDueDate } from "@/lib/working-days";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
 
 const taskStatuses: TaskStatus[] = ["planned", "in_progress", "blocked", "done"];
@@ -39,7 +40,13 @@ export async function POST(request: NextRequest) {
   const issue = String(body?.issue || "").trim();
   const phone = String(body?.phone || "").trim();
   const deviceId = String(body?.deviceId || "").trim();
-  const dueDate = String(body?.dueDate || "").trim();
+  /* Only admin/technician/dispatcher may pick a deadline; everyone else gets
+     the standard five working days, enforced here and not just in the UI. */
+  const requestedDueDate = String(body?.dueDate || "").trim();
+  const dueDate =
+    canChooseDueDate(user?.role) && requestedDueDate
+      ? requestedDueDate
+      : workingDayDueDate();
   const canSetPriority =
     hasPermission(user, "problem_reports.edit") ||
     hasPermission(user, "problem_reports.status");

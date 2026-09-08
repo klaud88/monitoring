@@ -2,22 +2,43 @@ import { cookies } from "next/headers";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import {
+  AlertTriangle,
   CalendarDays,
   ChevronLeft,
-  ClipboardList,
+  Cpu,
   Edit3,
+  FileText,
+  History,
   MapPin,
   MessageSquare,
   Phone,
-  ShieldAlert,
-  Tags,
+  Tag,
   UserRoundCheck,
 } from "lucide-react";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { withoutDeviceCodes } from "@/lib/display";
 import { getFirstAllowedPath } from "@/lib/navigation";
-import { getDevices, getTasks, getUsers } from "@/lib/repositories";
+import {
+  getDevices,
+  getEntityAuditTrail,
+  getTasks,
+  getUsers,
+} from "@/lib/repositories";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
+
+const editActions = new Set([
+  "task.update",
+  "task.status_local_change",
+  "task.assign",
+]);
+
+const editActionLabels: Record<string, string> = {
+  "task.update": "რედაქტირება",
+  "task.status_local_change": "სტატუსის შეცვლა",
+  "task.assign": "შემსრულებლის შეცვლა",
+};
+
+const maxEditRows = 8;
 
 const statusLabels: Record<TaskStatus, string> = {
   planned: "დაგეგმილი",
@@ -45,10 +66,11 @@ export default async function TaskDetailsPage({
     redirect(getFirstAllowedPath(user));
   }
 
-  const [tasks, devices, users] = await Promise.all([
+  const [tasks, devices, users, auditTrail] = await Promise.all([
     getTasks(),
     getDevices(),
     getUsers(),
+    getEntityAuditTrail("task", id),
   ]);
   const task = tasks.find((item) => item.id === id);
 
@@ -56,167 +78,297 @@ export default async function TaskDetailsPage({
     notFound();
   }
 
+  const createdEntry = auditTrail.find((entry) => entry.action === "task.create");
+  const editEntries = auditTrail
+    .filter((entry) => editActions.has(entry.action))
+    .reverse();
+  const shownEdits = editEntries.slice(0, maxEditRows);
+
   const device = devices.find((item) => item.id === task.deviceId);
-  const assignees = users.filter((user) => task.assigneeIds.includes(user.id));
+  const assignees = users.filter((item) => task.assigneeIds.includes(item.id));
   const displayTitle = withoutDeviceCodes(task.title, [device?.code]);
   const displayIssue = withoutDeviceCodes(task.issue, [device?.code]);
   const canEditTask = hasPermission(user, "tasks.edit");
+  const canViewReports = hasPermission(user, "problem_reports.view");
+  const overdue =
+    task.status !== "done" &&
+    task.dueDate < new Date().toISOString().slice(0, 10);
 
   return (
-    <>
-      <section className="page-header">
-        <div>
+    <div className="task-detail">
+      <header className="detail-head">
+        <div className="detail-head-main">
           <Link className="back-link" href="/tasks">
             <ChevronLeft size={16} />
-            ტასკებში დაბრუნება
+            დავალებებზე დაბრუნება
           </Link>
-          <p className="eyebrow">ტასკი</p>
-          <h1>{displayTitle}</h1>
-          <p>{displayIssue}</p>
-        </div>
-        <div className="page-actions">
-          {canEditTask ? (
-            <Link
-              className="primary-button"
-              href={`/tasks?edit=${encodeURIComponent(task.id)}#task-${task.id}`}
-            >
-              <Edit3 size={16} />
-              <span>რედაქტირება</span>
-            </Link>
-          ) : null}
-          <div className="metric-strip">
-            <div className="metric">
-              <ClipboardList size={18} />
-              <span>{statusLabels[task.status]}</span>
-              <small>სტატუსი</small>
-            </div>
-            <div className="metric">
-              <ShieldAlert size={18} />
-              <span>{priorityLabels[task.priority]}</span>
-              <small>პრიორიტეტი</small>
-            </div>
-            <div className="metric">
-              <Tags size={18} />
-              <span>{task.tags.length}</span>
-              <small>ტეგი</small>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {task.tags.length ? (
-        <section className="tag-filter task-tag-filter" aria-label="დავალების ტეგები">
-          {task.tags.map((tagName) => (
-            <span key={tagName} className="tag-toggle active">
-              {tagName}
+          <h1 className="detail-title">{displayTitle}</h1>
+          <div className="detail-badges">
+            <span className={`detail-badge status ${task.status}`}>
+              <i className={`status-dot ${task.status}`} />
+              {statusLabels[task.status]}
             </span>
-          ))}
-        </section>
-      ) : null}
+            <span className={`detail-badge p-${task.priority}`}>
+              {priorityLabels[task.priority]}
+            </span>
+            {overdue ? (
+              <span className="detail-badge p-urgent">
+                <AlertTriangle size={13} />
+                ვადაგადაცილებული
+              </span>
+            ) : null}
+          </div>
+          <p className="detail-sub">
+            <MapPin size={14} />
+            {device ? (
+              <Link className="inline-link" href={`/devices/${device.id}`}>
+                {device.name}
+              </Link>
+            ) : (
+              <span>ბაღი ვერ მოიძებნა</span>
+            )}
+            {device?.region ? <span>· {device.region}</span> : null}
+          </p>
+        </div>
 
-      <section className="content-grid three">
-        <div className="surface stat-surface">
-          <MapPin size={20} />
-          <span>X-Station</span>
-          <strong>{device?.name ?? "დავაისი ვერ მოიძებნა"}</strong>
+        {canEditTask ? (
+          <Link
+            className="primary-button"
+            href={`/tasks?edit=${encodeURIComponent(task.id)}#task-${task.id}`}
+          >
+            <Edit3 size={16} />
+            <span>რედაქტირება</span>
+          </Link>
+        ) : null}
+      </header>
+
+      <section className="detail-facts" aria-label="ძირითადი მონაცემები">
+        <div className="detail-fact">
+          <span>
+            <CalendarDays size={13} />
+            ვადა
+          </span>
+          <strong className={overdue ? "overdue" : undefined}>
+            {formatDate(task.dueDate)}
+          </strong>
         </div>
-        <div className="surface stat-surface">
-          <CalendarDays size={20} />
-          <span>ვადა</span>
-          <strong>{task.dueDate}</strong>
-          <small>
-            {task.startsAt
-              ? `დაწყება ${formatDateTime(task.startsAt)}`
-              : "დაწყების დრო არ არის მითითებული"}
-          </small>
+        <div className="detail-fact">
+          <span>
+            <CalendarDays size={13} />
+            დაწყება
+          </span>
+          <strong>
+            {task.startsAt ? formatDateTime(task.startsAt) : "—"}
+          </strong>
         </div>
-        <div className="surface stat-surface">
-          <UserRoundCheck size={20} />
-          <span>მიმაგრებულია</span>
+        <div className="detail-fact">
+          <span>
+            <CalendarDays size={13} />
+            შექმნილია
+          </span>
+          <strong>{formatDateTime(task.createdAt)}</strong>
+        </div>
+        <div className="detail-fact">
+          <span>
+            <Phone size={13} />
+            ტელეფონი
+          </span>
+          <strong>{task.phone || "—"}</strong>
+        </div>
+        <div className="detail-fact">
+          <span>
+            <UserRoundCheck size={13} />
+            შემსრულებელი
+          </span>
           <strong>{assignees.length}</strong>
-          <small>მომხმარებელი</small>
         </div>
       </section>
 
-      {task.phone ? (
-        <section className="content-grid two">
-          <div className="surface stat-surface">
-            <Phone size={20} />
-            <span>ტელეფონი</span>
-            <strong>{task.phone}</strong>
-          </div>
-        </section>
-      ) : null}
+      <div className="detail-grid">
+        <div className="detail-main">
+          <article className="detail-card">
+            <section className="detail-section">
+              <div className="detail-section-head">
+                <h2>საკითხი</h2>
+                <FileText size={15} />
+              </div>
+              <p className="detail-body-text">{displayIssue || "—"}</p>
+            </section>
 
-      {task.comment ? (
-        <section className="surface task-comment-detail">
-          <div className="section-title">
-            <h2>კომენტარი</h2>
-            <MessageSquare size={20} />
-          </div>
-          <p className="task-comment-text">{task.comment}</p>
-        </section>
-      ) : null}
+            <section className="detail-section comment">
+              <div className="detail-section-head">
+                <h2>კომენტარი</h2>
+                <MessageSquare size={15} />
+              </div>
+              {task.comment ? (
+                <p className="detail-body-text comment">{task.comment}</p>
+              ) : (
+                <p className="muted">კომენტარი არ არის.</p>
+              )}
+            </section>
+          </article>
 
-      <section className="content-grid two">
-        <div className="surface">
-          <div className="section-title">
-            <h2>მომხმარებლები</h2>
-            <UserRoundCheck size={20} />
-          </div>
-          <div className="user-table compact-user-table">
-            {assignees.map((user) => (
-              <article key={user.id} className="user-row">
-                <span
-                  className="avatar"
-                  style={{ backgroundColor: user.color }}
-                >
-                  {user.initials}
+          <article className="detail-card">
+            <div className="detail-card-head">
+              <h2>ტეგები</h2>
+              <Tag size={16} />
+            </div>
+            {task.tags.length ? (
+              <div className="detail-chips">
+                {task.tags.map((tagName) => (
+                  <span key={tagName} className="mini-pill tag">
+                    {tagName}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="muted">ტეგი არ არის მითითებული.</p>
+            )}
+          </article>
+
+          <article className="detail-card">
+            <div className="detail-card-head">
+              <h2>წარმოშობა</h2>
+              <History size={16} />
+            </div>
+
+            <div className="origin-list">
+              <div className="origin-row">
+                <span className="origin-kind create">შემქმნელი</span>
+                <span className="origin-user">
+                  {createdEntry?.userName ?? "უცნობი"}
                 </span>
-                <div>
-                  <strong>{user.name}</strong>
-                  <span>{user.email}</span>
+                <span className="origin-time">
+                  {formatDateTime(createdEntry?.createdAt ?? task.createdAt)}
+                </span>
+              </div>
+
+              {shownEdits.map((entry) => (
+                <div key={entry.id} className="origin-row">
+                  <span className="origin-kind edit">
+                    {editActionLabels[entry.action] ?? "რედაქტირება"}
+                  </span>
+                  <span className="origin-user">
+                    {entry.userName ?? "უცნობი"}
+                  </span>
+                  <span className="origin-time">
+                    {formatDateTime(entry.createdAt)}
+                  </span>
                 </div>
-                <span className="role-pill">{user.role}</span>
-              </article>
-            ))}
-          </div>
+              ))}
+
+              {editEntries.length === 0 ? (
+                <p className="muted">რედაქტირება არ ყოფილა.</p>
+              ) : null}
+              {editEntries.length > shownEdits.length ? (
+                <p className="muted">
+                  კიდევ {editEntries.length - shownEdits.length} ჩანაწერი
+                </p>
+              ) : null}
+            </div>
+
+            {task.problemReportId ? (
+              <p className="origin-note">
+                <AlertTriangle size={13} />
+                ეს დავალება დაფიქსირებული პრობლემიდან შეიქმნა.
+                {canViewReports ? (
+                  <>
+                    {" "}
+                    <Link className="inline-link" href="/problem-reports">
+                      პრობლემის დაფიქსირებაზე გადასვლა
+                    </Link>
+                  </>
+                ) : null}
+              </p>
+            ) : null}
+          </article>
         </div>
 
-        <div className="surface">
-          <div className="section-title">
-            <h2>დავაისის კონტექსტი</h2>
-            <MapPin size={20} />
-          </div>
-          {device ? (
-            <dl className="details-list">
-              <div>
-                <dt>რაიონი</dt>
-                <dd>{device.region}</dd>
+        <aside className="detail-side">
+          <article className="detail-card">
+            <div className="detail-card-head">
+              <h2>შემსრულებლები</h2>
+              <UserRoundCheck size={16} />
+            </div>
+            {assignees.length ? (
+              <div className="detail-people">
+                {assignees.map((assignee) => (
+                  <div key={assignee.id} className="detail-person">
+                    <span
+                      className="avatar"
+                      style={{ backgroundColor: assignee.color }}
+                    >
+                      {assignee.initials}
+                    </span>
+                    <span className="detail-person-copy">
+                      <strong>{assignee.name}</strong>
+                      <small>{assignee.email}</small>
+                    </span>
+                    <span className="role-pill">{assignee.role}</span>
+                  </div>
+                ))}
               </div>
-              <div>
-                <dt>სტატუსი</dt>
-                <dd>{formatDeviceStatus(device.status)}</dd>
-              </div>
-              <div>
-                <dt>ტეგები</dt>
-                <dd>{device.tags.join(", ")}</dd>
-              </div>
-              <div>
-                <dt>დეტალური გვერდი</dt>
-                <dd>
-                  <Link className="inline-link" href={`/devices/${device.id}`}>
-                    დავაისის გვერდზე გადასვლა
-                  </Link>
-                </dd>
-              </div>
-            </dl>
-          ) : (
-            <p className="muted">დავაისი აღარ მოიძებნა.</p>
-          )}
-        </div>
-      </section>
-    </>
+            ) : (
+              <p className="muted">შემსრულებელი მიმაგრებული არ არის.</p>
+            )}
+          </article>
+
+          <article className="detail-card">
+            <div className="detail-card-head">
+              <h2>ბაღის კონტექსტი</h2>
+              <Cpu size={16} />
+            </div>
+            {device ? (
+              <dl className="detail-list">
+                <div>
+                  <dt>ბაღი</dt>
+                  <dd>
+                    <Link className="inline-link" href={`/devices/${device.id}`}>
+                      {device.name}
+                    </Link>
+                  </dd>
+                </div>
+                <div>
+                  <dt>რაიონი</dt>
+                  <dd>{device.region || "—"}</dd>
+                </div>
+                <div>
+                  <dt>სტატუსი</dt>
+                  <dd>
+                    <span className={`device-status-chip ${device.status}`}>
+                      <i className={`status-dot ${device.status}`} />
+                      {formatDeviceStatus(device.status)}
+                    </span>
+                  </dd>
+                </div>
+                <div>
+                  <dt>ტეგები</dt>
+                  <dd>
+                    {device.tags.length ? (
+                      <span className="detail-chips">
+                        {device.tags.map((tagName) => (
+                          <span key={tagName} className="mini-pill tag">
+                            {tagName}
+                          </span>
+                        ))}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </dd>
+                </div>
+                <div>
+                  <dt>ბოლო კონტაქტი</dt>
+                  <dd>{formatDateTime(device.lastSeenAt)}</dd>
+                </div>
+              </dl>
+            ) : (
+              <p className="muted">ბაღი აღარ მოიძებნა.</p>
+            )}
+          </article>
+        </aside>
+      </div>
+    </div>
   );
 }
 
@@ -232,9 +384,23 @@ function formatDeviceStatus(status: "online" | "offline" | "error") {
   return "Error";
 }
 
+function formatDate(value: string) {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return value;
+  }
+  return new Intl.DateTimeFormat("ka-GE", { dateStyle: "medium" }).format(
+    new Date(`${value}T00:00:00`),
+  );
+}
+
 function formatDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
   return new Intl.DateTimeFormat("ka-GE", {
     dateStyle: "medium",
     timeStyle: "short",
-  }).format(new Date(value));
+  }).format(date);
 }

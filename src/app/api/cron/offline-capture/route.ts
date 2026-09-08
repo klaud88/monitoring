@@ -1,6 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
-import { captureDailyOfflineSnapshot, syncBiostarDevices } from "@/lib/repositories";
+import {
+  captureDailyOfflineSnapshot,
+  purgeOldOfflinePeriods,
+  syncBiostarDevices,
+} from "@/lib/repositories";
 
 export async function POST(request: NextRequest) {
   const user = await verifySessionToken(
@@ -23,5 +27,16 @@ export async function POST(request: NextRequest) {
   }
 
   const snapshot = await captureDailyOfflineSnapshot();
-  return NextResponse.json({ snapshot }, { status: 201 });
+
+  // Runs with the daily job, so the offline history stays a rolling year.
+  let purged = 0;
+  try {
+    purged = await purgeOldOfflinePeriods();
+  } catch (error) {
+    console.warn(
+      `[offline] purge failed: ${error instanceof Error ? error.message : "unknown"}`,
+    );
+  }
+
+  return NextResponse.json({ snapshot, purged }, { status: 201 });
 }

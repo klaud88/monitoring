@@ -76,7 +76,7 @@ const pages: {
   { key: "tasks", label: "ტასკები", actions: taskActions },
   {
     key: "problem_reports",
-    label: "განაცხადები",
+    label: "პრობლემის დაფიქსირება",
     actions: problemReportActions,
   },
   {

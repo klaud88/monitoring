@@ -1,19 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AlignJustify,
   CalendarDays,
-  CheckCircle2,
-  ClipboardList,
+  ChevronDown,
+  ChevronUp,
   Edit3,
   Filter,
+  LayoutGrid,
+  List,
   MapPin,
-  Minus,
   Plus,
   Save,
   Search,
-  SlidersHorizontal,
   Tag,
   Trash2,
   UserRound,
@@ -64,6 +65,8 @@ type TaskDraft = {
   dueDate: string;
 };
 
+type ViewMode = "lanes" | "columns" | "list";
+
 const statusLabels: Record<TaskStatus, string> = {
   planned: "დაგეგმილი",
   in_progress: "მიმდინარეობს",
@@ -77,6 +80,9 @@ const priorityLabels: Record<TaskPriority, string> = {
   high: "მაღალი",
   urgent: "სასწრაფო",
 };
+
+const statusOrder: TaskStatus[] = ["planned", "in_progress", "blocked", "done"];
+const viewStorageKey = "bagebi-tasks-view";
 
 export function TasksManager({
   initialTasks,
@@ -98,6 +104,7 @@ export function TasksManager({
     () => getAssignableTaskUsers(users),
     [users],
   );
+  const [viewMode, setViewMode] = useState<ViewMode>("lanes");
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all");
   const [userFilter, setUserFilter] = useState("all");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -152,6 +159,70 @@ export function TasksManager({
     });
   }, [deviceMap, query, selectedTags, statusFilter, tasks, userFilter]);
 
+  const groupedTasks = useMemo(() => {
+    const groups: Record<TaskStatus, Task[]> = {
+      planned: [],
+      in_progress: [],
+      blocked: [],
+      done: [],
+    };
+    for (const task of filteredTasks) {
+      groups[task.status].push(task);
+    }
+    return groups;
+  }, [filteredTasks]);
+
+  const doneCount = tasks.filter((task) => task.status === "done").length;
+  const activeCount = tasks.filter(
+    (task) => task.status === "planned" || task.status === "in_progress",
+  ).length;
+  const blockedCount = tasks.filter((task) => task.status === "blocked").length;
+
+  const editorMode: "create" | "edit" | null = createOpen
+    ? "create"
+    : editingTaskId && editDraft
+      ? "edit"
+      : null;
+  const editorRef = useRef<HTMLElement>(null);
+
+  /** Collapsing never discards the draft — only a saved task clears the fields. */
+  const closeEditor = useCallback(() => {
+    setCreateOpen(false);
+    setEditingTaskId(null);
+    setEditDraft(null);
+  }, []);
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(viewStorageKey);
+      if (stored === "lanes" || stored === "columns" || stored === "list") {
+        setViewMode(stored);
+      }
+    } catch {
+      // localStorage may be unavailable in restricted contexts.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!editorMode) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      editorRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
+    return () => window.cancelAnimationFrame(frameId);
+  }, [editorMode, editingTaskId]);
+
+  function changeView(next: ViewMode) {
+    setViewMode(next);
+    try {
+      window.localStorage.setItem(viewStorageKey, next);
+    } catch {
+      // localStorage may be unavailable in restricted contexts.
+    }
+  }
+
   useEffect(() => {
     if (
       !initialEditTaskId ||
@@ -167,6 +238,7 @@ export function TasksManager({
     }
 
     const device = deviceMap.get(task.deviceId);
+    setCreateOpen(false);
     setEditingTaskId(task.id);
     setEditDraft(createEditDraft(task, device?.code));
     setStatusFilter("all");
@@ -216,16 +288,8 @@ export function TasksManager({
     };
 
     setTasks((current) => [optimisticTask, ...current]);
-    setDraft((current) => ({
-      ...current,
-      title: "",
-      issue: "",
-      phone: "",
-      assigneeIds: [],
-      tags: [],
-    }));
-
     setError("");
+
     const response = await fetch("/api/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -239,7 +303,20 @@ export function TasksManager({
           task.id === optimisticTask.id ? payload.task : task,
         ),
       );
+      // Fields are cleared only once the task is actually stored.
+      setDraft((current) => ({
+        ...current,
+        title: "",
+        issue: "",
+        phone: "",
+        assigneeIds: [],
+        tags: [],
+      }));
+      setCreateOpen(false);
     } else {
+      setTasks((current) =>
+        current.filter((task) => task.id !== optimisticTask.id),
+      );
       setError("დავალების დამატება ვერ მოხერხდა.");
     }
   }
@@ -263,6 +340,7 @@ export function TasksManager({
 
   function startEditTask(task: Task) {
     const device = deviceMap.get(task.deviceId);
+    setCreateOpen(false);
     setEditingTaskId(task.id);
     setEditDraft(createEditDraft(task, device?.code));
     setError("");
@@ -448,566 +526,850 @@ export function TasksManager({
     setTasks((current) => current.filter((task) => task.id !== taskId));
   }
 
+  const visibleStatuses = statusOrder.filter(
+    (status) => statusFilter === "all" || status === statusFilter,
+  );
+
+  const rowProps = {
+    deviceMap,
+    userMap,
+    permissions,
+    savingTaskId,
+    onChangeStatus: changeStatus,
+    onEdit: startEditTask,
+    onDelete: removeTask,
+  };
+
   return (
     <div className="tasks-page">
       {confirmationDialog}
-      <section className="page-header">
+
+      <section className="tasks-head">
         <div>
-          <p className="eyebrow">ტასკების მართვა</p>
           <h1>დავალებები და ვიზიტები</h1>
-          <p>ტასკები მიამაგრეთ კონკრეტულ მომხმარებელზე და BioStar2 დავაისზე.</p>
+          <p>
+            {tasks.length} ტასკი · {activeCount} აქტიური · {blockedCount}{" "}
+            შეჩერებული · {doneCount} დასრულებული
+          </p>
         </div>
-        <div className="metric-strip">
-          <div className="metric">
-            <ClipboardList size={18} />
-            <span>{tasks.length}</span>
-            <small>სულ</small>
+        <div className="tasks-head-actions">
+          <div className="view-switch" role="group" aria-label="ჩვენების რეჟიმი">
+            <button
+              type="button"
+              className={viewMode === "lanes" ? "active" : ""}
+              onClick={() => changeView("lanes")}
+              aria-pressed={viewMode === "lanes"}
+            >
+              <AlignJustify size={14} strokeWidth={1.8} />
+              <span>ზოლები</span>
+            </button>
+            <button
+              type="button"
+              className={viewMode === "columns" ? "active" : ""}
+              onClick={() => changeView("columns")}
+              aria-pressed={viewMode === "columns"}
+            >
+              <LayoutGrid size={14} strokeWidth={1.8} />
+              <span>სვეტები</span>
+            </button>
+            <button
+              type="button"
+              className={viewMode === "list" ? "active" : ""}
+              onClick={() => changeView("list")}
+              aria-pressed={viewMode === "list"}
+            >
+              <List size={14} strokeWidth={1.8} />
+              <span>ერთი სია</span>
+            </button>
           </div>
-          <div className="metric">
-            <CheckCircle2 size={18} />
-            <span>{tasks.filter((task) => task.status === "done").length}</span>
-            <small>დასრულდა</small>
-          </div>
+          {permissions.create ? (
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => {
+                setEditingTaskId(null);
+                setEditDraft(null);
+                setCreateOpen(true);
+              }}
+            >
+              <Plus size={17} />
+              <span>ახალი ტასკი</span>
+            </button>
+          ) : null}
         </div>
       </section>
 
       {error ? <p className="form-error page-error">{error}</p> : null}
 
-      <section className="content-grid task-admin-grid">
-        {permissions.create ? (
-          <form className="surface admin-form task-create-form" onSubmit={createTask}>
-            <button
-              type="button"
-              className="section-title"
-              onClick={() => setCreateOpen((o) => !o)}
-            >
-              <h2>ახალი ტასკი</h2>
-              {createOpen ? <Minus size={20} /> : <Plus size={20} />}
-            </button>
-            {createOpen && (
-              <>
-                <label>
-                  <span>დავაისი</span>
-                  <input
-                    list="new-task-device-options"
-                    value={draft.deviceQuery}
-                    onChange={(event) => {
-                      const deviceQuery = event.target.value;
-                      const selectedDevice = findDeviceByName(
-                        sortedDevices,
-                        deviceQuery,
-                      );
-                      setDraft((current) => ({
-                        ...current,
-                        deviceQuery,
-                        deviceId: selectedDevice?.id ?? "",
-                      }));
-                    }}
-                    required
-                  />
-                  <datalist id="new-task-device-options">
-                    {sortedDevices.map((device) => (
-                      <option key={device.id} value={device.name} />
-                    ))}
-                  </datalist>
-                </label>
-                <label>
-                  <span>სათაური</span>
-                  <input
-                    value={draft.title}
-                    onChange={(event) =>
-                      setDraft((current) => ({
-                        ...current,
-                        title: event.target.value,
-                      }))
-                    }
-                    required
-                  />
-                </label>
-                <label>
-                  <span>საკითხი</span>
-                  <textarea
-                    value={draft.issue}
-                    onChange={(event) =>
-                      setDraft((current) => ({
-                        ...current,
-                        issue: event.target.value,
-                      }))
-                    }
-                    rows={4}
-                    required
-                  />
-                </label>
-                <label>
-                  <span>ტელეფონი</span>
-                  <input
-                    value={draft.phone}
-                    onChange={(event) =>
-                      setDraft((current) => ({
-                        ...current,
-                        phone: event.target.value,
-                      }))
-                    }
-                    inputMode="tel"
-                  />
-                </label>
-                <div className="task-assignee-edit">
-                  <span>მომხმარებლები</span>
-                  <div className="row-tags">
-                    {assignableUsers.map((user) => (
-                      <button
-                        key={user.id}
-                        type="button"
-                        className={`tag-toggle compact ${draft.assigneeIds.includes(user.id) ? "active" : ""}`}
-                        onClick={() =>
-                          setDraft((current) => ({
-                            ...current,
-                            assigneeIds: current.assigneeIds.includes(user.id)
-                              ? current.assigneeIds.filter((id) => id !== user.id)
-                              : [...current.assigneeIds, user.id],
-                          }))
-                        }
-                      >
-                        {user.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="form-row">
-                  <label>
-                    <span>პრიორიტეტი</span>
-                    <select
-                      value={draft.priority}
-                      onChange={(event) =>
-                        setDraft((current) => ({
-                          ...current,
-                          priority: event.target.value as TaskPriority,
-                        }))
-                      }
-                    >
-                      {Object.entries(priorityLabels).map(([value, label]) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    <span>ვადა</span>
-                    <input
-                      type="date"
-                      value={draft.dueDate}
-                      onChange={(event) =>
-                        setDraft((current) => ({
-                          ...current,
-                          dueDate: event.target.value,
-                        }))
-                      }
-                    />
-                  </label>
-                </div>
-                <TaskTagPicker
-                  availableTags={availableTags}
-                  selectedTags={draft.tags}
-                  canCreateTags={permissions.createTags}
-                  canDeleteTags={permissions.deleteTags}
-                  onToggle={toggleDraftTag}
-                  onCreateTag={createAvailableTag}
-                  onDeleteTag={removeAvailableTag}
-                />
-                <button className="primary-button" type="submit">
-                  <Plus size={18} />
-                  <span>დამატება</span>
-                </button>
-              </>
-            )}
-          </form>
-        ) : (
-          <section className="surface empty-state">დამატების უფლება არ გაქვთ.</section>
-        )}
-
-        <div className="surface task-admin-list">
-          <div className="table-toolbar">
-            <div className="search-field">
-              <Search size={18} />
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="ძებნა"
-              />
-            </div>
-            <label className="select-control">
-              <Filter size={17} />
-              <select
-                value={statusFilter}
-                onChange={(event) =>
-                  setStatusFilter(event.target.value as TaskStatus | "all")
-                }
-              >
-                <option value="all">ყველა სტატუსი</option>
-                {Object.entries(statusLabels).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="select-control">
-              <UserRound size={17} />
-              <select
-                value={userFilter}
-                onChange={(event) => setUserFilter(event.target.value)}
-              >
-                <option value="all">ყველა მომხმარებელი</option>
-                {assignableUsers.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <section className="tag-filter task-tag-filter" aria-label="დავალების ტეგები">
+      <section className="tasks-toolbar" aria-label="ფილტრები">
+        <div className="search-field">
+          <Search size={17} />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="ძებნა"
+          />
+        </div>
+        <label className="select-control">
+          <Filter size={16} />
+          <select
+            value={statusFilter}
+            onChange={(event) =>
+              setStatusFilter(event.target.value as TaskStatus | "all")
+            }
+          >
+            <option value="all">ყველა სტატუსი</option>
+            {statusOrder.map((value) => (
+              <option key={value} value={value}>
+                {statusLabels[value]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="select-control">
+          <UserRound size={16} />
+          <select
+            value={userFilter}
+            onChange={(event) => setUserFilter(event.target.value)}
+          >
+            <option value="all">ყველა მომხმარებელი</option>
+            {assignableUsers.map((user) => (
+              <option key={user.id} value={user.id}>
+                {user.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {availableTags.length ? (
+          <>
+            <span className="tasks-toolbar-divider" />
             {availableTags.map((tagName) => (
               <button
                 key={tagName}
-                className={`tag-toggle ${selectedTags.includes(tagName) ? "active" : ""}`}
+                className={`tag-toggle compact ${selectedTags.includes(tagName) ? "active" : ""}`}
                 type="button"
                 onClick={() => toggleFilterTag(tagName)}
               >
-                <Tag size={14} />
+                <Tag size={13} />
                 <span>{tagName}</span>
               </button>
             ))}
-          </section>
+          </>
+        ) : null}
+      </section>
 
-          <div className="task-table">
-            <div className="task-table-head">
-              <span />
-              <span>დავაისი</span>
-              <span>ტასკი</span>
-              <span>ტელეფონი</span>
-              <span>მომხმარებლები</span>
-              <span>სტატუსი</span>
-              <span>ვადა</span>
-              <span>მოქმედება</span>
+      {editorMode ? (
+        <section
+          className="task-editor"
+          ref={editorRef}
+          aria-label={editorMode === "create" ? "ახალი ტასკი" : "ტასკის რედაქტირება"}
+        >
+          <header className="task-editor-head">
+            <div>
+              <h2>
+                {editorMode === "create" ? "ახალი ტასკი" : "ტასკის რედაქტირება"}
+              </h2>
+              <p>
+                {editorMode === "create"
+                  ? "დაკეცვისას ჩაწერილი რჩება — ველები მხოლოდ შენახვის შემდეგ სუფთავდება."
+                  : "ცვლილება ძალაში შედის შენახვის შემდეგ."}
+              </p>
             </div>
-            {filteredTasks.map((task) => {
-              const device = deviceMap.get(task.deviceId);
-              const displayTitle = withoutDeviceCodes(task.title, [device?.code]);
-              const displayIssue = withoutDeviceCodes(task.issue, [device?.code]);
-              return editingTaskId === task.id && editDraft ? (
-                <article
-                  key={task.id}
-                  id={`task-${task.id}`}
-                  className="task-table-row editing"
+            <button
+              className="icon-button"
+              type="button"
+              onClick={closeEditor}
+              aria-label="დაკეცვა"
+              title="დაკეცვა"
+            >
+              <ChevronUp size={17} />
+            </button>
+          </header>
+
+          {editorMode === "create" ? (
+            <form
+              className="task-editor-body"
+              id="task-create-form"
+              onSubmit={createTask}
+            >
+              <label className="task-field span-2">
+                <span>დავაისი</span>
+                <input
+                  list="new-task-device-options"
+                  value={draft.deviceQuery}
+                  onChange={(event) => {
+                    const deviceQuery = event.target.value;
+                    const selectedDevice = findDeviceByName(
+                      sortedDevices,
+                      deviceQuery,
+                    );
+                    setDraft((current) => ({
+                      ...current,
+                      deviceQuery,
+                      deviceId: selectedDevice?.id ?? "",
+                    }));
+                  }}
+                  required
+                />
+                <datalist id="new-task-device-options">
+                  {sortedDevices.map((device) => (
+                    <option key={device.id} value={device.name} />
+                  ))}
+                </datalist>
+              </label>
+              <label className="task-field span-2">
+                <span>სათაური</span>
+                <input
+                  value={draft.title}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      title: event.target.value,
+                    }))
+                  }
+                  required
+                />
+              </label>
+              <label className="task-field">
+                <span>პრიორიტეტი</span>
+                <select
+                  value={draft.priority}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      priority: event.target.value as TaskPriority,
+                    }))
+                  }
                 >
-                  <div className="task-edit-grid">
-                    <label>
-                      <span>X-Station</span>
-                      <select
-                        value={editDraft.deviceId}
-                        onChange={(event) =>
-                          setEditDraft((current) =>
-                            current
-                              ? { ...current, deviceId: event.target.value }
-                              : current,
-                          )
-                        }
-                      >
-                        {sortedDevices.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      <span>სათაური</span>
-                      <input
-                        value={editDraft.title}
-                        onChange={(event) =>
-                          setEditDraft((current) =>
-                            current
-                              ? { ...current, title: event.target.value }
-                              : current,
-                          )
-                        }
-                      />
-                    </label>
-                    <label>
-                      <span>სტატუსი</span>
-                      <select
-                        value={editDraft.status}
-                        onChange={(event) =>
-                          setEditDraft((current) =>
-                            current
-                              ? {
-                                  ...current,
-                                  status: event.target.value as TaskStatus,
-                                }
-                              : current,
-                          )
-                        }
-                      >
-                        {Object.entries(statusLabels).map(([value, label]) => (
-                          <option key={value} value={value}>
-                            {label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      <span>პრიორიტეტი</span>
-                      <select
-                        value={editDraft.priority}
-                        onChange={(event) =>
-                          setEditDraft((current) =>
-                            current
-                              ? {
-                                  ...current,
-                                  priority: event.target.value as TaskPriority,
-                                }
-                              : current,
-                          )
-                        }
-                      >
-                        {Object.entries(priorityLabels).map(([value, label]) => (
-                          <option key={value} value={value}>
-                            {label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      <span>ვადა</span>
-                      <input
-                        type="date"
-                        value={editDraft.dueDate}
-                        onChange={(event) =>
-                          setEditDraft((current) =>
-                            current
-                              ? { ...current, dueDate: event.target.value }
-                              : current,
-                          )
-                        }
-                      />
-                    </label>
-                    <label>
-                      <span>ტელეფონი</span>
-                      <input
-                        value={editDraft.phone}
-                        onChange={(event) =>
-                          setEditDraft((current) =>
-                            current
-                              ? { ...current, phone: event.target.value }
-                              : current,
-                          )
-                        }
-                        inputMode="tel"
-                      />
-                    </label>
-                    <label className="task-edit-issue">
-                      <span>საკითხი</span>
-                      <textarea
-                        value={editDraft.issue}
-                        onChange={(event) =>
-                          setEditDraft((current) =>
-                            current
-                              ? { ...current, issue: event.target.value }
-                              : current,
-                          )
-                        }
-                        rows={3}
-                      />
-                    </label>
-                    <label className="task-edit-comment">
-                      <span>კომენტარი</span>
-                      <textarea
-                        className="task-comment-textarea"
-                        value={editDraft.comment}
-                        onChange={(event) =>
-                          setEditDraft((current) =>
-                            current
-                              ? { ...current, comment: event.target.value }
-                              : current,
-                          )
-                        }
-                        rows={3}
-                      />
-                    </label>
-                    <div className="task-assignee-edit">
-                      <span>მომხმარებლები</span>
-                      <div className="row-tags">
-                        {assignableUsers.map((user) => (
-                          <button
-                            key={user.id}
-                            type="button"
-                            className={`tag-toggle compact ${editDraft.assigneeIds.includes(user.id) ? "active" : ""}`}
-                            onClick={() => toggleEditAssignee(user.id)}
-                          >
-                            {user.name}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <TaskTagPicker
-                      className="task-assignee-edit"
-                      availableTags={availableTags}
-                      selectedTags={editDraft.tags}
-                      canCreateTags={permissions.createTags}
-                      canDeleteTags={permissions.deleteTags}
-                      onToggle={toggleEditTag}
-                      onCreateTag={createAvailableTag}
-                      onDeleteTag={removeAvailableTag}
-                    />
-                  </div>
-                  <div className="row-actions">
+                  {Object.entries(priorityLabels).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="task-field">
+                <span>ვადა</span>
+                <input
+                  type="date"
+                  value={draft.dueDate}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      dueDate: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label className="task-field span-2">
+                <span>ტელეფონი</span>
+                <input
+                  value={draft.phone}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      phone: event.target.value,
+                    }))
+                  }
+                  inputMode="tel"
+                />
+              </label>
+              <label className="task-field span-full">
+                <span>საკითხი</span>
+                <textarea
+                  value={draft.issue}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      issue: event.target.value,
+                    }))
+                  }
+                  rows={3}
+                  required
+                />
+              </label>
+              <div className="task-field span-full">
+                <span>მომხმარებლები</span>
+                <div className="row-tags">
+                  {assignableUsers.map((user) => (
                     <button
-                      className="ghost-button"
+                      key={user.id}
                       type="button"
-                      onClick={() => saveTask(task.id)}
-                      disabled={savingTaskId === task.id}
-                    >
-                      <Save size={16} />
-                      <span>შენახვა</span>
-                    </button>
-                    <button
-                      className="ghost-button"
-                      type="button"
-                      onClick={() => {
-                        setEditingTaskId(null);
-                        setEditDraft(null);
-                      }}
-                    >
-                      <X size={16} />
-                      <span>გაუქმება</span>
-                    </button>
-                  </div>
-                </article>
-              ) : (
-                <article
-                  key={task.id}
-                  id={`task-${task.id}`}
-                  className="task-table-row"
-                >
-                  <span
-                    className={
-                      task.problemReportId
-                        ? `issue-indicator ${getIssueIndicatorState(task)}`
-                        : "issue-indicator empty"
-                    }
-                    aria-label="პრობლემის ინდიკატორი"
-                  />
-                  <Link
-                    className="task-device-cell clickable-cell"
-                    href={`/devices/${device?.id ?? task.deviceId}`}
-                  >
-                    <span className="device-name-inline">
-                      <MapPin size={15} />
-                      {device?.name || "დავაისი ვერ მოიძებნა"}
-                    </span>
-                  </Link>
-                  <Link
-                    className="task-summary-cell clickable-cell"
-                    href={`/tasks/${task.id}`}
-                  >
-                    <strong className="table-title-link">{displayTitle}</strong>
-                    <p>{displayIssue}</p>
-                    {task.comment ? (
-                      <p className="task-comment-text">{task.comment}</p>
-                    ) : null}
-                    <TaskTagList tags={task.tags} />
-                    <small className={`priority-label ${task.priority}`}>
-                      {priorityLabels[task.priority]}
-                    </small>
-                  </Link>
-                  <span className="phone-inline task-phone-cell">
-                    {task.phone || "—"}
-                  </span>
-                  <span className="avatar-stack">
-                    {task.assigneeIds.map((userId) => {
-                      const user = userMap.get(userId);
-                      return user ? (
-                        <span
-                          key={user.id}
-                          className="avatar small"
-                          style={{ backgroundColor: user.color }}
-                          title={user.name}
-                        >
-                          {user.initials}
-                        </span>
-                      ) : null;
-                    })}
-                  </span>
-                  <label className="inline-select">
-                    <SlidersHorizontal size={15} />
-                    <select
-                      value={task.status}
-                      onChange={(event) =>
-                        changeStatus(task.id, event.target.value as TaskStatus)
+                      className={`tag-toggle compact ${draft.assigneeIds.includes(user.id) ? "active" : ""}`}
+                      onClick={() =>
+                        setDraft((current) => ({
+                          ...current,
+                          assigneeIds: current.assigneeIds.includes(user.id)
+                            ? current.assigneeIds.filter((id) => id !== user.id)
+                            : [...current.assigneeIds, user.id],
+                        }))
                       }
-                      disabled={!permissions.edit}
                     >
-                      {Object.entries(statusLabels).map(([value, label]) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <span>
-                    <CalendarDays size={15} />
-                    {task.dueDate}
-                  </span>
-                  <div className="row-actions task-row-actions">
-                    {permissions.edit ? (
-                      <button
-                        className="icon-button"
-                        type="button"
-                        onClick={() => startEditTask(task)}
-                        aria-label="დავალების რედაქტირება"
-                        title="დავალების რედაქტირება"
-                      >
-                        <Edit3 size={16} />
-                      </button>
-                    ) : null}
-                    {permissions.delete ? (
-                      <button
-                        className="icon-button danger"
-                        type="button"
-                        onClick={() => removeTask(task.id)}
-                        disabled={savingTaskId === task.id}
-                        aria-label="დავალების წაშლა"
-                        title="დავალების წაშლა"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    ) : null}
+                      {user.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <TaskTagPicker
+                className="task-field span-full"
+                availableTags={availableTags}
+                selectedTags={draft.tags}
+                canCreateTags={permissions.createTags}
+                canDeleteTags={permissions.deleteTags}
+                onToggle={toggleDraftTag}
+                onCreateTag={createAvailableTag}
+                onDeleteTag={removeAvailableTag}
+              />
+            </form>
+          ) : editDraft ? (
+            <div className="task-editor-body">
+              <label className="task-field span-2">
+                <span>X-Station</span>
+                <select
+                  value={editDraft.deviceId}
+                  onChange={(event) =>
+                    setEditDraft((current) =>
+                      current
+                        ? { ...current, deviceId: event.target.value }
+                        : current,
+                    )
+                  }
+                >
+                  {sortedDevices.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="task-field span-2">
+                <span>სათაური</span>
+                <input
+                  value={editDraft.title}
+                  onChange={(event) =>
+                    setEditDraft((current) =>
+                      current
+                        ? { ...current, title: event.target.value }
+                        : current,
+                    )
+                  }
+                />
+              </label>
+              <label className="task-field">
+                <span>სტატუსი</span>
+                <select
+                  value={editDraft.status}
+                  onChange={(event) =>
+                    setEditDraft((current) =>
+                      current
+                        ? {
+                            ...current,
+                            status: event.target.value as TaskStatus,
+                          }
+                        : current,
+                    )
+                  }
+                >
+                  {statusOrder.map((value) => (
+                    <option key={value} value={value}>
+                      {statusLabels[value]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="task-field">
+                <span>პრიორიტეტი</span>
+                <select
+                  value={editDraft.priority}
+                  onChange={(event) =>
+                    setEditDraft((current) =>
+                      current
+                        ? {
+                            ...current,
+                            priority: event.target.value as TaskPriority,
+                          }
+                        : current,
+                    )
+                  }
+                >
+                  {Object.entries(priorityLabels).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="task-field">
+                <span>ვადა</span>
+                <input
+                  type="date"
+                  value={editDraft.dueDate}
+                  onChange={(event) =>
+                    setEditDraft((current) =>
+                      current
+                        ? { ...current, dueDate: event.target.value }
+                        : current,
+                    )
+                  }
+                />
+              </label>
+              <label className="task-field">
+                <span>ტელეფონი</span>
+                <input
+                  value={editDraft.phone}
+                  onChange={(event) =>
+                    setEditDraft((current) =>
+                      current
+                        ? { ...current, phone: event.target.value }
+                        : current,
+                    )
+                  }
+                  inputMode="tel"
+                />
+              </label>
+              <label className="task-field span-2">
+                <span>საკითხი</span>
+                <textarea
+                  value={editDraft.issue}
+                  onChange={(event) =>
+                    setEditDraft((current) =>
+                      current
+                        ? { ...current, issue: event.target.value }
+                        : current,
+                    )
+                  }
+                  rows={3}
+                />
+              </label>
+              <label className="task-field span-2">
+                <span>კომენტარი</span>
+                <textarea
+                  className="task-comment-textarea"
+                  value={editDraft.comment}
+                  onChange={(event) =>
+                    setEditDraft((current) =>
+                      current
+                        ? { ...current, comment: event.target.value }
+                        : current,
+                    )
+                  }
+                  rows={3}
+                />
+              </label>
+              <div className="task-field span-full">
+                <span>მომხმარებლები</span>
+                <div className="row-tags">
+                  {assignableUsers.map((user) => (
+                    <button
+                      key={user.id}
+                      type="button"
+                      className={`tag-toggle compact ${editDraft.assigneeIds.includes(user.id) ? "active" : ""}`}
+                      onClick={() => toggleEditAssignee(user.id)}
+                    >
+                      {user.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <TaskTagPicker
+                className="task-field span-full"
+                availableTags={availableTags}
+                selectedTags={editDraft.tags}
+                canCreateTags={permissions.createTags}
+                canDeleteTags={permissions.deleteTags}
+                onToggle={toggleEditTag}
+                onCreateTag={createAvailableTag}
+                onDeleteTag={removeAvailableTag}
+              />
+            </div>
+          ) : null}
+
+          <div className="task-editor-foot">
+            {editorMode === "create" ? (
+              <button
+                className="primary-button"
+                type="submit"
+                form="task-create-form"
+              >
+                <Plus size={17} />
+                <span>დამატება</span>
+              </button>
+            ) : (
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => editingTaskId && saveTask(editingTaskId)}
+                disabled={savingTaskId === editingTaskId}
+              >
+                <Save size={17} />
+                <span>შენახვა</span>
+              </button>
+            )}
+            <button className="ghost-button" type="button" onClick={closeEditor}>
+              <X size={16} />
+              <span>დაკეცვა</span>
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {viewMode === "columns" ? (
+        <div className="task-columns">
+          {visibleStatuses.map((status) => (
+            <div
+              key={status}
+              className={`task-column${status === "blocked" ? " danger" : ""}`}
+            >
+              <div className="task-column-head">
+                <span className={`status-dot ${status}`} />
+                <h2>{statusLabels[status]}</h2>
+                <span className={`task-module-count ${status}`}>
+                  {groupedTasks[status].length}
+                </span>
+              </div>
+              {groupedTasks[status].length ? (
+                groupedTasks[status].map((task) => (
+                  <TaskCard key={task.id} task={task} {...rowProps} />
+                ))
+              ) : (
+                <p className="task-module-empty">ტასკი არ არის.</p>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="task-scroll">
+          <div className="task-scroll-inner">
+          <div className="task-grid task-grid-head" aria-hidden="true">
+            <span />
+            <span>ბაღი</span>
+            <span>პრიორიტეტი</span>
+            <span>სათაური</span>
+            <span>კომენტარი</span>
+            <span>ტეგები</span>
+            <span>ტელ.</span>
+            <span>შემსრ.</span>
+            <span>სტატუსი</span>
+            <span>ვადა</span>
+            <span />
+          </div>
+
+          {viewMode === "lanes" ? (
+            <div className="task-modules">
+              {visibleStatuses.map((status) => (
+                <section
+                  key={status}
+                  className={`task-module${status === "blocked" ? " danger" : ""}`}
+                  aria-label={statusLabels[status]}
+                >
+                  <div className="task-module-head">
+                    <span className={`status-dot ${status}`} />
+                    <h2>{statusLabels[status]}</h2>
+                    <span className={`task-module-count ${status}`}>
+                      {groupedTasks[status].length}
+                    </span>
                   </div>
-                </article>
-              );
-            })}
+                  <div className="task-module-body">
+                    {groupedTasks[status].length ? (
+                      groupedTasks[status].map((task) => (
+                        <TaskRow key={task.id} task={task} {...rowProps} />
+                      ))
+                    ) : (
+                      <p className="task-module-empty">ტასკი არ არის.</p>
+                    )}
+                  </div>
+                </section>
+              ))}
+            </div>
+          ) : (
+            <section className="task-module" aria-label="ყველა ტასკი">
+              <div className="task-module-body task-list-panel-body">
+                {filteredTasks.length ? (
+                  filteredTasks.map((task) => (
+                    <TaskRow key={task.id} task={task} {...rowProps} />
+                  ))
+                ) : (
+                  <p className="task-module-empty">ტასკი ვერ მოიძებნა.</p>
+                )}
+              </div>
+            </section>
+          )}
           </div>
         </div>
-      </section>
+      )}
     </div>
   );
 }
 
-function TaskTagList({ tags }: { tags: string[] }) {
-  if (!tags.length) {
-    return null;
-  }
+type RowProps = {
+  task: Task;
+  deviceMap: Map<string, Device>;
+  userMap: Map<string, AppUser>;
+  permissions: TaskPermissions;
+  savingTaskId: string | null;
+  onChangeStatus: (taskId: string, status: TaskStatus) => void;
+  onEdit: (task: Task) => void;
+  onDelete: (taskId: string) => void;
+};
+
+function TaskRow({
+  task,
+  deviceMap,
+  userMap,
+  permissions,
+  savingTaskId,
+  onChangeStatus,
+  onEdit,
+  onDelete,
+}: RowProps) {
+  const device = deviceMap.get(task.deviceId);
+  const displayTitle = withoutDeviceCodes(task.title, [device?.code]);
+  const displayIssue = withoutDeviceCodes(task.issue, [device?.code]);
+  const overdue = isOverdue(task);
 
   return (
-    <div className="task-tags">
-      {tags.map((tagName) => (
-        <span key={tagName} className="tag-toggle compact active">
+    <article
+      id={`task-${task.id}`}
+      className={`task-grid task-row${overdue ? " urgent" : ""}${task.status === "done" ? " muted" : ""}`}
+    >
+      <span
+        className={
+          task.problemReportId
+            ? `issue-indicator ${getIssueIndicatorState(task)}`
+            : "issue-indicator empty"
+        }
+        aria-label="პრობლემის ინდიკატორი"
+      />
+      <Link
+        className="task-row-device"
+        href={`/devices/${device?.id ?? task.deviceId}`}
+        title={device?.name}
+      >
+        <MapPin size={14} />
+        {device?.name || "ბაღი ვერ მოიძებნა"}
+      </Link>
+      <span className="task-row-priority">
+        <span className={`mini-pill p-${task.priority}`}>
+          {priorityLabels[task.priority]}
+        </span>
+      </span>
+      <Link className="task-row-summary" href={`/tasks/${task.id}`}>
+        <span className="task-row-title" title={displayTitle}>
+          {displayTitle}
+        </span>
+        <span className="task-row-sub" title={displayIssue}>
+          {displayIssue}
+        </span>
+      </Link>
+      <span
+        className={`task-row-comment${task.comment ? "" : " empty"}`}
+        title={task.comment || undefined}
+      >
+        {task.comment || "—"}
+      </span>
+      <TagCell tags={task.tags} />
+      <span className="task-row-phone">{task.phone || "—"}</span>
+      <span className="avatar-stack">
+        {task.assigneeIds.map((userId) => {
+          const user = userMap.get(userId);
+          return user ? (
+            <span
+              key={user.id}
+              className="avatar small"
+              style={{ backgroundColor: user.color }}
+              title={user.name}
+            >
+              {user.initials}
+            </span>
+          ) : null;
+        })}
+      </span>
+      <StatusPill
+        task={task}
+        canEdit={permissions.edit}
+        onChangeStatus={onChangeStatus}
+      />
+      <span className={`task-row-due${overdue ? " overdue" : ""}`}>
+        {task.dueDate}
+      </span>
+      <div className="task-row-actions">
+        {permissions.edit ? (
+          <button
+            className="icon-button"
+            type="button"
+            onClick={() => onEdit(task)}
+            aria-label="დავალების რედაქტირება"
+            title="დავალების რედაქტირება"
+          >
+            <Edit3 size={15} />
+          </button>
+        ) : null}
+        {permissions.delete ? (
+          <button
+            className="icon-button danger"
+            type="button"
+            onClick={() => onDelete(task.id)}
+            disabled={savingTaskId === task.id}
+            aria-label="დავალების წაშლა"
+            title="დავალების წაშლა"
+          >
+            <Trash2 size={15} />
+          </button>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
+function TaskCard({
+  task,
+  deviceMap,
+  userMap,
+  permissions,
+  savingTaskId,
+  onChangeStatus,
+  onEdit,
+  onDelete,
+}: RowProps) {
+  const device = deviceMap.get(task.deviceId);
+  const displayTitle = withoutDeviceCodes(task.title, [device?.code]);
+  const displayIssue = withoutDeviceCodes(task.issue, [device?.code]);
+  const overdue = isOverdue(task);
+
+  return (
+    <article
+      id={`task-${task.id}`}
+      className={`task-card2${overdue ? " urgent" : ""}${task.status === "done" ? " muted" : ""}`}
+    >
+      <TaskChips task={task} />
+      <Link className="task-card2-title" href={`/tasks/${task.id}`}>
+        {displayTitle}
+      </Link>
+      <p className="task-card2-sub">
+        {device?.name || "ბაღი ვერ მოიძებნა"} · {displayIssue}
+      </p>
+      {task.comment ? (
+        <p className="task-card2-comment">{task.comment}</p>
+      ) : null}
+      <div className="task-card2-meta">
+        <span className={overdue ? "task-row-due overdue" : undefined}>
+          <CalendarDays size={13} /> {task.dueDate}
+        </span>
+        <span className="avatar-stack" style={{ marginLeft: "auto" }}>
+          {task.assigneeIds.map((userId) => {
+            const user = userMap.get(userId);
+            return user ? (
+              <span
+                key={user.id}
+                className="avatar small"
+                style={{ backgroundColor: user.color }}
+                title={user.name}
+              >
+                {user.initials}
+              </span>
+            ) : null;
+          })}
+        </span>
+      </div>
+      <div className="task-card2-foot">
+        <StatusPill
+          task={task}
+          canEdit={permissions.edit}
+          onChangeStatus={onChangeStatus}
+        />
+        <div className="task-row-actions" style={{ marginLeft: "auto" }}>
+          {permissions.edit ? (
+            <button
+              className="icon-button"
+              type="button"
+              onClick={() => onEdit(task)}
+              aria-label="დავალების რედაქტირება"
+              title="დავალების რედაქტირება"
+            >
+              <Edit3 size={15} />
+            </button>
+          ) : null}
+          {permissions.delete ? (
+            <button
+              className="icon-button danger"
+              type="button"
+              onClick={() => onDelete(task.id)}
+              disabled={savingTaskId === task.id}
+              aria-label="დავალების წაშლა"
+              title="დავალების წაშლა"
+            >
+              <Trash2 size={15} />
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function StatusPill({
+  task,
+  canEdit,
+  onChangeStatus,
+}: {
+  task: Task;
+  canEdit: boolean;
+  onChangeStatus: (taskId: string, status: TaskStatus) => void;
+}) {
+  return (
+    <label className={`task-status-pill ${task.status}`}>
+      <span className="sr-only">სტატუსი</span>
+      <select
+        value={task.status}
+        onChange={(event) =>
+          onChangeStatus(task.id, event.target.value as TaskStatus)
+        }
+        disabled={!canEdit}
+      >
+        {statusOrder.map((value) => (
+          <option key={value} value={value}>
+            {statusLabels[value]}
+          </option>
+        ))}
+      </select>
+      <ChevronDown size={12} strokeWidth={2.4} />
+    </label>
+  );
+}
+
+/** Two tags fit the column; the rest collapse into a hoverable counter. */
+function TagCell({ tags }: { tags: string[] }) {
+  if (!tags.length) {
+    return <span className="task-row-tags empty">—</span>;
+  }
+
+  const shown = tags.slice(0, 2);
+  const hidden = tags.length - shown.length;
+
+  return (
+    <span className="task-row-tags" title={tags.join(", ")}>
+      {shown.map((tagName) => (
+        <span key={tagName} className="mini-pill tag">
           {tagName}
         </span>
       ))}
-    </div>
+      {hidden > 0 ? <span className="mini-pill tag more">+{hidden}</span> : null}
+    </span>
+  );
+}
+
+function TaskChips({ task }: { task: Task }) {
+  return (
+    <span className="task-row-chips">
+      <span className={`mini-pill p-${task.priority}`}>
+        {priorityLabels[task.priority]}
+      </span>
+      {task.tags.map((tagName) => (
+        <span key={tagName} className="mini-pill tag">
+          {tagName}
+        </span>
+      ))}
+    </span>
   );
 }
 
@@ -1030,6 +1392,13 @@ function toggleListValue(values: string[], value: string) {
   return values.includes(value)
     ? values.filter((item) => item !== value)
     : [...values, value];
+}
+
+function isOverdue(task: Pick<Task, "status" | "dueDate">) {
+  return (
+    task.status !== "done" &&
+    task.dueDate < new Date().toISOString().slice(0, 10)
+  );
 }
 
 function getIssueIndicatorState(task: Pick<Task, "status" | "dueDate">) {

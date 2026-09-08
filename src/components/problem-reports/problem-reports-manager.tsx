@@ -1,16 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertCircle,
   CalendarDays,
-  CheckCircle2,
+  ChevronUp,
   Edit3,
   Filter,
   MapPin,
-  Minus,
-  Phone,
   Plus,
   Save,
   Search,
@@ -21,6 +18,7 @@ import {
 import { useConfirmDialog } from "@/components/common/confirm-dialog";
 import { TaskTagPicker } from "@/components/tasks/task-tag-picker";
 import { mergeTags } from "@/lib/tags";
+import { workingDayDueDate } from "@/lib/working-days";
 import { getAssignableTaskUsers } from "@/lib/task-assignees";
 import type {
   AppUser,
@@ -46,6 +44,7 @@ type Props = {
   devices: Device[];
   users: AppUser[];
   initialTags: string[];
+  canChooseDueDate: boolean;
   permissions: ProblemReportPermissions;
 };
 
@@ -81,13 +80,29 @@ const priorityLabels: Record<TaskPriority, string> = {
   urgent: "სასწრაფო",
 };
 
+const statusOrder: TaskStatus[] = ["planned", "in_progress", "blocked", "done"];
 const today = new Date().toISOString().slice(0, 10);
+
+function emptyDraft(deviceId: string): ReportDraft {
+  return {
+    deviceId,
+    title: "",
+    issue: "",
+    phone: "",
+    status: "planned",
+    priority: "normal",
+    tags: [],
+    assigneeIds: [],
+    dueDate: workingDayDueDate(),
+  };
+}
 
 export function ProblemReportsManager({
   initialReports,
   devices,
   users,
   initialTags,
+  canChooseDueDate,
   permissions,
 }: Props) {
   const [reports, setReports] = useState(initialReports);
@@ -106,17 +121,10 @@ export function ProblemReportsManager({
   const [error, setError] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const { confirm, confirmationDialog } = useConfirmDialog();
-  const [draft, setDraft] = useState<ReportDraft>({
-    deviceId: devices[0]?.id || "",
-    title: "",
-    issue: "",
-    phone: "",
-    status: "planned",
-    priority: "normal",
-    tags: [],
-    assigneeIds: [],
-    dueDate: today,
-  });
+  const editorRef = useRef<HTMLElement>(null);
+  const [draft, setDraft] = useState<ReportDraft>(() =>
+    emptyDraft(devices[0]?.id || ""),
+  );
 
   const canUpdate =
     permissions.edit ||
@@ -161,6 +169,32 @@ export function ProblemReportsManager({
     });
   }, [deviceFilter, deviceMap, query, reports, statusFilter]);
 
+  const doneCount = reports.filter((report) => report.status === "done").length;
+  const overdueCount = reports.filter(isOverdueReport).length;
+
+  const editorMode: "create" | "edit" | null = createOpen
+    ? "create"
+    : editingReportId && editDraft
+      ? "edit"
+      : null;
+
+  const closeEditor = useCallback(() => {
+    setCreateOpen(false);
+    setEditingReportId(null);
+    setEditDraft(null);
+  }, []);
+
+  useEffect(() => {
+    if (!editorMode) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      editorRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
+    return () => window.cancelAnimationFrame(frameId);
+  }, [editorMode, editingReportId]);
+
   async function createReport(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (
@@ -188,20 +222,13 @@ export function ProblemReportsManager({
 
     const data = (await response.json()) as { report: ProblemReport };
     setReports((current) => [data.report, ...current]);
-    setDraft((current) => ({
-      ...current,
-      title: "",
-      issue: "",
-      phone: "",
-      status: "planned",
-      priority: "normal",
-      tags: [],
-      assigneeIds: [],
-      dueDate: today,
-    }));
+    // Fields clear only once the report is stored.
+    setDraft(emptyDraft(draft.deviceId));
+    setCreateOpen(false);
   }
 
   function startEdit(report: ProblemReport) {
+    setCreateOpen(false);
     setEditingReportId(report.id);
     setEditDraft({
       deviceId: report.deviceId,
@@ -267,6 +294,10 @@ export function ProblemReportsManager({
     }
 
     setReports((current) => current.filter((report) => report.id !== reportId));
+    if (editingReportId === reportId) {
+      setEditingReportId(null);
+      setEditDraft(null);
+    }
   }
 
   function toggleDraftTag(tagName: string) {
@@ -369,262 +400,322 @@ export function ProblemReportsManager({
   }
 
   return (
-    <div className="problem-reports-page">
+    <div className="reports-page">
       {confirmationDialog}
-      <section className="page-header">
+
+      <section className="tasks-head">
         <div>
-          <p className="eyebrow">განაცხადები</p>
-          <h1>დარეგისტრირებული პრობლემები</h1>
+          <h1>პრობლემის დაფიქსირება</h1>
           <p>
-            ბაღები აფიქსირებენ პრობლემებს, დისპეტჩერი კი ანაწილებს
-            მომხმარებლებს, ტეგებს და სტატუსს.
+            {reports.length} დაფიქსირებული · {doneCount} დასრულებული ·{" "}
+            {overdueCount} ვადაგასული
           </p>
         </div>
-        <div className="metric-strip">
-          <div className="metric">
-            <AlertCircle size={18} />
-            <span>{reports.length}</span>
-            <small>სულ</small>
+        {permissions.create ? (
+          <div className="tasks-head-actions">
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => {
+                setEditingReportId(null);
+                setEditDraft(null);
+                setError("");
+                setCreateOpen(true);
+              }}
+            >
+              <Plus size={17} />
+              <span>ახალი პრობლემა</span>
+            </button>
           </div>
-          <div className="metric">
-            <CheckCircle2 size={18} />
-            <span>
-              {reports.filter((report) => report.status === "done").length}
-            </span>
-            <small>დასრულდა</small>
-          </div>
-          <div className="metric">
-            <CalendarDays size={18} />
-            <span>{reports.filter(isOverdueReport).length}</span>
-            <small>ვადაგასული</small>
-          </div>
-        </div>
+        ) : null}
       </section>
 
       {error ? <p className="form-error page-error">{error}</p> : null}
 
-      <section className="content-grid problem-report-grid">
-        {permissions.create ? (
-          <form
-            className="surface admin-form problem-report-form"
-            onSubmit={createReport}
+      <section className="tasks-toolbar" aria-label="ფილტრები">
+        <div className="search-field">
+          <Search size={17} />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="ძებნა"
+          />
+        </div>
+        <label className="select-control">
+          <Filter size={16} />
+          <select
+            value={statusFilter}
+            onChange={(event) =>
+              setStatusFilter(event.target.value as TaskStatus | "all")
+            }
           >
-            <button
-              type="button"
-              className="section-title"
-              onClick={() => setCreateOpen((o) => !o)}
-            >
-              <h2>ახალი პრობლემა</h2>
-              {createOpen ? <Minus size={20} /> : <Plus size={20} />}
-            </button>
-            {createOpen && (
-              <>
-                <ReportFields
-                  draft={draft}
-                  devices={devices}
-                  gardenOptions={gardenOptions}
-                  availableTags={availableTags}
-                  permissions={permissions}
-                  users={assignableUsers}
-                  onChange={(updater) =>
-                    setDraft((current) => updater(current) ?? current)
-                  }
-                  onToggleTag={toggleDraftTag}
-                  onCreateTag={createAvailableTag}
-                  onDeleteTag={removeAvailableTag}
-                  onToggleAssignee={toggleDraftAssignee}
-                  mode="create"
-                />
-                <button className="primary-button" type="submit" disabled={saving}>
-                  <Plus size={18} />
-                  <span>{saving ? "ინახება..." : "რეგისტრაცია"}</span>
-                </button>
-              </>
-            )}
-          </form>
-        ) : (
-          <section className="surface empty-state">
-            რეგისტრაციის უფლება არ გაქვთ.
-          </section>
-        )}
+            <option value="all">ყველა სტატუსი</option>
+            {statusOrder.map((value) => (
+              <option key={value} value={value}>
+                {statusLabels[value]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="select-control">
+          <MapPin size={16} />
+          <select
+            value={deviceFilter}
+            onChange={(event) => setDeviceFilter(event.target.value)}
+          >
+            <option value="all">ყველა ბაღი</option>
+            {gardenOptions.map((garden) => (
+              <option key={garden.code} value={garden.code}>
+                {garden.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </section>
 
-        <section className="surface problem-report-list">
-          <div className="table-toolbar">
-            <div className="search-field">
-              <Search size={18} />
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="ძებნა"
+      {editorMode ? (
+        <section
+          className="task-editor"
+          ref={editorRef}
+          aria-label={
+            editorMode === "create" ? "ახალი პრობლემა" : "პრობლემის რედაქტირება"
+          }
+        >
+          <header className="task-editor-head">
+            <div>
+              <h2>
+                {editorMode === "create"
+                  ? "ახალი პრობლემა"
+                  : "პრობლემის რედაქტირება"}
+              </h2>
+              <p>
+                {editorMode === "create"
+                  ? "დაკეცვისას ჩაწერილი რჩება — ველები მხოლოდ რეგისტრაციის შემდეგ სუფთავდება."
+                  : "ცვლილება ძალაში შედის შენახვის შემდეგ."}
+              </p>
+            </div>
+            <button
+              className="icon-button"
+              type="button"
+              onClick={closeEditor}
+              aria-label="დაკეცვა"
+              title="დაკეცვა"
+            >
+              <ChevronUp size={17} />
+            </button>
+          </header>
+
+          {editorMode === "create" ? (
+            <form
+              className="task-editor-body"
+              id="report-create-form"
+              onSubmit={createReport}
+            >
+              <ReportFields
+                draft={draft}
+                devices={devices}
+                gardenOptions={gardenOptions}
+                availableTags={availableTags}
+                permissions={permissions}
+                users={assignableUsers}
+                canChooseDueDate={canChooseDueDate}
+                onChange={(updater) =>
+                  setDraft((current) => updater(current) ?? current)
+                }
+                onToggleTag={toggleDraftTag}
+                onCreateTag={createAvailableTag}
+                onDeleteTag={removeAvailableTag}
+                onToggleAssignee={toggleDraftAssignee}
+                mode="create"
+              />
+            </form>
+          ) : editDraft ? (
+            <div className="task-editor-body">
+              <ReportFields
+                draft={editDraft}
+                devices={devices}
+                gardenOptions={gardenOptions}
+                availableTags={availableTags}
+                permissions={permissions}
+                users={assignableUsers}
+                canChooseDueDate={canChooseDueDate}
+                onChange={setEditDraft}
+                onToggleTag={toggleEditTag}
+                onCreateTag={createAvailableTag}
+                onDeleteTag={removeAvailableTag}
+                onToggleAssignee={toggleEditAssignee}
+                mode="edit"
               />
             </div>
-            <label className="select-control">
-              <Filter size={17} />
-              <select
-                value={statusFilter}
-                onChange={(event) =>
-                  setStatusFilter(event.target.value as TaskStatus | "all")
-                }
-              >
-                <option value="all">ყველა სტატუსი</option>
-                {Object.entries(statusLabels).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="select-control">
-              <MapPin size={17} />
-              <select
-                value={deviceFilter}
-                onChange={(event) => setDeviceFilter(event.target.value)}
-              >
-                <option value="all">ყველა ბაღი</option>
-                {gardenOptions.map((garden) => (
-                  <option key={garden.code} value={garden.code}>
-                    {garden.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
+          ) : null}
 
-          <div className="problem-report-table">
-            <div className="problem-report-head">
-              <span />
-              <span>ბაღი</span>
-              <span>პრობლემა</span>
-              <span>მომხმარებლები</span>
-              <span>სტატუსი</span>
-              <span>ვადა</span>
-              <span>მოქმედება</span>
-            </div>
-            {visibleReports.map((report) => {
-              const device = deviceMap.get(report.deviceId);
-              return editingReportId === report.id && editDraft ? (
-                <article key={report.id} className="problem-report-row editing">
-                  <ReportFields
-                    draft={editDraft}
-                    devices={devices}
-                    gardenOptions={gardenOptions}
-                    availableTags={availableTags}
-                    permissions={permissions}
-                    users={assignableUsers}
-                    onChange={setEditDraft}
-                    onToggleTag={toggleEditTag}
-                    onCreateTag={createAvailableTag}
-                    onDeleteTag={removeAvailableTag}
-                    onToggleAssignee={toggleEditAssignee}
-                    mode="edit"
-                  />
-                  <div className="row-actions">
-                    <button
-                      className="ghost-button"
-                      type="button"
-                      onClick={() => saveReport(report.id)}
-                      disabled={saving}
-                    >
-                      <Save size={16} />
-                      <span>შენახვა</span>
-                    </button>
-                    <button
-                      className="ghost-button"
-                      type="button"
-                      onClick={() => {
-                        setEditingReportId(null);
-                        setEditDraft(null);
-                      }}
-                    >
-                      <X size={16} />
-                      <span>გაუქმება</span>
-                    </button>
-                  </div>
-                </article>
-              ) : (
-                <article key={report.id} className="problem-report-row">
-                  <span
-                    className={`issue-indicator ${getIssueIndicatorState(report)}`}
-                    aria-label="პრობლემის ინდიკატორი"
-                  />
-                  <Link
-                    className="task-device-cell clickable-cell"
-                    href={`/devices/${device?.id ?? report.deviceId}`}
-                  >
-                    <span className="device-name-inline">
-                      <MapPin size={15} />
-                      {device
-                        ? getGardenDisplayName(device)
-                        : "ბაღი ვერ მოიძებნა"}
-                    </span>
-                  </Link>
-                  <div className="problem-summary-cell">
-                    <strong>{report.title}</strong>
-                    <p>{report.issue}</p>
-                    {report.phone ? (
-                      <small className="phone-inline">
-                        <Phone size={13} />
-                        {report.phone}
-                      </small>
-                    ) : null}
-                    <TaskTagList tags={report.tags} />
-                    <small className={`priority-label ${report.priority}`}>
-                      {priorityLabels[report.priority]}
-                    </small>
-                  </div>
-                  <span className="avatar-stack">
-                    {report.assigneeIds.map((userId) => {
-                      const user = userMap.get(userId);
-                      return user ? (
-                        <span
-                          key={user.id}
-                          className="avatar small"
-                          style={{ backgroundColor: user.color }}
-                          title={user.name}
-                        >
-                          {user.initials}
-                        </span>
-                      ) : null;
-                    })}
-                  </span>
-                  <span className={`status-pill ${report.status}`}>
-                    {statusLabels[report.status]}
-                  </span>
-                  <span className="date-cell">
-                    <CalendarDays size={14} />
-                    {report.dueDate}
-                  </span>
-                  <div className="row-actions">
-                    {canUpdate ? (
-                      <button
-                        className="icon-button"
-                        type="button"
-                        aria-label="რედაქტირება"
-                        title="რედაქტირება"
-                        onClick={() => startEdit(report)}
-                      >
-                        <Edit3 size={17} />
-                      </button>
-                    ) : null}
-                    {permissions.delete ? (
-                      <button
-                        className="icon-button danger"
-                        type="button"
-                        aria-label="წაშლა"
-                        title="წაშლა"
-                        onClick={() => removeReport(report.id)}
-                      >
-                        <Trash2 size={17} />
-                      </button>
-                    ) : null}
-                  </div>
-                </article>
-              );
-            })}
+          <div className="task-editor-foot">
+            {editorMode === "create" ? (
+              <button
+                className="primary-button"
+                type="submit"
+                form="report-create-form"
+                disabled={saving}
+              >
+                <Plus size={17} />
+                <span>{saving ? "ინახება..." : "რეგისტრაცია"}</span>
+              </button>
+            ) : (
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => editingReportId && saveReport(editingReportId)}
+                disabled={saving}
+              >
+                <Save size={17} />
+                <span>შენახვა</span>
+              </button>
+            )}
+            <button className="ghost-button" type="button" onClick={closeEditor}>
+              <X size={16} />
+              <span>დაკეცვა</span>
+            </button>
           </div>
         </section>
-      </section>
+      ) : null}
+
+      <div className="task-scroll">
+        <div className="task-scroll-inner report-scroll-inner">
+          <div className="report-grid task-grid-head" aria-hidden="true">
+            <span />
+            <span>ბაღი</span>
+            <span>პრიორიტეტი</span>
+            <span>პრობლემა</span>
+            <span>ტეგები</span>
+            <span>ტელ.</span>
+            <span>შემსრ.</span>
+            <span>სტატუსი</span>
+            <span>ვადა</span>
+            <span />
+          </div>
+
+          <section className="task-module" aria-label="დაფიქსირებული პრობლემები">
+            <div className="task-module-body">
+              {visibleReports.length ? (
+                visibleReports.map((report) => {
+                  const device = deviceMap.get(report.deviceId);
+                  const overdue = isOverdueReport(report);
+                  return (
+                    <article
+                      key={report.id}
+                      id={`report-${report.id}`}
+                      className={`report-grid task-row${overdue ? " urgent" : ""}${report.status === "done" ? " muted" : ""}`}
+                    >
+                      <span
+                        className={`issue-indicator ${getIssueIndicatorState(report)}`}
+                        aria-label="პრობლემის ინდიკატორი"
+                      />
+                      <Link
+                        className="task-row-device"
+                        href={`/devices/${device?.id ?? report.deviceId}`}
+                      >
+                        <MapPin size={14} />
+                        {device
+                          ? getGardenDisplayName(device)
+                          : report.deviceGroupCode || "ბაღი ვერ მოიძებნა"}
+                      </Link>
+                      <span className="task-row-priority">
+                        <span className={`mini-pill p-${report.priority}`}>
+                          {priorityLabels[report.priority]}
+                        </span>
+                      </span>
+                      <span className="task-row-summary">
+                        <span className="task-row-title" title={report.title}>
+                          {report.title}
+                        </span>
+                        <span className="task-row-sub" title={report.issue}>
+                          {report.issue}
+                        </span>
+                      </span>
+                      <TagCell tags={report.tags} />
+                      <span className="task-row-phone">
+                        {report.phone || "—"}
+                      </span>
+                      <span className="avatar-stack">
+                        {report.assigneeIds.map((userId) => {
+                          const assignee = userMap.get(userId);
+                          return assignee ? (
+                            <span
+                              key={assignee.id}
+                              className="avatar small"
+                              style={{ backgroundColor: assignee.color }}
+                              title={assignee.name}
+                            >
+                              {assignee.initials}
+                            </span>
+                          ) : null;
+                        })}
+                      </span>
+                      <span className={`status-pill ${report.status}`}>
+                        {statusLabels[report.status]}
+                      </span>
+                      <span
+                        className={`task-row-due${overdue ? " overdue" : ""}`}
+                      >
+                        <CalendarDays size={13} />
+                        {report.dueDate}
+                      </span>
+                      <div className="task-row-actions">
+                        {canUpdate ? (
+                          <button
+                            className="icon-button"
+                            type="button"
+                            aria-label="რედაქტირება"
+                            title="რედაქტირება"
+                            onClick={() => startEdit(report)}
+                          >
+                            <Edit3 size={15} />
+                          </button>
+                        ) : null}
+                        {permissions.delete ? (
+                          <button
+                            className="icon-button danger"
+                            type="button"
+                            aria-label="წაშლა"
+                            title="წაშლა"
+                            disabled={saving}
+                            onClick={() => removeReport(report.id)}
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        ) : null}
+                      </div>
+                    </article>
+                  );
+                })
+              ) : (
+                <p className="task-module-empty">პრობლემა ვერ მოიძებნა.</p>
+              )}
+            </div>
+          </section>
+        </div>
+      </div>
     </div>
+  );
+}
+
+function TagCell({ tags }: { tags: string[] }) {
+  if (!tags.length) {
+    return <span className="task-row-tags empty">—</span>;
+  }
+
+  const shown = tags.slice(0, 2);
+  const hidden = tags.length - shown.length;
+
+  return (
+    <span className="task-row-tags" title={tags.join(", ")}>
+      {shown.map((tagName) => (
+        <span key={tagName} className="mini-pill tag">
+          {tagName}
+        </span>
+      ))}
+      {hidden > 0 ? <span className="mini-pill tag more">+{hidden}</span> : null}
+    </span>
   );
 }
 
@@ -635,6 +726,7 @@ function ReportFields({
   availableTags,
   permissions,
   users,
+  canChooseDueDate,
   onChange,
   onToggleTag,
   onCreateTag,
@@ -648,6 +740,7 @@ function ReportFields({
   availableTags: string[];
   permissions: ProblemReportPermissions;
   users: AppUser[];
+  canChooseDueDate: boolean;
   onChange: (
     updater: (current: ReportDraft | null) => ReportDraft | null,
   ) => void;
@@ -672,7 +765,7 @@ function ReportFields({
 
   return (
     <>
-      <label>
+      <label className="task-field span-2">
         <span>ბაღი</span>
         <select
           value={selectedGardenOption?.deviceId ?? draft.deviceId}
@@ -687,7 +780,7 @@ function ReportFields({
           ))}
         </select>
       </label>
-      <label>
+      <label className="task-field span-2">
         <span>სათაური</span>
         <input
           value={draft.title}
@@ -696,76 +789,76 @@ function ReportFields({
           required
         />
       </label>
-      <div className="form-row">
-        <label>
-          <span>ტელეფონი</span>
-          <input
-            value={draft.phone}
-            onChange={(event) => update({ phone: event.target.value })}
-            disabled={!canEditCore}
-            inputMode="tel"
-          />
+      <label className="task-field">
+        <span>ტელეფონი</span>
+        <input
+          value={draft.phone}
+          onChange={(event) => update({ phone: event.target.value })}
+          disabled={!canEditCore}
+          inputMode="tel"
+        />
+      </label>
+      <label className="task-field">
+        <span>ვადა</span>
+        <input
+          type="date"
+          value={draft.dueDate}
+          onChange={(event) => update({ dueDate: event.target.value })}
+          disabled={!canEditCore || !canChooseDueDate}
+        />
+        {canChooseDueDate ? null : (
+          <small className="task-field-hint">
+            ავტომატურად — 5 სამუშაო დღე
+          </small>
+        )}
+      </label>
+      {canManagePriority ? (
+        <label className="task-field">
+          <span>პრიორიტეტი</span>
+          <select
+            value={draft.priority}
+            onChange={(event) =>
+              update({ priority: event.target.value as TaskPriority })
+            }
+          >
+            {Object.entries(priorityLabels).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
         </label>
-        <label>
-          <span>ვადა</span>
-          <input
-            type="date"
-            value={draft.dueDate}
-            onChange={(event) => update({ dueDate: event.target.value })}
-            disabled={!canEditCore}
-          />
-        </label>
-      </div>
-      {canManagePriority || permissions.manageStatus ? (
-        <div className="form-row">
-          {canManagePriority ? (
-            <label>
-              <span>პრიორიტეტი</span>
-              <select
-                value={draft.priority}
-                onChange={(event) =>
-                  update({ priority: event.target.value as TaskPriority })
-                }
-              >
-                {Object.entries(priorityLabels).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          {permissions.manageStatus ? (
-            <label>
-              <span>სტატუსი</span>
-              <select
-                value={draft.status}
-                onChange={(event) =>
-                  update({ status: event.target.value as TaskStatus })
-                }
-              >
-                {Object.entries(statusLabels).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-        </div>
       ) : null}
-      <label>
+      {permissions.manageStatus ? (
+        <label className="task-field">
+          <span>სტატუსი</span>
+          <select
+            value={draft.status}
+            onChange={(event) =>
+              update({ status: event.target.value as TaskStatus })
+            }
+          >
+            {statusOrder.map((value) => (
+              <option key={value} value={value}>
+                {statusLabels[value]}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      <label className="task-field span-full">
         <span>საკითხი</span>
         <textarea
           value={draft.issue}
           onChange={(event) => update({ issue: event.target.value })}
           disabled={!canEditCore}
-          rows={4}
+          rows={3}
           required
         />
       </label>
       {permissions.manageTags ? (
         <TaskTagPicker
+          className="task-field span-full"
           availableTags={availableTags}
           selectedTags={draft.tags}
           canCreateTags={permissions.createTags}
@@ -776,7 +869,7 @@ function ReportFields({
         />
       ) : null}
       {permissions.assignUsers ? (
-        <div className="task-assignee-edit">
+        <div className="task-field span-full">
           <span>მომხმარებლები</span>
           <div className="row-tags">
             {users.map((user) => (
@@ -856,22 +949,6 @@ function normalizeDraftForSave(
     assigneeIds: permissions.assignUsers ? draft.assigneeIds : [],
     dueDate: draft.dueDate,
   };
-}
-
-function TaskTagList({ tags }: { tags: string[] }) {
-  if (!tags.length) {
-    return null;
-  }
-
-  return (
-    <div className="task-tags">
-      {tags.map((tagName) => (
-        <span key={tagName} className="tag-toggle compact active">
-          {tagName}
-        </span>
-      ))}
-    </div>
-  );
 }
 
 function toggleListValue(values: string[], value: string) {

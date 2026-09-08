@@ -8,6 +8,7 @@ const publicRoutes = [
   "/api/auth/login",
   "/api/auth/change-password",
   "/api/cron/offline-capture",
+  "/api/cron/status-poll",
 ];
 
 const MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);

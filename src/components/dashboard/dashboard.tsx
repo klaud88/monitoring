@@ -3,18 +3,19 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  AlertTriangle,
   CalendarDays,
+  ChevronDown,
+  ChevronUp,
   Filter,
   MapPin,
   Plus,
   RefreshCw,
   RotateCcw,
   Search,
+  SlidersHorizontal,
   Tag,
   Users,
   Wifi,
-  WifiOff,
   X,
 } from "lucide-react";
 import { GoogleTbilisiMap } from "@/components/dashboard/google-tbilisi-map";
@@ -72,6 +73,7 @@ const priorityLabels: Record<TaskPriority, string> = {
 };
 
 const today = new Date().toISOString().slice(0, 10);
+const railStorageKey = "bagebi-map-rail";
 
 export function Dashboard({
   initialDevices,
@@ -108,6 +110,8 @@ export function Dashboard({
   const [selectedDeviceTags, setSelectedDeviceTags] = useState<string[]>([]);
   const [query, setQuery] = useState("");
   const [showCreateTask, setShowCreateTask] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [railOpen, setRailOpen] = useState(true);
   const [showOfflineDevices, setShowOfflineDevices] = useState(false);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [editingDeviceId, setEditingDeviceId] = useState<string | null>(null);
@@ -164,16 +168,24 @@ export function Dashboard({
 
   const refreshDevices = useCallback(
     async (source: "manual" | "interval" = "manual") => {
-      setRefreshingDevices(true);
+      const manual = source === "manual";
+      if (manual) {
+        setRefreshingDevices(true);
+      }
       setRefreshError("");
 
       try {
-        const syncResponse = await fetch("/api/biostar/sync", {
-          method: "POST",
-        });
+        /* The 5-minute cron already keeps BioStar2 in sync, so the timed
+           refresh only re-reads what it stored. Pressing the button still
+           forces a fresh pull. */
+        if (manual) {
+          const syncResponse = await fetch("/api/biostar/sync", {
+            method: "POST",
+          });
 
-        if (!syncResponse.ok) {
-          throw new Error("BioStar sync failed.");
+          if (!syncResponse.ok) {
+            throw new Error("BioStar sync failed.");
+          }
         }
 
         const devicesResponse = await fetch("/api/devices", {
@@ -194,13 +206,15 @@ export function Dashboard({
         setDevices(payload.devices);
         setLastRefreshedAt(new Date().toISOString());
 
-        if (source === "manual") {
+        if (manual) {
           recordAudit("dashboard.devices_refresh", "dashboard");
         }
       } catch {
         setRefreshError("განახლება ვერ მოხერხდა.");
       } finally {
-        setRefreshingDevices(false);
+        if (manual) {
+          setRefreshingDevices(false);
+        }
       }
     },
     [],
@@ -241,11 +255,12 @@ export function Dashboard({
   }, [devices, editingDeviceId]);
 
   useEffect(() => {
+    // Matches the cron cadence, so the map is never more than one poll behind.
     const intervalId = window.setInterval(
       () => {
         void refreshDevices("interval");
       },
-      60 * 60 * 1000,
+      5 * 60 * 1000,
     );
 
     return () => window.clearInterval(intervalId);
@@ -266,6 +281,31 @@ export function Dashboard({
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [showCreateTask]);
 
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(railStorageKey) === "collapsed") {
+        setRailOpen(false);
+      }
+    } catch {
+      // localStorage may be unavailable in restricted contexts.
+    }
+  }, []);
+
+  /** Only an explicit toggle is remembered, so an empty day does not leave the
+   *  rail collapsed once planned work exists again. */
+  const toggleRail = useCallback(() => {
+    const next = !railOpen;
+    setRailOpen(next);
+    try {
+      window.localStorage.setItem(
+        railStorageKey,
+        next ? "expanded" : "collapsed",
+      );
+    } catch {
+      // localStorage may be unavailable in restricted contexts.
+    }
+  }, [railOpen]);
+
   const activeTasks = useMemo(
     () =>
       tasks.filter(
@@ -277,10 +317,14 @@ export function Dashboard({
     () => activeTasks.filter((task) => taskMatchesTags(task, selectedTags)),
     [activeTasks, selectedTags],
   );
-  const recentTasks = useMemo(
+  /** The rail lists planned work, newest first. */
+  const plannedTasks = useMemo(
     () =>
       [...tasks]
-        .filter((task) => taskMatchesTags(task, selectedTags))
+        .filter(
+          (task) =>
+            task.status === "planned" && taskMatchesTags(task, selectedTags),
+        )
         .sort(
           (a, b) =>
             new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
@@ -351,6 +395,22 @@ export function Dashboard({
   const plannedVisitCount = activeTasks.filter(
     (task) => task.assigneeIds.length > 0,
   ).length;
+  const hasPlannedTasks = plannedTasks.length > 0;
+  const railExpanded = railOpen;
+
+  /** Nothing planned collapses the rail once; it can still be opened by hand. */
+  useEffect(() => {
+    if (!hasPlannedTasks) {
+      setRailOpen(false);
+    }
+  }, [hasPlannedTasks]);
+  /** Shown on the toggle so a collapsed panel never hides an active filter. */
+  const activeFilterCount =
+    (regionFilter === "all" ? 0 : 1) +
+    (statusFilter === "all" ? 0 : 1) +
+    (userFilter === "all" ? 0 : 1) +
+    selectedTags.length +
+    selectedDeviceTags.length;
 
   function toggleTag(tagName: string) {
     setSelectedTags((current) => {
@@ -626,316 +686,373 @@ export function Dashboard({
   }
 
   return (
-    <div className="dashboard-page">
-      <section className="page-header compact">
-        <div>
-          <p className="eyebrow">თბილისის რუკა</p>
-          <h1>X-Station სტატუსები</h1>
-        </div>
-        <div className="metric-strip">
-          <button
-            className={`metric metric-button ${showOfflineDevices ? "active" : ""}`}
-            type="button"
-            onClick={toggleOfflineDevices}
-            aria-expanded={showOfflineDevices}
-            aria-controls="dashboard-offline-devices"
-          >
-            <WifiOff size={18} />
-            <span>{offlineCount}</span>
-            <small>offline</small>
-          </button>
-          <div className="metric">
-            <AlertTriangle size={18} />
-            <span>{errorCount}</span>
-            <small>error</small>
-          </div>
-          <div className="metric">
-            <Users size={18} />
-            <span>{plannedVisitCount}</span>
-            <small>ვიზიტი</small>
-          </div>
-          <div className="metric">
-            <MapPin size={18} />
-            <span>{visibleDevices.length}</span>
-            <small>ნაჩვენები</small>
-          </div>
-        </div>
-      </section>
+    <div className="dashboard-page map-console">
+      <GoogleTbilisiMap
+        devices={visibleDevices}
+        deviceLocations={deviceLocations}
+        tasksByDevice={tasksByDevice}
+        userMap={userMap}
+        canEditLocations={canEditDeviceLocations}
+        activeAssignment={activeAssignment}
+        selectedDeviceId={selectedDeviceId}
+        editingDeviceId={editingDeviceId}
+        onSelect={selectDevice}
+        onCloseDevice={() => {
+          setSelectedDeviceId(null);
+          setEditingDeviceId(null);
+        }}
+        onStartEdit={startDeviceEdit}
+        onStopEdit={stopDeviceEdit}
+        onMove={updateDeviceLocation}
+        onMoveEnd={(deviceId, location) => {
+          updateDeviceLocation(deviceId, location);
+          void saveDeviceLocation(deviceId, location);
+        }}
+        onShowAssignment={showAssignment}
+        onCloseAssignment={() => setActiveAssignment(null)}
+      />
 
-      {showOfflineDevices ? (
-        <section
-          id="dashboard-offline-devices"
-          className="offline-device-popout"
-          aria-label="Offline მოწყობილობების ჩამონათვალი"
-        >
-          <header>
-            <div>
-              <p className="eyebrow">Offline</p>
-              <h2>მოწყობილობები</h2>
-            </div>
+      <div className="map-console-top">
+      <div className="map-panels-left">
+        <section className="map-panel map-head-panel" aria-label="მიმოხილვა">
+          <div className="map-head-top">
+            <h1>X-Station სტატუსები</h1>
+            {refreshError ? (
+              <span className="map-sync error">{refreshError}</span>
+            ) : locationSaveError ? (
+              <span className="map-sync error">{locationSaveError}</span>
+            ) : lastRefreshedAt ? (
+              <span className="map-sync">
+                <i className="status-dot online" />
+                {formatSyncTime(lastRefreshedAt)}
+              </span>
+            ) : null}
+          </div>
+
+          <div className="map-stats">
             <button
-              className="icon-button"
+              className={`map-stat map-stat-button${showOfflineDevices ? " active" : ""}`}
               type="button"
-              onClick={() => setShowOfflineDevices(false)}
-              aria-label="ჩამონათვალის დახურვა"
+              onClick={toggleOfflineDevices}
+              aria-expanded={showOfflineDevices}
+              aria-controls="dashboard-offline-devices"
             >
-              <X size={18} />
+              <span>
+                <i className="status-dot offline" />
+                offline
+              </span>
+              <strong className="offline">{offlineCount}</strong>
             </button>
-          </header>
-
-          {offlineDevices.length ? (
-            <div className="offline-device-popout-list">
-              {offlineDevices.map((device) => (
-                <Link
-                  key={device.id}
-                  className="offline-device-popout-card"
-                  href={`/devices/${device.id}`}
-                >
-                  <strong>{device.name}</strong>
-                  <small>რაიონი: {device.region}</small>
-                </Link>
-              ))}
+            <div className="map-stat">
+              <span>
+                <i className="status-dot error" />
+                error
+              </span>
+              <strong className="error">{errorCount}</strong>
             </div>
-          ) : (
-            <p className="muted">ამ დროისთვის offline მოწყობილობა არ არის.</p>
-          )}
+            <div className="map-stat">
+              <span>ვიზიტი</span>
+              <strong>{plannedVisitCount}</strong>
+            </div>
+            <div className="map-stat">
+              <span>ნაჩვენები</span>
+              <strong>{visibleDevices.length}</strong>
+            </div>
+          </div>
         </section>
-      ) : null}
 
-      <section className="filter-bar" aria-label="რუკის ფილტრები">
-        <div className="search-field">
-          <Search size={18} />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="ძებნა სახელით"
-          />
-        </div>
-
-        <label className="select-control">
-          <Filter size={17} />
-          <select
-            value={regionFilter}
-            onChange={(event) => updateRegionFilter(event.target.value)}
+        {showOfflineDevices ? (
+          <section
+            id="dashboard-offline-devices"
+            className="map-panel map-offline-panel"
+            aria-label="Offline მოწყობილობების ჩამონათვალი"
           >
-            <option value="all">ყველა რაიონი</option>
-            {regions.map((region) => (
-              <option key={region} value={region}>
-                {region}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="select-control">
-          <Wifi size={17} />
-          <select
-            value={statusFilter}
-            onChange={(event) =>
-              setStatusFilter(event.target.value as DeviceStatus | "all")
-            }
-          >
-            <option value="all">ყველა სტატუსი</option>
-            <option value="online">Online</option>
-            <option value="offline">Offline</option>
-            <option value="error">Error</option>
-          </select>
-        </label>
-
-        <label className="select-control">
-          <Users size={17} />
-          <select
-            value={userFilter}
-            onChange={(event) => updateUserFilter(event.target.value)}
-          >
-            <option value="all">ყველა მომხმარებელი</option>
-            {assignableUsers.map((user) => (
-              <option key={user.id} value={user.id}>
-                {user.name}
-              </option>
-            ))}
-          </select>
-        </label>
-
-
-        <button className="ghost-button" type="button" onClick={resetFilters}>
-          <RotateCcw size={16} />
-          <span>გასუფთავება</span>
-        </button>
-        <button
-          className="primary-button"
-          type="button"
-          disabled={refreshingDevices}
-          onClick={() => void refreshDevices()}
-        >
-          <RefreshCw size={16} />
-          <span>{refreshingDevices ? "ახლდება" : "განახლება"}</span>
-        </button>
-        {refreshError ? (
-          <span className="sync-message error">{refreshError}</span>
-        ) : locationSaveError ? (
-          <span className="sync-message error">{locationSaveError}</span>
-        ) : lastRefreshedAt ? (
-          <span className="sync-message">
-            ბოლო: {formatSyncTime(lastRefreshedAt)}
-          </span>
+            <header>
+              <h2>Offline მოწყობილობები</h2>
+              <button
+                className="icon-button"
+                type="button"
+                onClick={() => setShowOfflineDevices(false)}
+                aria-label="ჩამონათვალის დახურვა"
+              >
+                <X size={16} />
+              </button>
+            </header>
+            {offlineDevices.length ? (
+              <div className="map-offline-list">
+                {offlineDevices.map((device) => (
+                  <Link
+                    key={device.id}
+                    className="map-offline-item"
+                    href={`/devices/${device.id}`}
+                  >
+                    <strong>{device.name}</strong>
+                    <small>{device.region}</small>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <p className="muted">ამ დროისთვის offline მოწყობილობა არ არის.</p>
+            )}
+          </section>
         ) : null}
-      </section>
 
-      {availableTags.length || deviceTagOptions.length ? (
-        <div className="dashboard-tag-filters">
-          {availableTags.length ? (
-            <section className="tag-filter" aria-label="ტასკების ტეგები">
-              <span className="tag-filter-label">ტასკები:</span>
-              {availableTags.map((tagName) => (
-                <button
-                  key={tagName}
-                  className={`tag-toggle ${selectedTags.includes(tagName) ? "active" : ""}`}
-                  type="button"
-                  onClick={() => toggleTag(tagName)}
-                >
-                  <Tag size={14} />
-                  <span>{tagName}</span>
-                </button>
-              ))}
-            </section>
-          ) : null}
-          {deviceTagOptions.length ? (
-            <section className="tag-filter" aria-label="X-Station ტეგები">
-              <span className="tag-filter-label">X-Station:</span>
-              {deviceTagOptions.map((tagName) => (
-                <button
-                  key={tagName}
-                  className={`tag-toggle ${selectedDeviceTags.includes(tagName) ? "active" : ""}`}
-                  type="button"
-                  onClick={() => toggleDeviceTag(tagName)}
-                >
-                  <Tag size={14} />
-                  <span>{tagName}</span>
-                </button>
-              ))}
-            </section>
-          ) : null}
+      </div>
+
+      <div className="map-panels-filter">
+        <div className="map-panel map-search-panel">
+          <div className="search-field">
+            <Search size={16} />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="ძებნა სახელით"
+            />
+          </div>
+          <button
+            className={`map-filter-toggle${filtersOpen ? " active" : ""}`}
+            type="button"
+            onClick={() => setFiltersOpen((open) => !open)}
+            aria-expanded={filtersOpen}
+            aria-controls="dashboard-filters"
+            aria-label={filtersOpen ? "ფილტრების დაკეცვა" : "ფილტრების გაშლა"}
+            title={filtersOpen ? "ფილტრების დაკეცვა" : "ფილტრების გაშლა"}
+          >
+            <SlidersHorizontal size={15} />
+            {activeFilterCount > 0 ? (
+              <span className="map-filter-count">{activeFilterCount}</span>
+            ) : null}
+            {filtersOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
         </div>
-      ) : null}
 
-      <div className="dashboard-grid">
-        <section className="map-surface" aria-label="თბილისის რუკა">
-          <GoogleTbilisiMap
-            devices={visibleDevices}
-            deviceLocations={deviceLocations}
-            tasksByDevice={tasksByDevice}
-            userMap={userMap}
-            canEditLocations={canEditDeviceLocations}
-            activeAssignment={activeAssignment}
-            selectedDeviceId={selectedDeviceId}
-            editingDeviceId={editingDeviceId}
-            onSelect={selectDevice}
-            onCloseDevice={() => {
-              setSelectedDeviceId(null);
-              setEditingDeviceId(null);
-            }}
-            onStartEdit={startDeviceEdit}
-            onStopEdit={stopDeviceEdit}
-            onMove={updateDeviceLocation}
-            onMoveEnd={(deviceId, location) => {
-              updateDeviceLocation(deviceId, location);
-              void saveDeviceLocation(deviceId, location);
-            }}
-            onShowAssignment={showAssignment}
-            onCloseAssignment={() => setActiveAssignment(null)}
-          />
-        </section>
+        {filtersOpen ? (
+        <section
+          id="dashboard-filters"
+          className="map-panel map-filter-panel"
+          aria-label="რუკის ფილტრები"
+        >
+          <div className="map-filter-row">
+            <label className="select-control">
+              <Filter size={15} />
+              <select
+                value={regionFilter}
+                onChange={(event) => updateRegionFilter(event.target.value)}
+              >
+                <option value="all">ყველა რაიონი</option>
+                {regions.map((region) => (
+                  <option key={region} value={region}>
+                    {region}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-        <aside className="task-rail" aria-label="ტასკები">
-          <div className="rail-header">
-            <div>
-              <p className="eyebrow">ტასკები</p>
-              <h2>ტასკების ჩამონათვალი</h2>
-            </div>
+            <label className="select-control">
+              <Wifi size={15} />
+              <select
+                value={statusFilter}
+                onChange={(event) =>
+                  setStatusFilter(event.target.value as DeviceStatus | "all")
+                }
+              >
+                <option value="all">ყველა სტატუსი</option>
+                <option value="online">Online</option>
+                <option value="offline">Offline</option>
+                <option value="error">Error</option>
+              </select>
+            </label>
+          </div>
+
+          <label className="select-control">
+            <Users size={15} />
+            <select
+              value={userFilter}
+              onChange={(event) => updateUserFilter(event.target.value)}
+            >
+              <option value="all">ყველა მომხმარებელი</option>
+              {assignableUsers.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="map-filter-actions">
+            <button className="ghost-button" type="button" onClick={resetFilters}>
+              <RotateCcw size={15} />
+              <span>გასუფთავება</span>
+            </button>
             <button
               className="primary-button"
               type="button"
-              onClick={() => {
-                setTaskSaveError("");
-                setShowCreateTask(true);
-              }}
+              disabled={refreshingDevices}
+              onClick={() => void refreshDevices()}
             >
-              <Plus size={17} />
-              <span>დამატება</span>
+              <RefreshCw size={15} />
+              <span>{refreshingDevices ? "ახლდება" : "განახლება"}</span>
             </button>
           </div>
 
-          <div className="task-rail-scroll">
-            <div className="task-list">
-              {recentTasks.map((task) => {
-                const device = deviceMap.get(task.deviceId);
-                const firstUser = userMap.get(task.assigneeIds[0]);
-                const displayTitle = withoutDeviceCodes(task.title, [
-                  device?.code,
-                ]);
-                const displayIssue = withoutDeviceCodes(task.issue, [
-                  device?.code,
-                ]);
-                return (
-                  <Link
-                    key={task.id}
-                    className={`task-card task-card-link priority-${task.priority}`}
-                    href={`/tasks/${task.id}`}
-                    style={{ borderInlineStartColor: firstUser?.color }}
+          {availableTags.length ? (
+            <div className="map-tag-group" aria-label="ტასკების ტეგები">
+              <span className="map-tag-label">ტასკები</span>
+              <div className="map-tag-chips">
+                {availableTags.map((tagName) => (
+                  <button
+                    key={tagName}
+                    className={`tag-toggle compact ${selectedTags.includes(tagName) ? "active" : ""}`}
+                    type="button"
+                    onClick={() => toggleTag(tagName)}
                   >
-                    <div className="task-card-top">
-                      {task.problemReportId ? (
-                        <span
-                          className={`issue-indicator ${getIssueIndicatorState(task)}`}
-                          aria-label="პრობლემის ინდიკატორი"
-                        />
-                      ) : null}
-                      <div className="avatar-stack">
-                        {task.assigneeIds.map((userId) => {
-                          const user = userMap.get(userId);
-                          return user ? (
-                            <span
-                              key={user.id}
-                              className="avatar small"
-                              style={{ backgroundColor: user.color }}
-                            >
-                              {user.initials}
-                            </span>
-                          ) : null;
-                        })}
-                      </div>
-                      <span className={`status-pill ${task.status}`}>
-                        {statusLabels[task.status]}
-                      </span>
-                    </div>
-                    <h3>{displayTitle}</h3>
-                    <p>{displayIssue}</p>
-                    {task.phone ? (
-                      <small className="phone-inline">{task.phone}</small>
-                    ) : null}
-                    <TaskTagList tags={task.tags} />
-                    <footer>
-                      <span>
-                        <MapPin size={14} />
-                        {device?.name || "დავაისი ვერ მოიძებნა"}
-                      </span>
-                      <span>
-                        <CalendarDays size={14} />
-                        {task.dueDate}
-                      </span>
-                      <span className="task-card-detail">დეტალურად</span>
-                    </footer>
-                  </Link>
-                );
-              })}
+                    <Tag size={12} />
+                    <span>{tagName}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-            <Link className="rail-link" href="/tasks">
-              ყველა ტასკის ნახვა
-            </Link>
-          </div>
-        </aside>
+          ) : null}
+
+          {deviceTagOptions.length ? (
+            <div className="map-tag-group" aria-label="X-Station ტეგები">
+              <span className="map-tag-label">X-Station</span>
+              <div className="map-tag-chips">
+                {deviceTagOptions.map((tagName) => (
+                  <button
+                    key={tagName}
+                    className={`tag-toggle compact ${selectedDeviceTags.includes(tagName) ? "active" : ""}`}
+                    type="button"
+                    onClick={() => toggleDeviceTag(tagName)}
+                  >
+                    <Tag size={12} />
+                    <span>{tagName}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </section>
+        ) : null}
       </div>
+      </div>
+
+      <aside
+        className="map-panel map-rail"
+        data-open={railExpanded ? "true" : "false"}
+        aria-label="მიმდინარე დავალებები"
+      >
+        <header className="map-rail-head">
+          <div className="map-rail-title">
+            <h2>მიმდინარე დავალებები</h2>
+            <span className="map-rail-count">{plannedTasks.length}</span>
+            <button
+              className="map-rail-toggle"
+              type="button"
+              onClick={toggleRail}
+              aria-expanded={railExpanded}
+              aria-controls="dashboard-rail-list"
+              aria-label={railExpanded ? "დაკეცვა" : "გაშლა"}
+              title={railExpanded ? "დაკეცვა" : "გაშლა"}
+            >
+              {railExpanded ? (
+                <ChevronUp size={15} />
+              ) : (
+                <ChevronDown size={15} />
+              )}
+            </button>
+          </div>
+          <button
+            className="map-rail-add"
+            type="button"
+            onClick={() => {
+              setTaskSaveError("");
+              setShowCreateTask(true);
+            }}
+            aria-label="ახალი ტასკი"
+            title="ახალი ტასკი"
+          >
+            <Plus size={16} strokeWidth={2.4} />
+          </button>
+        </header>
+
+        {railExpanded ? (
+        <>
+        <div className="map-rail-scroll" id="dashboard-rail-list">
+          {hasPlannedTasks ? null : (
+            <p className="muted">დაგეგმილი დავალება არ არის.</p>
+          )}
+          <div className="task-list">
+            {plannedTasks.map((task) => {
+              const device = deviceMap.get(task.deviceId);
+              const firstUser = userMap.get(task.assigneeIds[0]);
+              const displayTitle = withoutDeviceCodes(task.title, [
+                device?.code,
+              ]);
+              const displayIssue = withoutDeviceCodes(task.issue, [
+                device?.code,
+              ]);
+              return (
+                <Link
+                  key={task.id}
+                  className={`task-card task-card-link priority-${task.priority}`}
+                  href={`/tasks/${task.id}`}
+                  style={{ borderInlineStartColor: firstUser?.color }}
+                >
+                  <div className="task-card-top">
+                    {task.problemReportId ? (
+                      <span
+                        className={`issue-indicator ${getIssueIndicatorState(task)}`}
+                        aria-label="პრობლემის ინდიკატორი"
+                      />
+                    ) : null}
+                    <div className="avatar-stack">
+                      {task.assigneeIds.map((userId) => {
+                        const user = userMap.get(userId);
+                        return user ? (
+                          <span
+                            key={user.id}
+                            className="avatar small"
+                            style={{ backgroundColor: user.color }}
+                          >
+                            {user.initials}
+                          </span>
+                        ) : null;
+                      })}
+                    </div>
+                    <span className={`status-pill ${task.status}`}>
+                      {statusLabels[task.status]}
+                    </span>
+                  </div>
+                  <h3>{displayTitle}</h3>
+                  <p>{displayIssue}</p>
+                  {task.phone ? (
+                    <small className="phone-inline">{task.phone}</small>
+                  ) : null}
+                  <TaskTagList tags={task.tags} />
+                  <footer>
+                    <span>
+                      <MapPin size={14} />
+                      {device?.name || "ბაღი ვერ მოიძებნა"}
+                    </span>
+                    <span>
+                      <CalendarDays size={14} />
+                      {task.dueDate}
+                    </span>
+                    <span className="task-card-detail">დეტალურად</span>
+                  </footer>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+
+        <Link className="map-rail-link" href="/tasks">
+          ყველა ტასკის ნახვა
+        </Link>
+        </>
+        ) : null}
+      </aside>
 
       {showCreateTask ? (
         <div

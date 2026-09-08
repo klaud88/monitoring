@@ -11,6 +11,7 @@ import {
   getUsers,
   normalizeDeviceGroupCode,
 } from "@/lib/repositories";
+import { canChooseDueDate } from "@/lib/working-days";
 
 export default async function ProblemReportsPage() {
   const cookieStore = await cookies();
@@ -40,6 +41,7 @@ export default async function ProblemReportsPage() {
       devices={visibleDevices}
       users={users}
       initialTags={taskTags}
+      canChooseDueDate={canChooseDueDate(user?.role)}
       permissions={{
         create: hasPermission(user, "problem_reports.create"),
         edit: hasPermission(user, "problem_reports.edit"),

@@ -5,6 +5,7 @@ import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { getFirstAllowedPath } from "@/lib/navigation";
 import {
   ensureTodayOfflineSnapshot,
+  getDailyOfflineLevels,
   getDevices,
   getMonitoredDevices,
   getOfflineSnapshots,
@@ -17,12 +18,14 @@ export default async function OfflineRecordsPage() {
     redirect(getFirstAllowedPath(user));
   }
 
-  const [, devices, snapshots, monitoredDevices] = await Promise.all([
-    ensureTodayOfflineSnapshot(),
-    getDevices(),
-    getOfflineSnapshots(),
-    getMonitoredDevices({ includeInactive: true }),
-  ]);
+  const [, devices, snapshots, monitoredDevices, dailyLevels] =
+    await Promise.all([
+      ensureTodayOfflineSnapshot(),
+      getDevices(),
+      getOfflineSnapshots(),
+      getMonitoredDevices({ includeInactive: true }),
+      getDailyOfflineLevels(),
+    ]);
   const activeDevices = devices.filter((device) => !device.isExcluded);
 
   return (
@@ -30,6 +33,8 @@ export default async function OfflineRecordsPage() {
       initialDevices={activeDevices}
       initialSnapshots={snapshots}
       initialMonitoredDevices={monitoredDevices}
+      dailyLevels={dailyLevels}
+      userId={user?.id ?? "anonymous"}
     />
   );
 }
