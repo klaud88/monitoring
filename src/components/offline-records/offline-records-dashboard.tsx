@@ -19,6 +19,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useConfirmDialog } from "@/components/common/confirm-dialog";
+import { FiltersToggle } from "@/components/common/filters-toggle";
 import { recordAudit } from "@/lib/client-audit";
 import type { DailyOfflineEntry, DailyOfflineLevel } from "@/lib/repositories";
 import type {
@@ -91,6 +92,7 @@ export function OfflineRecordsDashboard({
   const [toDate, setToDate] = useState(defaultToDate);
   const [threshold, setThreshold] = useState(10);
   const [query, setQuery] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [deviceSort, setDeviceSort] = useState<DeviceSortMode>("offline");
   const [historyDeviceId, setHistoryDeviceId] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -996,29 +998,39 @@ export function OfflineRecordsDashboard({
             <h2>მოწყობილობები</h2>
             <span className="count-pill">{selectedDeviceIds.length}</span>
           </div>
-          <div className="search-field">
-            <Search size={18} />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="ძებნა სახელით ან ID-ით"
+          <div
+            className="table-toolbar"
+            data-filters-open={filtersOpen ? "true" : "false"}
+          >
+            <div className="search-field">
+              <Search size={18} />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="ძებნა სახელით ან ID-ით"
+              />
+            </div>
+            <FiltersToggle
+              open={filtersOpen}
+              count={deviceSort === "offline" ? 0 : 1}
+              onToggle={() => setFiltersOpen((current) => !current)}
             />
+            <label className="select-control offline-sort-control">
+              <Filter size={17} />
+              <select
+                value={deviceSort}
+                onChange={(event) =>
+                  setDeviceSort(event.target.value as DeviceSortMode)
+                }
+              >
+                <option value="offline">Offline</option>
+                <option value="online">Online</option>
+                <option value="monitoring">მონიტორინგი</option>
+                <option value="az">A-Z</option>
+                <option value="za">Z-A</option>
+              </select>
+            </label>
           </div>
-          <label className="select-control offline-sort-control">
-            <Filter size={17} />
-            <select
-              value={deviceSort}
-              onChange={(event) =>
-                setDeviceSort(event.target.value as DeviceSortMode)
-              }
-            >
-              <option value="offline">Offline</option>
-              <option value="online">Online</option>
-              <option value="monitoring">მონიტორინგი</option>
-              <option value="az">A-Z</option>
-              <option value="za">Z-A</option>
-            </select>
-          </label>
           <div className="offline-monitor-actions">
             <button
               className="primary-button"

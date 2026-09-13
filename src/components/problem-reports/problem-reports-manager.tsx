@@ -16,7 +16,9 @@ import {
   X,
 } from "lucide-react";
 import { useConfirmDialog } from "@/components/common/confirm-dialog";
+import { FiltersToggle } from "@/components/common/filters-toggle";
 import { TaskTagPicker } from "@/components/tasks/task-tag-picker";
+import { formatShortDate } from "@/lib/display";
 import { mergeTags } from "@/lib/tags";
 import { workingDayDueDate } from "@/lib/working-days";
 import { getAssignableTaskUsers } from "@/lib/task-assignees";
@@ -113,6 +115,7 @@ export function ProblemReportsManager({
     ),
   );
   const [query, setQuery] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all");
   const [deviceFilter, setDeviceFilter] = useState("all");
   const [editingReportId, setEditingReportId] = useState<string | null>(null);
@@ -144,12 +147,11 @@ export function ProblemReportsManager({
     () => new Map(users.map((user) => [user.id, user])),
     [users],
   );
-  const visibleReports = useMemo(() => {
+  /** Everything except the status filter, so the status chips can show counts. */
+  const scopedReports = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return reports.filter((report) => {
       const device = deviceMap.get(report.deviceId);
-      const matchesStatus =
-        statusFilter === "all" || report.status === statusFilter;
       const matchesDevice =
         deviceFilter === "all" ||
         report.deviceGroupCode === deviceFilter ||
@@ -165,9 +167,30 @@ export function ProblemReportsManager({
         gardenName.toLowerCase().includes(normalized) ||
         device?.name.toLowerCase().includes(normalized);
 
-      return matchesStatus && matchesDevice && matchesQuery;
+      return matchesDevice && matchesQuery;
     });
-  }, [deviceFilter, deviceMap, query, reports, statusFilter]);
+  }, [deviceFilter, deviceMap, query, reports]);
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<TaskStatus, number> = {
+      planned: 0,
+      in_progress: 0,
+      blocked: 0,
+      done: 0,
+    };
+    for (const report of scopedReports) {
+      counts[report.status] += 1;
+    }
+    return counts;
+  }, [scopedReports]);
+
+  const visibleReports = useMemo(
+    () =>
+      scopedReports.filter(
+        (report) => statusFilter === "all" || report.status === statusFilter,
+      ),
+    [scopedReports, statusFilter],
+  );
 
   const doneCount = reports.filter((report) => report.status === "done").length;
   const overdueCount = reports.filter(isOverdueReport).length;
@@ -414,7 +437,7 @@ export function ProblemReportsManager({
         {permissions.create ? (
           <div className="tasks-head-actions">
             <button
-              className="primary-button"
+              className="primary-button create-fab wide"
               type="button"
               onClick={() => {
                 setEditingReportId(null);
@@ -432,7 +455,11 @@ export function ProblemReportsManager({
 
       {error ? <p className="form-error page-error">{error}</p> : null}
 
-      <section className="tasks-toolbar" aria-label="ფილტრები">
+      <section
+        className="tasks-toolbar"
+        aria-label="ფილტრები"
+        data-filters-open={filtersOpen ? "true" : "false"}
+      >
         <div className="search-field">
           <Search size={17} />
           <input
@@ -441,6 +468,13 @@ export function ProblemReportsManager({
             placeholder="ძებნა"
           />
         </div>
+        <FiltersToggle
+          open={filtersOpen}
+          count={
+            (statusFilter === "all" ? 0 : 1) + (deviceFilter === "all" ? 0 : 1)
+          }
+          onToggle={() => setFiltersOpen((current) => !current)}
+        />
         <label className="select-control">
           <Filter size={16} />
           <select
@@ -472,6 +506,32 @@ export function ProblemReportsManager({
           </select>
         </label>
       </section>
+
+      {/* Phone-width status switch — the same filter the toolbar select drives. */}
+      <div className="status-chips" role="group" aria-label="სტატუსის ფილტრი">
+        <button
+          className={`status-chip${statusFilter === "all" ? " active" : ""}`}
+          type="button"
+          aria-pressed={statusFilter === "all"}
+          onClick={() => setStatusFilter("all")}
+        >
+          ყველა
+          <span className="status-chip-count">{scopedReports.length}</span>
+        </button>
+        {statusOrder.map((status) => (
+          <button
+            key={status}
+            className={`status-chip ${status}${statusFilter === status ? " active" : ""}`}
+            type="button"
+            aria-pressed={statusFilter === status}
+            onClick={() => setStatusFilter(status)}
+          >
+            <span className={`status-dot ${status}`} />
+            {statusLabels[status]}
+            <span className="status-chip-count">{statusCounts[status]}</span>
+          </button>
+        ))}
+      </div>
 
       {editorMode ? (
         <section
@@ -658,7 +718,12 @@ export function ProblemReportsManager({
                         className={`task-row-due${overdue ? " overdue" : ""}`}
                       >
                         <CalendarDays size={13} />
-                        {report.dueDate}
+                        <span className="task-row-due-full">
+                          {report.dueDate}
+                        </span>
+                        <span className="task-row-due-short">
+                          {formatShortDate(report.dueDate)}
+                        </span>
                       </span>
                       <div className="task-row-actions">
                         {canUpdate ? (

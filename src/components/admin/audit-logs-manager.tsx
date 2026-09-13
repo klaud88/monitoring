@@ -10,6 +10,7 @@ import {
   Search,
   Shield,
 } from "lucide-react";
+import { FiltersToggle } from "@/components/common/filters-toggle";
 import type { AuditLogEntry, AuditLogsResult, SessionUser } from "@/lib/types";
 
 const ACTION_LABELS: Record<string, string> = {
@@ -107,6 +108,7 @@ type Props = {
 export function AuditLogsManager({ initial, users }: Props) {
   const [result, setResult] = useState<AuditLogsResult>(initial);
   const [filters, setFilters] = useState<Filters>(emptyFilters);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -163,7 +165,10 @@ export function AuditLogsManager({ initial, users }: Props) {
       </div>
 
       {/* Filters */}
-      <div className="filter-bar audit-filter-bar">
+      <div
+        className="filter-bar audit-filter-bar"
+        data-filters-open={filtersOpen ? "true" : "false"}
+      >
         <div className="field-with-icon search-field">
           <Search size={16} />
           <input
@@ -173,6 +178,17 @@ export function AuditLogsManager({ initial, users }: Props) {
             onChange={(e) => handleFilterChange({ action: e.target.value })}
           />
         </div>
+
+        <FiltersToggle
+          open={filtersOpen}
+          count={
+            (filters.entityType ? 1 : 0) +
+            (filters.userId ? 1 : 0) +
+            (filters.from ? 1 : 0) +
+            (filters.to ? 1 : 0)
+          }
+          onToggle={() => setFiltersOpen((current) => !current)}
+        />
 
         <select
           className="select-control"

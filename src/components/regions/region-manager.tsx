@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { useConfirmDialog } from "@/components/common/confirm-dialog";
+import { FiltersToggle } from "@/components/common/filters-toggle";
 import { TBILISI_CENTER, clampLatLng } from "@/lib/geo";
 import { mergeTags } from "@/lib/tags";
 import type { Device, DeviceStatus, Region } from "@/lib/types";
@@ -63,6 +64,7 @@ export function RegionManager({
   const [devices, setDevices] = useState(initialDevices);
   const [regions, setRegions] = useState(initialRegions);
   const [query, setQuery] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [deviceSort, setDeviceSort] = useState<DeviceSortMode>("az");
   const [regionFilter, setRegionFilter] = useState("all");
   const [selectedFilterTags, setSelectedFilterTags] = useState<string[]>([]);
@@ -713,7 +715,10 @@ export function RegionManager({
         </aside>
 
         <section className="surface">
-          <div className="table-toolbar">
+          <div
+            className="table-toolbar"
+            data-filters-open={filtersOpen ? "true" : "false"}
+          >
             <div className="search-field">
               <Search size={18} />
               <input
@@ -722,6 +727,13 @@ export function RegionManager({
                 placeholder="ძებნა სახელით ან რაიონით"
               />
             </div>
+            <FiltersToggle
+              open={filtersOpen}
+              count={
+                (regionFilter === "all" ? 0 : 1) + selectedFilterTags.length
+              }
+              onToggle={() => setFiltersOpen((current) => !current)}
+            />
             <label className="select-control compact-filter-control">
               <select
                 value={deviceSort}

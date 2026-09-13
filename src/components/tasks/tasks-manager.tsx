@@ -7,6 +7,7 @@ import {
   CalendarDays,
   ChevronDown,
   ChevronUp,
+  Clock,
   Edit3,
   Filter,
   LayoutGrid,
@@ -21,10 +22,11 @@ import {
   X,
 } from "lucide-react";
 import { useConfirmDialog } from "@/components/common/confirm-dialog";
+import { FiltersToggle } from "@/components/common/filters-toggle";
 import { TaskTagPicker } from "@/components/tasks/task-tag-picker";
 import { recordAudit } from "@/lib/client-audit";
 import { findDeviceByName, sortDevicesByName } from "@/lib/device-options";
-import { withoutDeviceCodes } from "@/lib/display";
+import { formatShortDate, withoutDeviceCodes } from "@/lib/display";
 import { mergeTags } from "@/lib/tags";
 import { getAssignableTaskUsers } from "@/lib/task-assignees";
 import type {
@@ -105,6 +107,7 @@ export function TasksManager({
     [users],
   );
   const [viewMode, setViewMode] = useState<ViewMode>("lanes");
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all");
   const [userFilter, setUserFilter] = useState("all");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -137,14 +140,13 @@ export function TasksManager({
     [users],
   );
 
-  const filteredTasks = useMemo(() => {
+  /** Everything except the status filter, so the status chips can show counts. */
+  const scopedTasks = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return tasks.filter((task) => {
       const device = deviceMap.get(task.deviceId);
       const displayTitle = withoutDeviceCodes(task.title, [device?.code]);
       const displayIssue = withoutDeviceCodes(task.issue, [device?.code]);
-      const matchesStatus =
-        statusFilter === "all" || task.status === statusFilter;
       const matchesUser =
         userFilter === "all" || task.assigneeIds.includes(userFilter);
       const matchesTags =
@@ -155,9 +157,36 @@ export function TasksManager({
         displayTitle.toLowerCase().includes(normalized) ||
         displayIssue.toLowerCase().includes(normalized) ||
         device?.name.toLowerCase().includes(normalized);
-      return matchesStatus && matchesUser && matchesTags && matchesQuery;
+      return matchesUser && matchesTags && matchesQuery;
     });
-  }, [deviceMap, query, selectedTags, statusFilter, tasks, userFilter]);
+  }, [deviceMap, query, selectedTags, tasks, userFilter]);
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<TaskStatus, number> = {
+      planned: 0,
+      in_progress: 0,
+      blocked: 0,
+      done: 0,
+    };
+    for (const task of scopedTasks) {
+      counts[task.status] += 1;
+    }
+    return counts;
+  }, [scopedTasks]);
+
+  const filteredTasks = useMemo(
+    () =>
+      scopedTasks.filter(
+        (task) => statusFilter === "all" || task.status === statusFilter,
+      ),
+    [scopedTasks, statusFilter],
+  );
+
+  /** Shown on the phone-width filter button so a collapsed filter stays visible. */
+  const activeFilterCount =
+    (statusFilter === "all" ? 0 : 1) +
+    (userFilter === "all" ? 0 : 1) +
+    selectedTags.length;
 
   const groupedTasks = useMemo(() => {
     const groups: Record<TaskStatus, Task[]> = {
@@ -584,7 +613,7 @@ export function TasksManager({
           </div>
           {permissions.create ? (
             <button
-              className="primary-button"
+              className="primary-button create-fab"
               type="button"
               onClick={() => {
                 setEditingTaskId(null);
@@ -601,7 +630,11 @@ export function TasksManager({
 
       {error ? <p className="form-error page-error">{error}</p> : null}
 
-      <section className="tasks-toolbar" aria-label="ფილტრები">
+      <section
+        className="tasks-toolbar"
+        aria-label="ფილტრები"
+        data-filters-open={filtersOpen ? "true" : "false"}
+      >
         <div className="search-field">
           <Search size={17} />
           <input
@@ -610,6 +643,11 @@ export function TasksManager({
             placeholder="ძებნა"
           />
         </div>
+        <FiltersToggle
+          open={filtersOpen}
+          count={activeFilterCount}
+          onToggle={() => setFiltersOpen((current) => !current)}
+        />
         <label className="select-control">
           <Filter size={16} />
           <select
@@ -657,6 +695,32 @@ export function TasksManager({
           </>
         ) : null}
       </section>
+
+      {/* Phone-width status switch — the same filter the toolbar select drives. */}
+      <div className="status-chips" role="group" aria-label="სტატუსის ფილტრი">
+        <button
+          className={`status-chip${statusFilter === "all" ? " active" : ""}`}
+          type="button"
+          aria-pressed={statusFilter === "all"}
+          onClick={() => setStatusFilter("all")}
+        >
+          ყველა
+          <span className="status-chip-count">{scopedTasks.length}</span>
+        </button>
+        {statusOrder.map((status) => (
+          <button
+            key={status}
+            className={`status-chip ${status}${statusFilter === status ? " active" : ""}`}
+            type="button"
+            aria-pressed={statusFilter === status}
+            onClick={() => setStatusFilter(status)}
+          >
+            <span className={`status-dot ${status}`} />
+            {statusLabels[status]}
+            <span className="status-chip-count">{statusCounts[status]}</span>
+          </button>
+        ))}
+      </div>
 
       {editorMode ? (
         <section
@@ -1190,7 +1254,11 @@ function TaskRow({
         onChangeStatus={onChangeStatus}
       />
       <span className={`task-row-due${overdue ? " overdue" : ""}`}>
-        {task.dueDate}
+        <Clock className="task-row-due-icon" size={13} strokeWidth={2} />
+        <span className="task-row-due-full">{task.dueDate}</span>
+        <span className="task-row-due-short">
+          {formatShortDate(task.dueDate)}
+        </span>
       </span>
       <div className="task-row-actions">
         {permissions.edit ? (

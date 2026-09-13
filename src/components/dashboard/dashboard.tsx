@@ -113,6 +113,8 @@ export function Dashboard({
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [railOpen, setRailOpen] = useState(true);
   const [showOfflineDevices, setShowOfflineDevices] = useState(false);
+  /** Which panel the phone-width bottom sheet is showing. */
+  const [sheetTab, setSheetTab] = useState<"offline" | "tasks">("tasks");
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [editingDeviceId, setEditingDeviceId] = useState<string | null>(null);
   const [locationSaveError, setLocationSaveError] = useState("");
@@ -686,7 +688,7 @@ export function Dashboard({
   }
 
   return (
-    <div className="dashboard-page map-console">
+    <div className="dashboard-page map-console" data-sheet-tab={sheetTab}>
       <GoogleTbilisiMap
         devices={visibleDevices}
         deviceLocations={deviceLocations}
@@ -1053,6 +1055,30 @@ export function Dashboard({
         </>
         ) : null}
       </aside>
+
+      {/* Phone-width sheet switch; the desktop keeps both panels on screen. */}
+      <div className="map-sheet-tabs" role="group" aria-label="ქვედა პანელი">
+        <button
+          className={`map-sheet-tab${sheetTab === "offline" ? " active" : ""}`}
+          type="button"
+          aria-pressed={sheetTab === "offline"}
+          onClick={() => {
+            setShowOfflineDevices(true);
+            setSheetTab("offline");
+          }}
+        >
+          <i className="status-dot offline" />
+          Offline · {offlineCount}
+        </button>
+        <button
+          className={`map-sheet-tab${sheetTab === "tasks" ? " active" : ""}`}
+          type="button"
+          aria-pressed={sheetTab === "tasks"}
+          onClick={() => setSheetTab("tasks")}
+        >
+          დავალებები · {plannedTasks.length}
+        </button>
+      </div>
 
       {showCreateTask ? (
         <div

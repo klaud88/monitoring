@@ -4,6 +4,8 @@ import { getFirstAllowedPath } from "@/lib/navigation";
 import type { PermissionKey } from "@/lib/types";
 import { MustChangePasswordModal } from "@/components/auth/must-change-password-modal";
 import { AppSidebar } from "./app-sidebar";
+import { MobileNavToggle } from "./mobile-nav-toggle";
+import { MobileWheelNav } from "./mobile-wheel-nav";
 import { NotificationsBell } from "./notifications-bell";
 import { ThemeToggle } from "./theme-toggle";
 
@@ -73,8 +75,15 @@ export async function AppShell({
           }}
         />
 
+        <MobileWheelNav
+          allowedHrefs={allowedHrefs}
+          canFormOne={canFormOne}
+          canOfflineMonitor={canOfflineMonitor}
+        />
+
         <div className="app-body">
           <header className="app-topbar">
+            <MobileNavToggle />
             <div className="app-topbar-actions">
               <ThemeToggle />
               {canOfflineMonitor || canFormOne ? (

@@ -30,3 +30,33 @@ export function withoutDeviceCodes(
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+const shortMonths = [
+  "იან",
+  "თებ",
+  "მარ",
+  "აპრ",
+  "მაი",
+  "ივნ",
+  "ივლ",
+  "აგვ",
+  "სექ",
+  "ოქტ",
+  "ნოე",
+  "დეკ",
+];
+
+/**
+ * "2026-09-08" -> "08 სექ". Phone cards have no room for the full date, and the
+ * year is almost always the current one; the full value stays in the DOM for
+ * wider screens.
+ */
+export function formatShortDate(value: string) {
+  const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return value.trim();
+  }
+
+  const month = shortMonths[Number(match[2]) - 1];
+  return month ? `${match[3]} ${month}` : value.trim();
+}
