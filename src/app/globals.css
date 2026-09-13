@@ -8255,37 +8255,55 @@ button.matrix-cell:hover {
   }
 
   /*
-   * A faint ball half-tucked behind the right edge says the menu lives there.
-   * Its touch zone is larger than the ball but no taller than it needs to be,
-   * so the rest of the edge still pans the map.
+   * A faint ball half-tucked behind the right edge, its chevron pointing the
+   * way the wheel comes out, says the menu lives there. Its touch zone is larger than the tab but no
+   * taller than it needs to be, so the rest of the edge still pans the map.
    */
   .wheel-edge {
     position: fixed;
     top: 50%;
     right: 0;
     z-index: 960;
-    width: 32px;
+    width: 40px;
     height: 96px;
     margin-top: -48px;
     touch-action: none;
     -webkit-tap-highlight-color: transparent;
   }
 
-  /* drawn as the visible half only, so nothing hangs past the viewport */
+  /*
+   * Drawn as the visible half only, so nothing hangs past the viewport. The
+   * see-through part is the ball itself; the chevron stays dark enough to read.
+   */
   .wheel-handle {
     position: fixed;
     top: 50%;
     right: 0;
     z-index: 960;
-    width: 9px;
-    height: 18px;
-    margin-top: -9px;
-    border: 1px solid var(--line);
+    width: 24px;
+    height: 48px;
+    margin-top: -24px;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--glass-line) 70%, transparent);
     border-right: 0;
-    border-radius: 9px 0 0 9px;
+    border-radius: 24px 0 0 24px;
     pointer-events: none;
-    background: var(--muted-2);
-    box-shadow: -1px 0 6px rgba(9, 18, 30, 0.16);
+    background: color-mix(in srgb, var(--glass-bg) 60%, transparent);
+    backdrop-filter: blur(8px);
+    color: color-mix(in srgb, var(--ink) 60%, var(--ink-muted));
+    box-shadow: -1px 0 6px rgba(9, 18, 30, 0.1);
+  }
+
+  /*
+   * The chevron fills only the middle quarter of its box, so the box is drawn
+   * wider than the ball and centred; the ball clips the empty margins.
+   */
+  .wheel-handle svg {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    opacity: 60%;
   }
 
   /* the disc overhangs the right edge, so the layer clips it to the screen */

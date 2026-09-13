@@ -7,6 +7,7 @@ import {
   BarChart3,
   ClipboardList,
   FileText,
+  ChevronLeft,
   MapPinned,
   MonitorCog,
   ScrollText,
@@ -237,7 +238,7 @@ export function MobileWheelNav({
       // the chip hangs off the disc's inner edge, so it grows leftwards
       tag!.style.transform = `translate(${(centreX - radius - PAD - 10 + shift).toFixed(1)}px, ${centredY.toFixed(1)}px) translate(-100%, -50%) translateX(${(settle * 8 - 8).toFixed(1)}px)`;
 
-      handle!.style.opacity = (0.5 * (1 - state.open)).toFixed(3);
+      handle!.style.opacity = (0.9 * (1 - state.open)).toFixed(3);
       layer!.classList.toggle("is-open", state.open > 0.02);
       edge!.style.pointerEvents = state.open > 0.02 ? "none" : "auto";
       document.documentElement.classList.toggle(
@@ -526,7 +527,9 @@ export function MobileWheelNav({
   return (
     <div className="wheel-root" aria-hidden={false}>
       <div className="wheel-edge" ref={edgeRef} />
-      <span className="wheel-handle" ref={handleRef} />
+      <span className="wheel-handle" ref={handleRef} aria-hidden="true">
+        <ChevronLeft size={30} strokeWidth={2.75} />
+      </span>
 
       <div className="wheel-layer" ref={layerRef} role="menu" aria-label="მთავარი მენიუ">
         <div className="wheel-scrim" ref={scrimRef} />
