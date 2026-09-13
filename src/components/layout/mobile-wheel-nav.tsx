@@ -55,8 +55,10 @@ const wheelItems: WheelItem[] = [
 const STEP = 17;
 /** Angle at which an icon has faded out completely. */
 const FADE = 56;
+/** Size against the first, full-width wheel — small enough to keep the page in view. */
+const SCALE = 0.6;
 /** How far the disc bulges past the centred icon. */
-const PAD = 58;
+const PAD = 58 * SCALE;
 
 function isActivePath(pathname: string | null, href: string) {
   if (!pathname) {
@@ -147,15 +149,23 @@ export function MobileWheelNav({
     let width = 0;
     let height = 0;
     let radius = 0;
+    let reach = 0;
     let centreX = 0;
     let centreY = 0;
     let pixelsPerItem = 1;
 
+    /** x of the point on the arc at `radians`, 0 being the centred icon. */
+    function arcX(radians: number) {
+      return centreX - radius * Math.cos(radians);
+    }
+
     function geometry() {
       width = layer!.clientWidth;
       height = layer!.clientHeight;
-      radius = width * 0.95;
-      centreX = width * 0.34 - radius;
+      radius = width * 0.95 * SCALE;
+      // The centre sits off the right edge, so the arc bulges in from the right.
+      reach = width * 0.34 * SCALE;
+      centreX = width - reach + radius;
       centreY = height * 0.52;
       pixelsPerItem = (radius * STEP * Math.PI) / 180;
 
@@ -169,10 +179,10 @@ export function MobileWheelNav({
       const to = (72 * Math.PI) / 180;
       railPath!.setAttribute(
         "d",
-        `M ${(centreX + radius * Math.cos(from)).toFixed(1)} ${(centreY + radius * Math.sin(from)).toFixed(1)} A ${radius.toFixed(1)} ${radius.toFixed(1)} 0 0 1 ${(centreX + radius * Math.cos(to)).toFixed(1)} ${(centreY + radius * Math.sin(to)).toFixed(1)}`,
+        `M ${arcX(from).toFixed(1)} ${(centreY + radius * Math.sin(from)).toFixed(1)} A ${radius.toFixed(1)} ${radius.toFixed(1)} 0 0 0 ${arcX(to).toFixed(1)} ${(centreY + radius * Math.sin(to)).toFixed(1)}`,
       );
-      mark!.style.marginLeft = `${centreX + radius + PAD - 1.5}px`;
-      mark!.style.marginTop = `${centreY - 15}px`;
+      mark!.style.marginLeft = `${centreX - radius - PAD - 1.5}px`;
+      mark!.style.marginTop = `${centreY - 9}px`;
     }
 
     function clamp(value: number, min: number, max: number) {
@@ -180,14 +190,14 @@ export function MobileWheelNav({
     }
 
     function render() {
-      const shift = (1 - state.open) * (radius * 0.34 + 70);
-      disc!.style.transform = `translateX(${-shift.toFixed(1)}px)`;
+      const shift = (1 - state.open) * (reach + PAD + 16);
+      disc!.style.transform = `translateX(${shift.toFixed(1)}px)`;
       disc!.style.opacity = String(clamp(state.open * 1.15, 0, 1));
       scrim!.style.opacity = (state.open * 0.95).toFixed(3);
       rail!.style.opacity = (state.open * state.open).toFixed(3);
-      rail!.style.transform = `translateX(${-shift.toFixed(1)}px)`;
+      rail!.style.transform = `translateX(${shift.toFixed(1)}px)`;
       mark!.style.opacity = (state.open * state.open * 0.9).toFixed(3);
-      mark!.style.transform = `translateX(${-shift.toFixed(1)}px)`;
+      mark!.style.transform = `translateX(${shift.toFixed(1)}px)`;
 
       const nearest = Math.round(state.offset);
       if (nearest !== state.current) {
@@ -204,7 +214,7 @@ export function MobileWheelNav({
         }
         const degrees = (i - state.offset) * STEP;
         const radians = (degrees * Math.PI) / 180;
-        const x = centreX + radius * Math.cos(radians) - shift;
+        const x = arcX(radians) + shift;
         const y = centreY + radius * Math.sin(radians);
         const falloff = Math.cos(
           Math.min(Math.abs(degrees) / FADE, 1) * (Math.PI / 2),
@@ -224,7 +234,8 @@ export function MobileWheelNav({
       const settle = 1 - Math.min(Math.abs(state.offset - state.current) * 3.4, 1);
       tag!.textContent = items[state.current]?.label ?? "";
       tag!.style.opacity = (settle * state.open * state.open).toFixed(3);
-      tag!.style.transform = `translate(${(centreX + radius + 72 - shift).toFixed(1)}px, ${centredY.toFixed(1)}px) translateY(-50%) translateX(${(8 - settle * 8).toFixed(1)}px)`;
+      // the chip hangs off the disc's inner edge, so it grows leftwards
+      tag!.style.transform = `translate(${(centreX - radius - PAD - 10 + shift).toFixed(1)}px, ${centredY.toFixed(1)}px) translate(-100%, -50%) translateX(${(settle * 8 - 8).toFixed(1)}px)`;
 
       handle!.style.opacity = (0.5 * (1 - state.open)).toFixed(3);
       layer!.classList.toggle("is-open", state.open > 0.02);
@@ -302,7 +313,7 @@ export function MobileWheelNav({
       }
       const p = point(event);
       layer!.setPointerCapture(event.pointerId);
-      if (p.x > centreX + radius + PAD) {
+      if (p.x < centreX - radius - PAD) {
         drag = { mode: "scrim", x0: p.x, y0: p.y, moved: 0, started: performance.now() };
         return;
       }
@@ -331,7 +342,7 @@ export function MobileWheelNav({
       drag.moved = Math.max(drag.moved, Math.hypot(dx, dy));
 
       if (drag.mode === "open") {
-        state.open = clamp(dx / 130, 0, 1);
+        state.open = clamp(-dx / (reach + PAD), 0, 1);
         state.openTarget = state.open;
         render();
         return;
@@ -359,7 +370,7 @@ export function MobileWheelNav({
 
       state.offset = raw;
 
-      if (dx < -70 && Math.abs(dy) < 40) {
+      if (dx > 60 && Math.abs(dy) < 40) {
         drag = null;
         state.openTarget = 0;
         kick();
@@ -380,8 +391,12 @@ export function MobileWheelNav({
       const quick = performance.now() - finished.started < 400;
 
       if (finished.mode === "open") {
+        // a tap on the ball opens the wheel as surely as a swipe does
+        const tapped = quick && finished.moved < 8;
         state.openTarget =
-          state.open > 0.35 || (quick && p.x - finished.x0 > 26) ? 1 : 0;
+          tapped || state.open > 0.35 || (quick && finished.x0 - p.x > 26)
+            ? 1
+            : 0;
       } else if (finished.mode === "scrim") {
         if (finished.moved < 10) {
           state.openTarget = 0;
@@ -548,7 +563,7 @@ export function MobileWheelNav({
               tabIndex={-1}
             >
               <span className="wheel-item-icon">
-                <Icon size={23} strokeWidth={1.8} />
+                <Icon size={15} strokeWidth={1.9} />
               </span>
               {count > 0 ? (
                 <span className="wheel-item-badge">

@@ -8254,39 +8254,46 @@ button.matrix-cell:hover {
     --wheel-bg: rgba(8, 14, 24, 0.92);
   }
 
-  /* the swipe zone and its resting affordance */
+  /*
+   * A faint ball half-tucked behind the right edge says the menu lives there.
+   * Its touch zone is larger than the ball but no taller than it needs to be,
+   * so the rest of the edge still pans the map.
+   */
   .wheel-edge {
     position: fixed;
-    top: 0;
-    bottom: 0;
-    left: 0;
+    top: 50%;
+    right: 0;
     z-index: 960;
-    width: 28px;
+    width: 32px;
+    height: 96px;
+    margin-top: -48px;
     touch-action: none;
+    -webkit-tap-highlight-color: transparent;
   }
 
+  /* drawn as the visible half only, so nothing hangs past the viewport */
   .wheel-handle {
     position: fixed;
     top: 50%;
-    left: 5px;
+    right: 0;
     z-index: 960;
-    width: 4px;
-    height: 78px;
-    margin-top: -39px;
-    border-radius: 3px;
+    width: 9px;
+    height: 18px;
+    margin-top: -9px;
+    border: 1px solid var(--line);
+    border-right: 0;
+    border-radius: 9px 0 0 9px;
     pointer-events: none;
-    background: linear-gradient(
-      180deg,
-      transparent,
-      var(--muted-2),
-      transparent
-    );
+    background: var(--muted-2);
+    box-shadow: -1px 0 6px rgba(9, 18, 30, 0.16);
   }
 
+  /* the disc overhangs the right edge, so the layer clips it to the screen */
   .wheel-layer {
     position: fixed;
     inset: 0;
     z-index: 970;
+    overflow: hidden;
     pointer-events: none;
   }
 
@@ -8316,8 +8323,8 @@ button.matrix-cell:hover {
     background: var(--wheel-bg);
     border: 1px solid var(--wheel-line);
     box-shadow:
-      0 0 60px rgba(4, 10, 20, 0.45),
-      inset -22px 0 46px rgba(255, 255, 255, 0.045);
+      0 0 36px rgba(4, 10, 20, 0.45),
+      inset 13px 0 28px rgba(255, 255, 255, 0.045);
     backdrop-filter: blur(22px) saturate(1.2);
   }
 
@@ -8338,10 +8345,10 @@ button.matrix-cell:hover {
     top: 0;
     left: 0;
     width: 3px;
-    height: 30px;
+    height: 18px;
     border-radius: 2px;
     background: var(--wheel-accent);
-    box-shadow: 0 0 14px rgba(77, 163, 255, 0.85);
+    box-shadow: 0 0 9px rgba(77, 163, 255, 0.85);
   }
 
   .wheel-item {
@@ -8350,8 +8357,9 @@ button.matrix-cell:hover {
     left: 0;
     display: grid;
     place-items: center;
-    width: 50px;
-    height: 50px;
+    /* the button stays a full tap target around the smaller visible chip */
+    width: 44px;
+    height: 44px;
     margin: 0;
     padding: 0;
     border: 0;
@@ -8365,9 +8373,9 @@ button.matrix-cell:hover {
   .wheel-item-icon {
     display: grid;
     place-items: center;
-    width: 50px;
-    height: 50px;
-    border-radius: 16px;
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.07);
     transition:
@@ -8384,24 +8392,24 @@ button.matrix-cell:hover {
     background: rgba(77, 163, 255, 0.2);
     border-color: rgba(77, 163, 255, 0.62);
     box-shadow:
-      0 10px 26px rgba(9, 60, 120, 0.5),
-      0 0 0 5px rgba(77, 163, 255, 0.09);
+      0 6px 16px rgba(9, 60, 120, 0.5),
+      0 0 0 3px rgba(77, 163, 255, 0.09);
   }
 
   .wheel-item-badge {
     position: absolute;
-    top: -2px;
-    right: -3px;
+    top: 0;
+    right: 0;
     display: grid;
     place-items: center;
-    min-width: 18px;
-    height: 18px;
-    padding: 0 5px;
-    border: 2px solid #0e1a29;
-    border-radius: 10px;
+    min-width: 15px;
+    height: 15px;
+    padding: 0 4px;
+    border: 1.5px solid #0e1a29;
+    border-radius: 8px;
     background: #dc2626;
     color: #fff;
-    font-size: 10.5px;
+    font-size: 9px;
     font-weight: 600;
     line-height: 1;
     font-variant-numeric: tabular-nums;
@@ -8413,19 +8421,19 @@ button.matrix-cell:hover {
 
   .wheel-item:focus-visible .wheel-item-icon {
     border-color: var(--wheel-accent);
-    box-shadow: 0 0 0 3px rgba(77, 163, 255, 0.45);
+    box-shadow: 0 0 0 2px rgba(77, 163, 255, 0.45);
   }
 
   .wheel-tag {
     position: absolute;
     top: 0;
     left: 0;
-    padding: 6px 12px;
+    padding: 5px 10px;
     border: 1px solid rgba(255, 255, 255, 0.16);
-    border-radius: 9px;
+    border-radius: 8px;
     background: #152438;
     color: #fff;
-    font-size: 12px;
+    font-size: 11.5px;
     font-weight: 600;
     white-space: nowrap;
     pointer-events: none;
@@ -8893,21 +8901,59 @@ html.wheel-locked body {
     justify-content: flex-end;
   }
 
-  /* --- რუკა: floating filters on top, one sheet at the bottom --- */
+  /*
+   * --- რუკა: the map fills the screen, filters float on top, one sheet below.
+   * The stacked tablet layout gives the map a fixed 460px, so the phone puts
+   * it back to full-bleed. The sheet rests lowered to just its tab bar.
+   */
 
   .map-console {
+    --sheet-tabs-h: 55px;
+    --sheet-h: min(280px, 40dvh);
+    --sheet-space: var(--sheet-tabs-h);
+    position: relative;
+    display: block;
     margin: -12px;
     height: calc(100dvh - 56px);
+    overflow: hidden;
+    background: var(--surface-muted);
+  }
+
+  .map-console[data-sheet-open="true"] {
+    --sheet-space: calc(var(--sheet-tabs-h) + var(--sheet-h));
+  }
+
+  .map-console .map-canvas {
+    position: absolute;
+    inset: 0;
+    height: auto;
+    min-height: 0;
+    border: 0;
+    border-radius: 0;
+  }
+
+  /* the status key and the map badge ride just above the sheet */
+  .map-console .map-status-legend {
+    left: 10px;
+    bottom: calc(var(--sheet-space) + 10px);
+  }
+
+  .map-console .map-mode-badge {
+    left: 10px;
+    bottom: calc(var(--sheet-space) + 56px);
   }
 
   .map-console-top {
+    position: absolute;
     left: 10px;
     right: 10px;
     top: 10px;
     bottom: auto;
+    display: flex;
     flex-direction: column;
     gap: 8px;
-    max-height: calc(100% - 372px);
+    max-height: calc(100% - var(--sheet-space) - 20px);
+    pointer-events: none;
   }
 
   .map-panels-left,
@@ -8915,6 +8961,13 @@ html.wheel-locked body {
     flex: 0 0 auto;
     width: 100%;
     max-height: none;
+  }
+
+  /* an opened filter panel scrolls inside the room the sheet leaves */
+  .map-panels-filter {
+    flex-shrink: 1;
+    min-height: 0;
+    overflow-y: auto;
   }
 
   /* the offline panel leaves this column for the sheet, so nothing is clipped */
@@ -8940,7 +8993,7 @@ html.wheel-locked body {
     position: fixed;
     left: 0;
     right: 0;
-    bottom: 300px;
+    bottom: 0;
     z-index: 8;
     display: flex;
     gap: 6px;
@@ -8971,9 +9024,29 @@ html.wheel-locked body {
     color: var(--tint-blue-ink);
   }
 
-  /* both panels share one sheet; the switch decides which one is up */
-  .map-offline-panel,
-  .map-rail {
+  .map-sheet-toggle {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border: 1px solid var(--panel-line);
+    border-radius: 8px;
+    background: var(--surface-soft);
+    color: var(--ink-muted);
+  }
+
+  .map-console[data-sheet-open="true"] .map-sheet-tabs {
+    bottom: var(--sheet-h);
+  }
+
+  /*
+   * Both panels share one sheet; the switch decides which one is up. Scoped to
+   * the console so a collapsed rail's `bottom: auto` cannot lift it off the edge.
+   */
+  .map-console .map-offline-panel,
+  .map-console .map-rail {
     position: fixed;
     left: 0;
     right: 0;
@@ -8981,12 +9054,14 @@ html.wheel-locked body {
     bottom: 0;
     z-index: 7;
     width: auto;
-    height: 300px;
+    height: var(--sheet-h);
     border-width: 1px 0 0;
     border-radius: 0;
     box-shadow: none;
   }
 
+  .map-console[data-sheet-open="false"] .map-offline-panel,
+  .map-console[data-sheet-open="false"] .map-rail,
   .map-console[data-sheet-tab="tasks"] .map-offline-panel,
   .map-console[data-sheet-tab="offline"] .map-rail {
     display: none;

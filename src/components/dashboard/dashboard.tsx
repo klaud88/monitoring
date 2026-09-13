@@ -115,6 +115,8 @@ export function Dashboard({
   const [showOfflineDevices, setShowOfflineDevices] = useState(false);
   /** Which panel the phone-width bottom sheet is showing. */
   const [sheetTab, setSheetTab] = useState<"offline" | "tasks">("tasks");
+  /** Whether that sheet is raised; it starts lowered so the map gets the screen. */
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [editingDeviceId, setEditingDeviceId] = useState<string | null>(null);
   const [locationSaveError, setLocationSaveError] = useState("");
@@ -459,6 +461,13 @@ export function Dashboard({
   function toggleOfflineDevices() {
     const next = !showOfflineDevices;
     setShowOfflineDevices(next);
+    // on a phone the list lives in the bottom sheet
+    if (next) {
+      setSheetTab("offline");
+      setSheetOpen(true);
+    } else if (sheetTab === "offline") {
+      setSheetOpen(false);
+    }
     void recordAudit(
       "dashboard.offline_devices_toggle",
       "dashboard",
@@ -468,6 +477,19 @@ export function Dashboard({
         count: offlineDevices.length,
       },
     );
+  }
+
+  /** Raises the phone sheet on `tab`; tapping the tab already up lowers it. */
+  function pickSheetTab(tab: "offline" | "tasks") {
+    if (sheetOpen && sheetTab === tab) {
+      setSheetOpen(false);
+      return;
+    }
+    if (tab === "offline") {
+      setShowOfflineDevices(true);
+    }
+    setSheetTab(tab);
+    setSheetOpen(true);
   }
 
   function toggleAssignee(userId: string) {
@@ -688,7 +710,11 @@ export function Dashboard({
   }
 
   return (
-    <div className="dashboard-page map-console" data-sheet-tab={sheetTab}>
+    <div
+      className="dashboard-page map-console"
+      data-sheet-tab={sheetTab}
+      data-sheet-open={sheetOpen ? "true" : "false"}
+    >
       <GoogleTbilisiMap
         devices={visibleDevices}
         deviceLocations={deviceLocations}
@@ -774,7 +800,10 @@ export function Dashboard({
               <button
                 className="icon-button"
                 type="button"
-                onClick={() => setShowOfflineDevices(false)}
+                onClick={() => {
+                  setShowOfflineDevices(false);
+                  setSheetOpen(false);
+                }}
                 aria-label="ჩამონათვალის დახურვა"
               >
                 <X size={16} />
@@ -1059,24 +1088,31 @@ export function Dashboard({
       {/* Phone-width sheet switch; the desktop keeps both panels on screen. */}
       <div className="map-sheet-tabs" role="group" aria-label="ქვედა პანელი">
         <button
-          className={`map-sheet-tab${sheetTab === "offline" ? " active" : ""}`}
+          className={`map-sheet-tab${sheetOpen && sheetTab === "offline" ? " active" : ""}`}
           type="button"
-          aria-pressed={sheetTab === "offline"}
-          onClick={() => {
-            setShowOfflineDevices(true);
-            setSheetTab("offline");
-          }}
+          aria-pressed={sheetOpen && sheetTab === "offline"}
+          onClick={() => pickSheetTab("offline")}
         >
           <i className="status-dot offline" />
           Offline · {offlineCount}
         </button>
         <button
-          className={`map-sheet-tab${sheetTab === "tasks" ? " active" : ""}`}
+          className={`map-sheet-tab${sheetOpen && sheetTab === "tasks" ? " active" : ""}`}
           type="button"
-          aria-pressed={sheetTab === "tasks"}
-          onClick={() => setSheetTab("tasks")}
+          aria-pressed={sheetOpen && sheetTab === "tasks"}
+          onClick={() => pickSheetTab("tasks")}
         >
           დავალებები · {plannedTasks.length}
+        </button>
+        <button
+          className="map-sheet-toggle"
+          type="button"
+          aria-expanded={sheetOpen}
+          aria-label={sheetOpen ? "პანელის ჩაკეცვა" : "პანელის გაშლა"}
+          title={sheetOpen ? "პანელის ჩაკეცვა" : "პანელის გაშლა"}
+          onClick={() => pickSheetTab(sheetTab)}
+        >
+          {sheetOpen ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
         </button>
       </div>
 
