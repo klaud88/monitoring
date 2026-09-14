@@ -9198,6 +9198,32 @@ html.wheel-locked body {
   }
 }
 
+/*
+ * A task card never grows past its column: the tag row wraps and long words
+ * break. Without this, a card with several tags widened the whole phone page
+ * and left blank space on the right.
+ */
+.task-column,
+.task-card2,
+.task-card2 > * {
+  min-width: 0;
+}
+
+.task-card2 {
+  grid-template-columns: minmax(0, 1fr);
+  overflow-wrap: anywhere;
+}
+
+.task-card2 .task-row-chips {
+  display: flex;
+  flex-wrap: wrap;
+  margin-right: 0;
+}
+
+.task-card2-meta {
+  flex-wrap: wrap;
+}
+
 /* The changed parameter sits between the employee and the date. */
 .origin-row {
   grid-template-columns: 132px minmax(0, 1fr) minmax(0, 1.6fr) auto;
