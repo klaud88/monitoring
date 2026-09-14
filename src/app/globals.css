@@ -9259,3 +9259,37 @@ html.wheel-locked body {
     display: none;
   }
 }
+
+/* ==========================================================================
+   Phone top bar: logout
+   ========================================================================== */
+
+/* On desktop the logout button stays in the side rail. */
+.topbar-logout-form {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  /* The side rail is hidden on phones, so logout sits in the top bar. */
+  .topbar-logout-form {
+    display: flex;
+  }
+
+  .topbar-logout {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    min-height: 40px;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--red);
+    box-shadow: var(--shadow-soft);
+  }
+
+  .topbar-logout:active {
+    background: var(--tint-red);
+  }
+}

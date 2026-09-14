@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { LogOut } from "lucide-react";
 import { SESSION_COOKIE, hasPermission, isAdmin, verifySessionToken } from "@/lib/auth";
 import { getFirstAllowedPath } from "@/lib/navigation";
 import type { PermissionKey } from "@/lib/types";
@@ -97,6 +98,21 @@ export async function AppShell({
                   canEditFormOne={hasPermission(user, "form_one.edit")}
                 />
               ) : null}
+              {/* Phones hide the side rail and its logout, so it lives here. */}
+              <form
+                className="topbar-logout-form"
+                action="/api/auth/logout"
+                method="post"
+              >
+                <button
+                  className="topbar-logout"
+                  type="submit"
+                  aria-label="გასვლა"
+                  title="გასვლა"
+                >
+                  <LogOut size={17} strokeWidth={1.9} />
+                </button>
+              </form>
             </div>
           </header>
 
