@@ -4,6 +4,7 @@ import { logAudit } from "@/lib/audit";
 import { filterRegisteredTaskTags } from "@/lib/catalog";
 import { createTask, getTaskTagNames, getTasks, getUsers } from "@/lib/repositories";
 import { filterAssignableTaskUserIds } from "@/lib/task-assignees";
+import { taskDueDateForPriority } from "@/lib/working-days";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
 
 const taskStatuses: TaskStatus[] = ["planned", "in_progress", "blocked", "done"];
@@ -30,9 +31,14 @@ export async function POST(request: NextRequest) {
   const comment = String(body?.comment || "").trim();
   const phone = String(body?.phone || "").trim();
   const deviceId = String(body?.deviceId || "");
-  const dueDate = String(body?.dueDate || "");
   const status = taskStatuses.includes(body?.status) ? body.status : "planned";
-  const priority = priorities.includes(body?.priority) ? body.priority : "normal";
+  const priority: TaskPriority = priorities.includes(body?.priority)
+    ? body.priority
+    : "normal";
+  /* Without an explicit deadline a task gets its priority's default:
+     10 / 5 / 2 working days, or the same day when it is urgent. */
+  const dueDate =
+    String(body?.dueDate || "").trim() || taskDueDateForPriority(priority);
   const requestedAssigneeIds = Array.isArray(body?.assigneeIds)
     ? body.assigneeIds.map(String).filter(Boolean)
     : [];

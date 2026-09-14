@@ -10,6 +10,7 @@ import {
   updateTask,
 } from "@/lib/repositories";
 import { filterAssignableTaskUserIds } from "@/lib/task-assignees";
+import { diffTrackedTaskFields } from "@/lib/task-history";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
 
 const taskStatuses: TaskStatus[] = ["planned", "in_progress", "blocked", "done"];
@@ -99,7 +100,15 @@ export async function PATCH(
     action: "task.update",
     entityType: "task",
     entityId: id,
-    metadata: { status, priority, deviceId, assigneeIds, tags },
+    metadata: {
+      status,
+      priority,
+      deviceId,
+      assigneeIds,
+      tags,
+      /* Status, priority, assignee and deadline changes feed the task history. */
+      changes: diffTrackedTaskFields(existingTask, task),
+    },
     ipAddress: request.headers.get("x-forwarded-for") ?? undefined,
     userAgent: request.headers.get("user-agent") ?? undefined
   });

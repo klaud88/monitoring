@@ -18,6 +18,7 @@ import {
   Wifi,
   X,
 } from "lucide-react";
+import { taskDueDateForPriority } from "@/lib/working-days";
 import { GoogleTbilisiMap } from "@/components/dashboard/google-tbilisi-map";
 import { TaskTagPicker } from "@/components/tasks/task-tag-picker";
 import { regions } from "@/lib/catalog";
@@ -138,7 +139,7 @@ export function Dashboard({
     assigneeIds: initialAssignableUsers[0] ? [initialAssignableUsers[0].id] : [],
     priority: "normal",
     tags: [],
-    dueDate: today,
+    dueDate: taskDueDateForPriority("normal"),
   });
 
   const userMap = useMemo(
@@ -607,7 +608,7 @@ export function Dashboard({
       assigneeIds: form.assigneeIds,
       priority: "normal",
       tags: [],
-      dueDate: today,
+      dueDate: taskDueDateForPriority("normal"),
     });
     setShowCreateTask(false);
 
@@ -1233,12 +1234,14 @@ export function Dashboard({
                   <span>პრიორიტეტი</span>
                   <select
                     value={form.priority}
-                    onChange={(event) =>
+                    onChange={(event) => {
+                      const priority = event.target.value as TaskPriority;
                       setForm((current) => ({
                         ...current,
-                        priority: event.target.value as TaskPriority,
-                      }))
-                    }
+                        priority,
+                        dueDate: taskDueDateForPriority(priority),
+                      }));
+                    }}
                   >
                     {Object.entries(priorityLabels).map(([value, label]) => (
                       <option key={value} value={value}>

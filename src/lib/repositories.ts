@@ -5310,6 +5310,7 @@ export type EntityAuditEntry = {
   userId: string;
   userName?: string;
   userRole?: string;
+  metadata?: unknown;
 };
 
 /**
@@ -5323,7 +5324,7 @@ export async function getEntityAuditTrail(
   const rows = await queryRows<RowDataPacket>(
     `
       select
-        al.id, al.user_id, al.action, al.created_at,
+        al.id, al.user_id, al.action, al.metadata, al.created_at,
         u.name as user_name, r.name as user_role
       from audit_logs al
       left join users u on u.id = al.user_id
@@ -5349,7 +5350,21 @@ export async function getEntityAuditTrail(
     userId: String(row.user_id),
     userName: row.user_name ? String(row.user_name) : undefined,
     userRole: row.user_role ? String(row.user_role) : undefined,
+    metadata: parseAuditMetadata(row.metadata),
   }));
+}
+
+/** mysql2 returns a JSON column either parsed or as text, depending on setup. */
+function parseAuditMetadata(value: unknown): unknown {
+  if (typeof value !== "string") {
+    return value ?? undefined;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
 }
 
 export async function getAuditLogs(opts: {

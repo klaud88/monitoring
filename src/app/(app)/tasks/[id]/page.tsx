@@ -24,6 +24,7 @@ import {
   getTasks,
   getUsers,
 } from "@/lib/repositories";
+import { readTaskChanges, type TaskChange } from "@/lib/task-history";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
 
 const editActions = new Set([
@@ -38,7 +39,12 @@ const editActionLabels: Record<string, string> = {
   "task.assign": "შემსრულებლის შეცვლა",
 };
 
-const maxEditRows = 8;
+const changeFieldLabels: Record<TaskChange["field"], string> = {
+  status: "სტატუსი",
+  priority: "პრიორიტეტი",
+  assignees: "შემსრ.",
+  dueDate: "ვადა",
+};
 
 const statusLabels: Record<TaskStatus, string> = {
   planned: "დაგეგმილი",
@@ -79,10 +85,12 @@ export default async function TaskDetailsPage({
   }
 
   const createdEntry = auditTrail.find((entry) => entry.action === "task.create");
+  /* Every edit and status change is listed, newest first. */
   const editEntries = auditTrail
     .filter((entry) => editActions.has(entry.action))
-    .reverse();
-  const shownEdits = editEntries.slice(0, maxEditRows);
+    .reverse()
+    .map((entry) => ({ ...entry, changes: readTaskChanges(entry.metadata) }));
+  const userNames = new Map(users.map((item) => [item.id, item.name]));
 
   const device = devices.find((item) => item.id === task.deviceId);
   const assignees = users.filter((item) => task.assigneeIds.includes(item.id));
@@ -93,6 +101,7 @@ export default async function TaskDetailsPage({
   const overdue =
     task.status !== "done" &&
     task.dueDate < new Date().toISOString().slice(0, 10);
+  const urgentActive = task.priority === "urgent" && task.status !== "done";
 
   return (
     <div className="task-detail">
@@ -104,7 +113,9 @@ export default async function TaskDetailsPage({
           </Link>
           <h1 className="detail-title">{displayTitle}</h1>
           <div className="detail-badges">
-            <span className={`detail-badge status ${task.status}`}>
+            <span
+              className={`detail-badge status ${task.status}${urgentActive ? " urgent-alert" : ""}`}
+            >
               <i className={`status-dot ${task.status}`} />
               {statusLabels[task.status]}
             </span>
@@ -238,18 +249,29 @@ export default async function TaskDetailsPage({
                 <span className="origin-user">
                   {createdEntry?.userName ?? "უცნობი"}
                 </span>
+                <span className="origin-change" />
                 <span className="origin-time">
                   {formatDateTime(createdEntry?.createdAt ?? task.createdAt)}
                 </span>
               </div>
 
-              {shownEdits.map((entry) => (
+              {editEntries.map((entry) => (
                 <div key={entry.id} className="origin-row">
                   <span className="origin-kind edit">
-                    {editActionLabels[entry.action] ?? "რედაქტირება"}
+                    {getEditKindLabel(entry.action, entry.changes)}
                   </span>
                   <span className="origin-user">
                     {entry.userName ?? "უცნობი"}
+                  </span>
+                  <span className="origin-change">
+                    {entry.changes.map((change) => (
+                      <span key={change.field} className="origin-change-line">
+                        <b>{changeFieldLabels[change.field]}:</b>{" "}
+                        {formatChangeSide(change, "from", userNames)}
+                        {" → "}
+                        {formatChangeSide(change, "to", userNames)}
+                      </span>
+                    ))}
                   </span>
                   <span className="origin-time">
                     {formatDateTime(entry.createdAt)}
@@ -259,11 +281,6 @@ export default async function TaskDetailsPage({
 
               {editEntries.length === 0 ? (
                 <p className="muted">რედაქტირება არ ყოფილა.</p>
-              ) : null}
-              {editEntries.length > shownEdits.length ? (
-                <p className="muted">
-                  კიდევ {editEntries.length - shownEdits.length} ჩანაწერი
-                </p>
               ) : null}
             </div>
 
@@ -370,6 +387,42 @@ export default async function TaskDetailsPage({
       </div>
     </div>
   );
+}
+
+/** A save that only moved the status reads as a status change. */
+function getEditKindLabel(action: string, changes: TaskChange[]) {
+  if (
+    action === "task.update" &&
+    changes.length > 0 &&
+    changes.every((change) => change.field === "status")
+  ) {
+    return "სტატუსის შეცვლა";
+  }
+
+  return editActionLabels[action] ?? "რედაქტირება";
+}
+
+function formatChangeSide(
+  change: TaskChange,
+  side: "from" | "to",
+  userNames: Map<string, string>,
+): string {
+  if (change.field === "status") {
+    return statusLabels[change[side]];
+  }
+
+  if (change.field === "priority") {
+    return priorityLabels[change[side]];
+  }
+
+  if (change.field === "dueDate") {
+    return change[side] ? formatDate(change[side]) : "—";
+  }
+
+  const ids = change[side];
+  return ids.length
+    ? ids.map((id) => userNames.get(id) ?? "წაშლილი მომხმარებელი").join(", ")
+    : "—";
 }
 
 function formatDeviceStatus(status: "online" | "offline" | "error") {

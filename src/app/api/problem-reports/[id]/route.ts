@@ -6,11 +6,13 @@ import {
   deleteProblemReport,
   getProblemReportById,
   getTaskTagNames,
+  getTasks,
   getUsers,
   normalizeDeviceGroupCode,
   updateProblemReport,
 } from "@/lib/repositories";
 import { filterAssignableTaskUserIds } from "@/lib/task-assignees";
+import { diffTrackedTaskFields } from "@/lib/task-history";
 import { canChooseDueDate } from "@/lib/working-days";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
 
@@ -84,6 +86,10 @@ export async function PATCH(
     );
   }
 
+  const linkedTaskBefore = existing.taskId
+    ? (await getTasks()).find((task) => task.id === existing.taskId)
+    : undefined;
+
   const report = await updateProblemReport(
     id,
     {
@@ -120,6 +126,28 @@ export async function PATCH(
     ipAddress: request.headers.get("x-forwarded-for") ?? undefined,
     userAgent: request.headers.get("user-agent") ?? undefined,
   });
+
+  /* The linked task mirrors this report, so its status, priority, assignee
+     and deadline changes are written into the task's own history too. */
+  if (linkedTaskBefore) {
+    const linkedTaskAfter = (await getTasks()).find(
+      (task) => task.id === linkedTaskBefore.id,
+    );
+    const changes = linkedTaskAfter
+      ? diffTrackedTaskFields(linkedTaskBefore, linkedTaskAfter)
+      : [];
+    if (changes.length) {
+      await logAudit({
+        userId: user!.id,
+        action: "task.update",
+        entityType: "task",
+        entityId: linkedTaskBefore.id,
+        metadata: { source: "problem_report", problemReportId: id, changes },
+        ipAddress: request.headers.get("x-forwarded-for") ?? undefined,
+        userAgent: request.headers.get("user-agent") ?? undefined,
+      });
+    }
+  }
 
   return NextResponse.json({ report });
 }

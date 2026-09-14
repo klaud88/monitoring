@@ -8730,29 +8730,23 @@ html.wheel-locked body {
   }
 
   /*
-   * The card shows the status the way the design does — a coloured dot and a
-   * quiet label. The select stays underneath, so the status is still tappable.
+   * On a phone the status is a tappable chip: tinted by status, outlined and
+   * with a chevron, so it reads as a control you press to change. Someone
+   * without the edit right sees a quiet dot and label instead.
    */
-  .task-status-pill,
-  .task-status-pill.planned,
-  .task-status-pill.in_progress,
-  .task-status-pill.blocked,
-  .task-status-pill.done {
+  .task-status-pill {
     grid-area: status;
     justify-self: start;
     width: auto;
-    gap: 5px;
-    padding: 0;
-    background: none;
-    color: var(--ink-muted);
+    gap: 6px;
+    padding-left: 11px;
+    border: 1px solid currentColor;
+    border: 1px solid color-mix(in srgb, currentColor 45%, transparent);
+    transition: transform 0.12s ease;
   }
 
-  .task-status-pill.planned select,
-  .task-status-pill.in_progress select,
-  .task-status-pill.blocked select,
-  .task-status-pill.done select {
-    background: none;
-    color: var(--ink-muted);
+  .task-status-pill.editable:active {
+    transform: scale(0.96);
   }
 
   .task-status-pill::before {
@@ -8780,17 +8774,37 @@ html.wheel-locked body {
     background: var(--green);
   }
 
-  .task-status-pill select {
+  .task-status-pill.planned select,
+  .task-status-pill.in_progress select,
+  .task-status-pill.blocked select,
+  .task-status-pill.done select {
     width: auto;
-    height: 20px;
-    min-height: 20px;
-    padding: 0;
-    font-size: 11.5px;
-    font-weight: 500;
+    height: 32px;
+    min-height: 32px;
+    padding: 0 28px 0 0;
+    background: transparent;
+    color: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
   }
 
   .task-status-pill svg {
-    display: none;
+    right: 10px;
+  }
+
+  .task-status-pill:not(.editable) {
+    padding-left: 0;
+    border-color: transparent;
+    background: none;
+    color: var(--ink-muted);
+  }
+
+  .task-status-pill:not(.editable) select {
+    height: 20px;
+    min-height: 20px;
+    padding: 0;
+    color: var(--ink-muted);
+    font-weight: 500;
   }
 
   .task-row-due {
@@ -9137,5 +9151,85 @@ html.wheel-locked body {
   .form-one-record-item {
     grid-template-columns: 32px minmax(0, 1fr) minmax(0, 1.25fr) 52px;
     min-width: 0;
+  }
+}
+
+/* ==========================================================================
+   Tasks: urgent status alert, phone view, change history
+   ========================================================================== */
+
+/* An urgent task's status blinks red until it is marked done. */
+@keyframes task-urgent-blink {
+  0%,
+  100% {
+    background-color: #dc2626;
+    color: #fff;
+    box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.45);
+  }
+
+  50% {
+    background-color: var(--tint-red);
+    color: var(--tint-red-ink);
+    box-shadow: 0 0 0 5px rgba(220, 38, 38, 0);
+  }
+}
+
+.task-status-pill.urgent-alert,
+.detail-badge.status.urgent-alert {
+  animation: task-urgent-blink 1.2s ease-in-out infinite;
+}
+
+.task-status-pill.urgent-alert select {
+  background: transparent;
+  color: inherit;
+}
+
+.task-status-pill.urgent-alert::before,
+.detail-badge.status.urgent-alert .status-dot {
+  background: currentColor;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-status-pill.urgent-alert,
+  .detail-badge.status.urgent-alert {
+    animation: none;
+    background-color: #dc2626;
+    color: #fff;
+  }
+}
+
+/* The changed parameter sits between the employee and the date. */
+.origin-row {
+  grid-template-columns: 132px minmax(0, 1fr) minmax(0, 1.6fr) auto;
+}
+
+.origin-change {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  font-size: 12.5px;
+}
+
+.origin-change-line {
+  overflow-wrap: anywhere;
+}
+
+.origin-change-line b {
+  color: var(--ink-muted);
+  font-weight: 600;
+}
+
+@media (max-width: 760px) {
+  /* Phones always use the columns view, so the switch is hidden. */
+  .view-switch {
+    display: none;
+  }
+
+  .origin-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .origin-change:empty {
+    display: none;
   }
 }

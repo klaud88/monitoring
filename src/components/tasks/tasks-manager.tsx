@@ -24,11 +24,11 @@ import {
 import { useConfirmDialog } from "@/components/common/confirm-dialog";
 import { FiltersToggle } from "@/components/common/filters-toggle";
 import { TaskTagPicker } from "@/components/tasks/task-tag-picker";
-import { recordAudit } from "@/lib/client-audit";
 import { findDeviceByName, sortDevicesByName } from "@/lib/device-options";
 import { formatShortDate, withoutDeviceCodes } from "@/lib/display";
 import { mergeTags } from "@/lib/tags";
 import { getAssignableTaskUsers } from "@/lib/task-assignees";
+import { taskDueDateForPriority } from "@/lib/working-days";
 import type {
   AppUser,
   Device,
@@ -85,6 +85,8 @@ const priorityLabels: Record<TaskPriority, string> = {
 
 const statusOrder: TaskStatus[] = ["planned", "in_progress", "blocked", "done"];
 const viewStorageKey = "bagebi-tasks-view";
+/** Phones always show the columns view; the view switch is hidden there. */
+const phoneMediaQuery = "(max-width: 760px)";
 
 export function TasksManager({
   initialTasks,
@@ -107,6 +109,7 @@ export function TasksManager({
     [users],
   );
   const [viewMode, setViewMode] = useState<ViewMode>("lanes");
+  const [isPhone, setIsPhone] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all");
   const [userFilter, setUserFilter] = useState("all");
@@ -128,7 +131,7 @@ export function TasksManager({
     assigneeIds: [] as string[],
     priority: "normal" as TaskPriority,
     tags: [] as string[],
-    dueDate: new Date().toISOString().slice(0, 10),
+    dueDate: taskDueDateForPriority("normal"),
   }));
 
   const deviceMap = useMemo(
@@ -230,6 +233,14 @@ export function TasksManager({
     } catch {
       // localStorage may be unavailable in restricted contexts.
     }
+  }, []);
+
+  useEffect(() => {
+    const media = window.matchMedia(phoneMediaQuery);
+    const sync = () => setIsPhone(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
   }, []);
 
   useEffect(() => {
@@ -340,6 +351,7 @@ export function TasksManager({
         phone: "",
         assigneeIds: [],
         tags: [],
+        dueDate: taskDueDateForPriority(current.priority),
       }));
       setCreateOpen(false);
     } else {
@@ -355,16 +367,27 @@ export function TasksManager({
       return;
     }
 
+    const previousStatus = tasks.find((task) => task.id === taskId)?.status;
+    setError("");
     setTasks((current) =>
       current.map((task) => (task.id === taskId ? { ...task, status } : task)),
     );
-    recordAudit("task.status_local_change", "task", taskId, { status });
 
-    await fetch(`/api/tasks/${taskId}`, {
+    /* The server records who changed the status, when, and from/to what. */
+    const response = await fetch(`/api/tasks/${taskId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status }),
     }).catch(() => null);
+
+    if (!response?.ok && previousStatus) {
+      setTasks((current) =>
+        current.map((task) =>
+          task.id === taskId ? { ...task, status: previousStatus } : task,
+        ),
+      );
+      setError("სტატუსის შეცვლა ვერ მოხერხდა.");
+    }
   }
 
   function startEditTask(task: Task) {
@@ -558,6 +581,8 @@ export function TasksManager({
   const visibleStatuses = statusOrder.filter(
     (status) => statusFilter === "all" || status === statusFilter,
   );
+
+  const effectiveViewMode: ViewMode = isPhone ? "columns" : viewMode;
 
   const rowProps = {
     deviceMap,
@@ -798,12 +823,16 @@ export function TasksManager({
                 <span>პრიორიტეტი</span>
                 <select
                   value={draft.priority}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    /* Priority sets the deadline: 10 / 5 / 2 working days,
+                       or today for urgent. The date can still be edited. */
+                    const priority = event.target.value as TaskPriority;
                     setDraft((current) => ({
                       ...current,
-                      priority: event.target.value as TaskPriority,
-                    }))
-                  }
+                      priority,
+                      dueDate: taskDueDateForPriority(priority),
+                    }));
+                  }}
                 >
                   {Object.entries(priorityLabels).map(([value, label]) => (
                     <option key={value} value={value}>
@@ -1077,7 +1106,7 @@ export function TasksManager({
         </section>
       ) : null}
 
-      {viewMode === "columns" ? (
+      {effectiveViewMode === "columns" ? (
         <div className="task-columns">
           {visibleStatuses.map((status) => (
             <div
@@ -1118,7 +1147,7 @@ export function TasksManager({
             <span />
           </div>
 
-          {viewMode === "lanes" ? (
+          {effectiveViewMode === "lanes" ? (
             <div className="task-modules">
               {visibleStatuses.map((status) => (
                 <section
@@ -1384,8 +1413,14 @@ function StatusPill({
   canEdit: boolean;
   onChangeStatus: (taskId: string, status: TaskStatus) => void;
 }) {
+  /* An urgent task's status blinks red until it is done. */
+  const urgentActive = task.priority === "urgent" && task.status !== "done";
+
   return (
-    <label className={`task-status-pill ${task.status}`}>
+    <label
+      className={`task-status-pill ${task.status}${canEdit ? " editable" : ""}${urgentActive ? " urgent-alert" : ""}`}
+      title={canEdit ? "დააჭირეთ სტატუსის შესაცვლელად" : undefined}
+    >
       <span className="sr-only">სტატუსი</span>
       <select
         value={task.status}
@@ -1400,7 +1435,7 @@ function StatusPill({
           </option>
         ))}
       </select>
-      <ChevronDown size={12} strokeWidth={2.4} />
+      {canEdit ? <ChevronDown size={12} strokeWidth={2.4} /> : null}
     </label>
   );
 }

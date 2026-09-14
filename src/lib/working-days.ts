@@ -1,3 +1,5 @@
+import type { TaskPriority } from "./types";
+
 /**
  * Deadlines for reported problems are counted in working days: weekends are
  * skipped, public holidays are not (there is no holiday calendar in the app).
@@ -35,4 +37,23 @@ export function workingDayDueDate(
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${date.getFullYear()}-${month}-${day}`;
+}
+
+/**
+ * Default deadline for a new task, counted in working days from today:
+ * low → 10, normal → 5, high → 2, urgent → the same day.
+ */
+export const TASK_PRIORITY_DUE_WORKING_DAYS = {
+  low: 10,
+  normal: 5,
+  high: 2,
+  urgent: 0,
+} as const satisfies Record<TaskPriority, number>;
+
+/** `YYYY-MM-DD` deadline for a new task with the given priority. */
+export function taskDueDateForPriority(
+  priority: TaskPriority,
+  from: Date = new Date(),
+) {
+  return workingDayDueDate(TASK_PRIORITY_DUE_WORKING_DAYS[priority], from);
 }
