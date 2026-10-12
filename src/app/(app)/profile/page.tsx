@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
+import { TwoFactorSettings } from "@/components/profile/two-factor-settings";
 
 export default async function ProfilePage() {
   const cookieStore = await cookies();
@@ -42,6 +43,13 @@ export default async function ProfilePage() {
               </span>
             ))}
           </div>
+        </div>
+      </section>
+
+      <section className="content-grid">
+        <div className="surface">
+          <h2>ორფაქტორიანი ავტორიზაცია</h2>
+          <TwoFactorSettings initialEnabled={Boolean(user?.twoFactorEnabled)} />
         </div>
       </section>
     </>

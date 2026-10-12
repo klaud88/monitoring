@@ -16,6 +16,7 @@ import {
   UserRoundCheck,
 } from "lucide-react";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
+import { getGardenDisplayName } from "@/lib/device-options";
 import { withoutDeviceCodes } from "@/lib/display";
 import { getFirstAllowedPath } from "@/lib/navigation";
 import {
@@ -25,6 +26,7 @@ import {
   getUsers,
 } from "@/lib/repositories";
 import { readTaskChanges, type TaskChange } from "@/lib/task-history";
+import { resolveTaskVisibilityScope } from "@/lib/task-visibility";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
 
 const editActions = new Set([
@@ -72,8 +74,9 @@ export default async function TaskDetailsPage({
     redirect(getFirstAllowedPath(user));
   }
 
+  const scope = resolveTaskVisibilityScope(user);
   const [tasks, devices, users, auditTrail] = await Promise.all([
-    getTasks(),
+    getTasks(scope),
     getDevices(),
     getUsers(),
     getEntityAuditTrail("task", id),
@@ -133,7 +136,7 @@ export default async function TaskDetailsPage({
             <MapPin size={14} />
             {device ? (
               <Link className="inline-link" href={`/devices/${device.id}`}>
-                {device.name}
+                {getGardenDisplayName(device)}
               </Link>
             ) : (
               <span>ბაღი ვერ მოიძებნა</span>
@@ -341,7 +344,7 @@ export default async function TaskDetailsPage({
                   <dt>ბაღი</dt>
                   <dd>
                     <Link className="inline-link" href={`/devices/${device.id}`}>
-                      {device.name}
+                      {getGardenDisplayName(device)}
                     </Link>
                   </dd>
                 </div>

@@ -319,6 +319,7 @@ model tasks {
   status         tasks_status     @default(planned)
   priority       tasks_priority   @default(normal)
   tags           Json?
+  is_info        Boolean          @default(false)
   starts_at      DateTime?        @db.DateTime(0)
   due_date       DateTime         @db.Date
   created_by     String?          @db.VarChar(64)
@@ -344,6 +345,10 @@ model users {
   device_group_code    String?  @db.VarChar(80)
   is_active            Boolean  @default(true)
   must_change_password Boolean  @default(false)
+  twofa_enabled        Boolean  @default(false)
+  twofa_secret         String?  @db.VarChar(64)
+  twofa_backup_codes   Json?
+  twofa_enrolled_at    DateTime? @db.Timestamp(0)
   created_at     DateTime         @default(now()) @db.Timestamp(0)
   updated_at     DateTime         @default(now()) @db.Timestamp(0)
   audit_logs     audit_logs[]

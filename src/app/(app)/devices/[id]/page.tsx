@@ -24,6 +24,7 @@ import {
 import { withoutDeviceCodes } from "@/lib/display";
 import { getFirstAllowedPath } from "@/lib/navigation";
 import { getDevices, getTasks, getUsers } from "@/lib/repositories";
+import { resolveTaskVisibilityScope } from "@/lib/task-visibility";
 import { mergeTags } from "@/lib/tags";
 import type {
   AppUser,
@@ -78,7 +79,7 @@ export default async function DeviceDetailsPage({
 
   const [devices, tasks, users] = await Promise.all([
     getDevices(),
-    getTasks(),
+    getTasks(resolveTaskVisibilityScope(user)),
     getUsers(),
   ]);
   const device = devices.find((item) => item.id === id);

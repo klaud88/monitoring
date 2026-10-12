@@ -9,6 +9,7 @@ import {
   getTasks,
   getUsers,
 } from "@/lib/repositories";
+import { resolveTaskVisibilityScope } from "@/lib/task-visibility";
 
 export default async function DashboardPage() {
   const cookieStore = await cookies();
@@ -19,7 +20,7 @@ export default async function DashboardPage() {
 
   const [devices, tasks, users, taskTags] = await Promise.all([
     getDevices(),
-    getTasks(),
+    getTasks(resolveTaskVisibilityScope(user)),
     getUsers(),
     getTaskTagNames(),
   ]);

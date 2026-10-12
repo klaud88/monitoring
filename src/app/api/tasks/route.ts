@@ -4,6 +4,7 @@ import { logAudit } from "@/lib/audit";
 import { filterRegisteredTaskTags } from "@/lib/catalog";
 import { createTask, getTaskTagNames, getTasks, getUsers } from "@/lib/repositories";
 import { filterAssignableTaskUserIds } from "@/lib/task-assignees";
+import { resolveTaskVisibilityScope } from "@/lib/task-visibility";
 import { taskDueDateForPriority } from "@/lib/working-days";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
 
@@ -16,7 +17,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   }
 
-  return NextResponse.json({ tasks: await getTasks() });
+  const scope = resolveTaskVisibilityScope(user);
+  return NextResponse.json({ tasks: await getTasks(scope) });
 }
 
 export async function POST(request: NextRequest) {
@@ -47,6 +49,7 @@ export async function POST(request: NextRequest) {
     await getUsers(),
   );
   const tags = filterRegisteredTaskTags(body?.tags, await getTaskTagNames());
+  const info = Boolean(body?.info);
 
   if (!title || !issue || !deviceId || !dueDate) {
     return NextResponse.json({ message: "Missing required task fields" }, { status: 400 });
@@ -62,6 +65,7 @@ export async function POST(request: NextRequest) {
     status,
     priority,
     tags,
+    info,
     startsAt: body?.startsAt ? String(body.startsAt) : undefined,
     dueDate
   });

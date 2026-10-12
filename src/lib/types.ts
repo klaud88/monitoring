@@ -24,6 +24,9 @@ export type PermissionAction =
   | "assign"
   | "approve"
   | "alerts"
+  | "view_all"
+  | "view_assigned"
+  | "info"
   | "comment_edit"
   | "completion_request"
   | "completion_response"
@@ -54,6 +57,9 @@ export type AppUser = {
   deviceGroupCode?: string;
   passwordHash?: string;
   mustChangePassword?: boolean;
+  twoFactorEnabled?: boolean;
+  /** Base32 TOTP secret — server/internal only, never sent to the client. */
+  twoFactorSecret?: string;
 };
 
 export type ProblemRecord = {
@@ -105,6 +111,9 @@ export type Task = {
   dueDate: string;
   createdAt: string;
   problemReportId?: string;
+  /** Marked "informational" — tasks.info permission holders see these
+   *  regardless of their own full/assigned-only scope (green INFO badge). */
+  info?: boolean;
 };
 
 export type ProblemReport = {
@@ -238,7 +247,7 @@ export type AuditLogsResult = {
   pageSize: number;
 };
 
-export type SessionUser = Omit<AppUser, "passwordHash">;
+export type SessionUser = Omit<AppUser, "passwordHash" | "twoFactorSecret">;
 
 export type AppRole = {
   id: string;

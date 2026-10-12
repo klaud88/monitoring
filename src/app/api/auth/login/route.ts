@@ -1,26 +1,20 @@
 import bcrypt from "bcryptjs";
 import { NextResponse, type NextRequest } from "next/server";
-import { createSessionToken, sanitizeUser, SESSION_COOKIE, verifyPassword } from "@/lib/auth";
+import { createPendingTwoFactorToken, createSessionToken, sanitizeUser, SESSION_COOKIE, verifyPassword } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { getUserByLogin } from "@/lib/repositories";
-import { shouldUseSecureCookie } from "@/lib/session";
-import { clearLoginAttempts, recordFailedLogin } from "@/lib/rate-limit";
+import { PENDING_2FA_COOKIE, shouldUseSecureCookie } from "@/lib/session";
+import { clearLoginAttempts, getClientIp, recordFailedLogin } from "@/lib/rate-limit";
 
 const DUMMY_HASH = "$2a$10$dummy.hash.to.prevent.timing.oracle.attacks.XXXXXXXX";
 
-function getClientIp(request: NextRequest): string {
-  return (
-    request.headers.get("cf-connecting-ip") ??
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    "unknown"
-  );
-}
-
+// Rate limiting for this exact path is enforced in middleware.ts, which runs
+// before this handler and shares the same in-memory attempt counter.
 export async function POST(request: NextRequest) {
+  const ip = getClientIp(request);
   const body = await request.json().catch(() => null);
   const identifier = String(body?.email || body?.identifier || "").trim().toLowerCase();
   const password = String(body?.password || "");
-  const ip = getClientIp(request);
 
   if (!identifier || !password) {
     return NextResponse.json({ message: "ელფოსტა/X-Station და პაროლი აუცილებელია." }, { status: 400 });
@@ -47,6 +41,25 @@ export async function POST(request: NextRequest) {
   }
 
   clearLoginAttempts(ip);
+
+  // Password checked out, but the account still needs its authenticator-app
+  // code before a real session is issued. Hand back a short-lived pending
+  // cookie instead of the full session one.
+  if (user.twoFactorEnabled) {
+    const pendingToken = await createPendingTwoFactorToken(user.id);
+    const response = NextResponse.json({ twoFactorRequired: true });
+
+    response.cookies.set(PENDING_2FA_COOKIE, pendingToken, {
+      httpOnly: true,
+      sameSite: "strict",
+      secure: shouldUseSecureCookie(),
+      path: "/",
+      maxAge: 60 * 5,
+    });
+
+    return response;
+  }
+
   const sessionUser = sanitizeUser(user);
   const token = await createSessionToken(sessionUser);
   const response = NextResponse.json({

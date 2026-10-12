@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { KeyRound, LogIn, Mail } from "lucide-react";
+import { KeyRound, LogIn, Mail, ShieldCheck } from "lucide-react";
 import { canAccessPath, getFirstAllowedPath } from "@/lib/navigation";
 import type { SessionUser } from "@/lib/types";
 import { SystemLoader } from "@/components/common/system-loader";
@@ -32,13 +32,20 @@ const LOGIN_PHASES = [
 ];
 
 function getLoginMessage(p: number) {
-  return LOGIN_PHASES.find((ph) => p < ph.until)?.text ?? "მონაცემების ჩატვირთვა";
+  return (
+    LOGIN_PHASES.find((ph) => p < ph.until)?.text ?? "მონაცემების ჩატვირთვა"
+  );
 }
 
 export function LoginForm({ nextPath }: LoginFormProps) {
   const router = useRouter();
-  const [identifier, setIdentifier] = useState("admin@local.ge");
-  const [password, setPassword] = useState("admin123");
+  const [identifier, setIdentifier] = useState("");
+  const [password, setPassword] = useState("");
+  // "credentials" is email/password; a 2FA account moves to "code" once the
+  // password checks out, and only then is a real session issued.
+  const [stage, setStage] = useState<"credentials" | "code">("credentials");
+  const [code, setCode] = useState("");
+  const [useBackupCode, setUseBackupCode] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [loginProgress, setLoginProgress] = useState(0);
@@ -63,10 +70,22 @@ export function LoginForm({ nextPath }: LoginFormProps) {
     }
 
     raf.current = requestAnimationFrame(step);
-    return () => { if (raf.current !== null) cancelAnimationFrame(raf.current); };
+    return () => {
+      if (raf.current !== null) cancelAnimationFrame(raf.current);
+    };
   }, [loading]);
 
-  async function submit(event: React.SyntheticEvent<HTMLFormElement>) {
+  function goToDestination(user?: SessionUser) {
+    const target = canAccessPath(user, redirectTo)
+      ? redirectTo
+      : getFirstAllowedPath(user);
+    router.replace(target);
+    router.refresh();
+  }
+
+  async function submitCredentials(
+    event: React.SyntheticEvent<HTMLFormElement>,
+  ) {
     event.preventDefault();
     setError("");
     setLoading(true);
@@ -74,7 +93,7 @@ export function LoginForm({ nextPath }: LoginFormProps) {
     const response = await fetch("/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: identifier, password })
+      body: JSON.stringify({ email: identifier, password }),
     });
 
     if (!response.ok) {
@@ -86,66 +105,158 @@ export function LoginForm({ nextPath }: LoginFormProps) {
 
     const payload = (await response.json().catch(() => null)) as {
       user?: SessionUser;
+      twoFactorRequired?: boolean;
     } | null;
-    const target = canAccessPath(payload?.user, redirectTo)
-      ? redirectTo
-      : getFirstAllowedPath(payload?.user);
-    router.replace(target);
-    router.refresh();
+
+    if (payload?.twoFactorRequired) {
+      setLoading(false);
+      setStage("code");
+      return;
+    }
+
+    goToDestination(payload?.user);
+  }
+
+  async function submitCode(event: React.SyntheticEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setLoading(true);
+
+    const response = await fetch("/api/auth/login/2fa", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      setLoading(false);
+      setError(payload?.message || "კოდი არასწორია.");
+      return;
+    }
+
+    const payload = (await response.json().catch(() => null)) as {
+      user?: SessionUser;
+    } | null;
+
+    goToDestination(payload?.user);
   }
 
   return (
     <>
       {loading ? (
-        <div style={{
-          position: "fixed",
-          inset: 0,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "#0b1220",
-          zIndex: 9999,
-        }}>
-          <SystemLoader progress={loginProgress} message={getLoginMessage(loginProgress)} />
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "#0b1220",
+            zIndex: 9999,
+          }}
+        >
+          <SystemLoader
+            progress={loginProgress}
+            message={getLoginMessage(loginProgress)}
+          />
         </div>
       ) : null}
 
-      <form className="login-form" onSubmit={submit}>
-        <label>
-          <span>ელფოსტა ან X-Station</span>
-          <div className="field-with-icon">
-            <Mail size={18} />
-            <input
-              type="text"
-              value={identifier}
-              onChange={(event) => setIdentifier(event.target.value)}
-              autoComplete="username"
-              required
-            />
+      {stage === "credentials" ? (
+        <form className="login-form" onSubmit={submitCredentials}>
+          <label>
+            <span>ელფოსტა ან X-Station</span>
+            <div className="field-with-icon">
+              <Mail size={18} />
+              <input
+                type="text"
+                value={identifier}
+                onChange={(event) => setIdentifier(event.target.value)}
+                autoComplete="username"
+                required
+              />
+            </div>
+          </label>
+
+          <label>
+            <span>პაროლი</span>
+            <div className="field-with-icon">
+              <KeyRound size={18} />
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete="current-password"
+                required
+              />
+            </div>
+          </label>
+
+          {error ? <p className="form-error">{error}</p> : null}
+
+          <button className="primary-button" type="submit" disabled={loading}>
+            <LogIn size={18} />
+            <span>შესვლა</span>
+          </button>
+        </form>
+      ) : (
+        <form className="login-form" onSubmit={submitCode}>
+          <label>
+            <span>
+              {useBackupCode ? "სარეზერვო კოდი" : "ავტორიზაციის კოდი"}
+            </span>
+            <div className="field-with-icon">
+              <ShieldCheck size={18} />
+              <input
+                type="text"
+                value={code}
+                onChange={(event) => setCode(event.target.value)}
+                placeholder={useBackupCode ? "XXXXX-XXXXX" : "123456"}
+                inputMode={useBackupCode ? "text" : "numeric"}
+                autoComplete="one-time-code"
+                autoFocus
+                required
+              />
+            </div>
+          </label>
+
+          {error ? <p className="form-error">{error}</p> : null}
+
+          <button className="primary-button" type="submit" disabled={loading}>
+            <ShieldCheck size={18} />
+            <span>დადასტურება</span>
+          </button>
+
+          <div className="login-form-actions">
+            <button
+              type="button"
+              className="login-form-link"
+              onClick={() => {
+                setUseBackupCode((v) => !v);
+                setCode("");
+                setError("");
+              }}
+            >
+              {useBackupCode
+                ? "ავტორიზაციის კოდის გამოყენება"
+                : "სარეზერვო კოდის გამოყენება"}
+            </button>
+
+            <button
+              type="button"
+              className="login-form-link"
+              onClick={() => {
+                setStage("credentials");
+                setCode("");
+                setError("");
+              }}
+            >
+              ← უკან
+            </button>
           </div>
-        </label>
-
-        <label>
-          <span>პაროლი</span>
-          <div className="field-with-icon">
-            <KeyRound size={18} />
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete="current-password"
-              required
-            />
-          </div>
-        </label>
-
-        {error ? <p className="form-error">{error}</p> : null}
-
-        <button className="primary-button" type="submit" disabled={loading}>
-          <LogIn size={18} />
-          <span>შესვლა</span>
-        </button>
-      </form>
+        </form>
+      )}
     </>
   );
 }

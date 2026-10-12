@@ -18,6 +18,9 @@ const ACTION_LABELS: Record<string, string> = {
   "auth.login.failed":             "შესვლის მცდელობა",
   "auth.logout":                   "გამოსვლა",
   "auth.change_password":          "პაროლის შეცვლა",
+  "auth.login.2fa_failed":         "2FA კოდი არასწორია",
+  "auth.2fa.enabled":              "2FA ჩაირთო",
+  "auth.2fa.disabled":             "2FA გამოირთო",
   "user.create":                   "მომხმარებელი შეიქმნა",
   "user.update":                   "მომხმარებელი განახლდა",
   "user.delete":                   "მომხმარებელი წაიშალა",
@@ -64,6 +67,8 @@ const ENTITY_OPTIONS = [
 
 const ACTION_BADGE_CLASS: Record<string, string> = {
   "auth.login.failed":   "badge-danger",
+  "auth.login.2fa_failed": "badge-danger",
+  "auth.2fa.disabled":   "badge-danger",
   "user.delete":         "badge-danger",
   "task.delete":         "badge-danger",
   "form_one.delete":     "badge-danger",
@@ -71,6 +76,7 @@ const ACTION_BADGE_CLASS: Record<string, string> = {
   "device.delete":       "badge-danger",
   "region.delete":       "badge-danger",
   "auth.login":          "badge-success",
+  "auth.2fa.enabled":    "badge-success",
   "role.permissions_update": "badge-warning",
   "auth.change_password": "badge-warning",
 };

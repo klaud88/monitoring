@@ -96,7 +96,7 @@ export function OfflineRecordsDashboard({
   const [deviceSort, setDeviceSort] = useState<DeviceSortMode>("offline");
   const [historyDeviceId, setHistoryDeviceId] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
-  const [matrixOpen, setMatrixOpen] = useState(false);
+  const [matrixOpen, setMatrixOpen] = useState(true);
   const [matrixSort, setMatrixSort] = useState<MatrixSort>("offline-desc");
   const [matrixOrder, setMatrixOrder] = useState<string[]>([]);
   const dragIndexRef = useRef<number | null>(null);
@@ -283,7 +283,6 @@ export function OfflineRecordsDashboard({
 
     return days;
   }, [fromDate, offlineByDay, toDate]);
-
 
   /** Rows of the matrix: gardens that were offline at least once in range. */
   const matrixDevices = useMemo(() => {
@@ -689,11 +688,13 @@ export function OfflineRecordsDashboard({
                   changeMatrixSort(event.target.value as MatrixSort)
                 }
               >
-                {(Object.keys(matrixSortLabels) as MatrixSort[]).map((value) => (
-                  <option key={value} value={value}>
-                    {matrixSortLabels[value]}
-                  </option>
-                ))}
+                {(Object.keys(matrixSortLabels) as MatrixSort[]).map(
+                  (value) => (
+                    <option key={value} value={value}>
+                      {matrixSortLabels[value]}
+                    </option>
+                  ),
+                )}
               </select>
             </label>
             <label className="select-control matrix-threshold">
@@ -926,8 +927,7 @@ export function OfflineRecordsDashboard({
                         type="button"
                         onClick={() => removeFrequencyDevice(device.deviceId)}
                         disabled={
-                          busyAction ===
-                          `frequency-remove-${device.deviceId}`
+                          busyAction === `frequency-remove-${device.deviceId}`
                         }
                         aria-label={`${device.label} სიხშირიდან წაშლა`}
                         title="სიხშირიდან წაშლა"

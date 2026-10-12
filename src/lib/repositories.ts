@@ -53,6 +53,8 @@ type UserRow = {
   device_group_code: string | null;
   password_hash: string;
   must_change_password: boolean | number;
+  twofa_enabled?: boolean | number;
+  twofa_secret?: string | null;
   permissions: string | null;
 };
 
@@ -348,6 +350,7 @@ type TaskRow = {
   status: TaskStatus;
   priority: Task["priority"];
   tags: unknown;
+  is_info: boolean | number;
   starts_at: DatabaseDate | null;
   due_date: DatabaseDate;
   created_at: DatabaseDate;
@@ -652,6 +655,46 @@ async function ensureOperationalSchema() {
          join permissions p on p.id = rp.permission_id
          where p.code = 'form_one.comment_edit' and r.name != 'admin'`,
       );
+      // Seed the task-visibility permission rows so they exist to grant even
+      // before any role is saved through the Permissions UI.
+      for (const key of ["tasks.view_all", "tasks.view_assigned", "tasks.info"]) {
+        const [pageKey, actionKey] = key.split(".");
+        await connection.query(
+          `insert ignore into permissions (id, code, label, page_key, action_key)
+           values (?, ?, ?, ?, ?)`,
+          [makeStableId("perm", key), key, key, pageKey, actionKey],
+        );
+      }
+      // One-time: dispatcher/technician keep full task visibility when the
+      // new scoping permissions ship, so their workflow doesn't change —
+      // every other role (including new ones) defaults to seeing only its
+      // own assigned tasks, per the task-visibility feature's design. Gated
+      // by a migration marker (not a bare "insert ignore if missing") so an
+      // admin who later removes this via the Permissions page stays removed
+      // — otherwise the grant would silently reappear on every server
+      // restart/redeploy, since ensureOperationalSchema() re-runs then.
+      await connection.query(`
+        create table if not exists app_migrations (
+          id varchar(64) primary key,
+          applied_at timestamp not null default current_timestamp
+        )
+      `);
+      const [seedRows] = await connection.query<RowDataPacket[]>(
+        `select 1 from app_migrations where id = 'tasks_view_all_seed_v1' limit 1`,
+      );
+      if (seedRows.length === 0) {
+        for (const roleName of ["dispatcher", "technician"]) {
+          await connection.query(
+            `insert ignore into role_permissions (role_id, permission_id)
+             select r.id, p.id from roles r, permissions p
+             where r.name = ? and p.code = 'tasks.view_all'`,
+            [roleName],
+          );
+        }
+        await connection.query(
+          `insert ignore into app_migrations (id) values ('tasks_view_all_seed_v1')`,
+        );
+      }
       // Drop FK on audit_logs.user_id so unknown/deleted user IDs are accepted
       const [auditFkRows] = await connection.query<RowDataPacket[]>(
         `select 1 from information_schema.TABLE_CONSTRAINTS
@@ -738,6 +781,13 @@ async function ensureOperationalSchema() {
         "tags",
         "tags json null after priority",
       );
+      await addColumnIfMissing(
+        connection,
+        taskColumns,
+        "tasks",
+        "is_info",
+        "is_info boolean not null default false after tags",
+      );
       const userColumns = await getTableColumns(connection, "users");
       await addColumnIfMissing(
         connection,
@@ -752,6 +802,34 @@ async function ensureOperationalSchema() {
         "users",
         "must_change_password",
         "must_change_password boolean not null default false after is_active",
+      );
+      await addColumnIfMissing(
+        connection,
+        userColumns,
+        "users",
+        "twofa_enabled",
+        "twofa_enabled boolean not null default false after must_change_password",
+      );
+      await addColumnIfMissing(
+        connection,
+        userColumns,
+        "users",
+        "twofa_secret",
+        "twofa_secret varchar(64) null after twofa_enabled",
+      );
+      await addColumnIfMissing(
+        connection,
+        userColumns,
+        "users",
+        "twofa_backup_codes",
+        "twofa_backup_codes json null after twofa_secret",
+      );
+      await addColumnIfMissing(
+        connection,
+        userColumns,
+        "users",
+        "twofa_enrolled_at",
+        "twofa_enrolled_at timestamp null after twofa_backup_codes",
       );
       await addIndexIfMissing(
         connection,
@@ -1388,6 +1466,8 @@ export async function getUserByEmail(email: string): Promise<AppUser | null> {
         u.device_group_code,
         u.password_hash,
         u.must_change_password,
+        u.twofa_enabled,
+        u.twofa_secret,
         group_concat(distinct p.code order by p.code separator ',') as permissions
       from users u
       join roles r on r.id = u.role_id
@@ -1423,6 +1503,8 @@ export async function getUserByEmail(email: string): Promise<AppUser | null> {
     deviceGroupCode: row.device_group_code ?? undefined,
     passwordHash: row.password_hash,
     mustChangePassword: Boolean(row.must_change_password),
+    twoFactorEnabled: Boolean(row.twofa_enabled),
+    twoFactorSecret: row.twofa_secret ?? undefined,
     permissions: csv(row.permissions) as PermissionKey[],
   };
 }
@@ -1451,6 +1533,8 @@ export async function getUserByLogin(identifier: string): Promise<AppUser | null
         u.device_group_code,
         u.password_hash,
         u.must_change_password,
+        u.twofa_enabled,
+        u.twofa_secret,
         group_concat(distinct p.code order by p.code separator ',') as permissions
       from users u
       join roles r on r.id = u.role_id
@@ -1486,6 +1570,8 @@ export async function getUserByLogin(identifier: string): Promise<AppUser | null
     deviceGroupCode: row.device_group_code ?? undefined,
     passwordHash: row.password_hash,
     mustChangePassword: Boolean(row.must_change_password),
+    twoFactorEnabled: Boolean(row.twofa_enabled),
+    twoFactorSecret: row.twofa_secret ?? undefined,
     permissions: csv(row.permissions) as PermissionKey[],
   };
 }
@@ -1681,6 +1767,116 @@ export async function changeUserPassword(
         where id = ? and is_active = true
       `,
       [newPasswordHash, id],
+    );
+    return result.affectedRows > 0;
+  });
+
+  return updated ?? false;
+}
+
+export type TwoFactorRecord = {
+  enabled: boolean;
+  secret: string | null;
+  backupCodeHashes: string[];
+};
+
+export async function getTwoFactorRecord(userId: string): Promise<TwoFactorRecord | null> {
+  await ensureOperationalSchema();
+
+  const rows = await queryRows<{
+    twofa_enabled: boolean | number;
+    twofa_secret: string | null;
+    twofa_backup_codes: unknown;
+  }>(
+    `
+      select twofa_enabled, twofa_secret, twofa_backup_codes
+      from users
+      where id = ? and is_active = true
+      limit 1
+    `,
+    [userId],
+  );
+
+  const row = rows?.[0];
+  if (!row) {
+    return null;
+  }
+
+  return {
+    enabled: Boolean(row.twofa_enabled),
+    secret: row.twofa_secret ?? null,
+    backupCodeHashes: parseJsonArray(row.twofa_backup_codes) as string[],
+  };
+}
+
+// Stores a freshly generated secret without turning 2FA on yet — it only
+// becomes active once confirmTwoFactorEnrollment verifies a live code
+// against it. Re-running this (e.g. the user backs out and starts over)
+// simply overwrites the still-unconfirmed secret.
+export async function startTwoFactorEnrollment(userId: string, secret: string): Promise<boolean> {
+  const updated = await withConnection(async (connection) => {
+    const [result] = await connection.query<ResultSetHeader>(
+      `
+        update users
+        set twofa_secret = ?, twofa_enabled = false, twofa_backup_codes = null
+        where id = ? and is_active = true
+      `,
+      [secret, userId],
+    );
+    return result.affectedRows > 0;
+  });
+
+  return updated ?? false;
+}
+
+export async function confirmTwoFactorEnrollment(
+  userId: string,
+  backupCodeHashes: string[],
+): Promise<boolean> {
+  const updated = await withConnection(async (connection) => {
+    const [result] = await connection.query<ResultSetHeader>(
+      `
+        update users
+        set twofa_enabled = true, twofa_backup_codes = cast(? as json), twofa_enrolled_at = now()
+        where id = ? and is_active = true
+      `,
+      [JSON.stringify(backupCodeHashes), userId],
+    );
+    return result.affectedRows > 0;
+  });
+
+  return updated ?? false;
+}
+
+export async function disableTwoFactor(userId: string): Promise<boolean> {
+  const updated = await withConnection(async (connection) => {
+    const [result] = await connection.query<ResultSetHeader>(
+      `
+        update users
+        set twofa_enabled = false, twofa_secret = null, twofa_backup_codes = null, twofa_enrolled_at = null
+        where id = ? and is_active = true
+      `,
+      [userId],
+    );
+    return result.affectedRows > 0;
+  });
+
+  return updated ?? false;
+}
+
+/** Removes one used backup code from the stored list so it can't be replayed. */
+export async function consumeBackupCode(userId: string, usedHash: string): Promise<boolean> {
+  const updated = await withConnection(async (connection) => {
+    const [rows] = await connection.query<RowDataPacket[]>(
+      `select twofa_backup_codes from users where id = ? limit 1`,
+      [userId],
+    );
+    const current = parseJsonArray(rows[0]?.twofa_backup_codes) as string[];
+    const remaining = current.filter((hash) => hash !== usedHash);
+
+    const [result] = await connection.query<ResultSetHeader>(
+      `update users set twofa_backup_codes = cast(? as json) where id = ?`,
+      [JSON.stringify(remaining), userId],
     );
     return result.affectedRows > 0;
   });
@@ -3389,8 +3585,30 @@ function isBuildTime() {
   );
 }
 
-export async function getTasks(): Promise<Task[]> {
+export async function getTasks(
+  {
+    assigneeUserId,
+    includeInfoTasks = false,
+  }: { assigneeUserId?: string; includeInfoTasks?: boolean } = {},
+): Promise<Task[]> {
   await ensureOperationalSchema();
+
+  // A straight "and ta.user_id = ?" on the display join below would turn the
+  // left join into an effective inner join and make group_concat drop every
+  // co-assignee, corrupting assigneeIds — so scoping is a separate EXISTS
+  // check on the task itself, independent of the join used to list assignees.
+  const scopeFilter = assigneeUserId
+    ? `
+      and (
+        exists (
+          select 1 from task_assignees scope_ta
+          where scope_ta.task_id = t.id and scope_ta.user_id = ?
+        )
+        ${includeInfoTasks ? "or t.is_info = true" : ""}
+      )
+    `
+    : "";
+  const params = assigneeUserId ? [assigneeUserId] : [];
 
   const rows = await queryRows<TaskRow>(
     `
@@ -3404,6 +3622,7 @@ export async function getTasks(): Promise<Task[]> {
         t.status,
         t.priority,
         t.tags,
+        t.is_info,
         t.starts_at,
         t.due_date,
         t.created_at,
@@ -3412,20 +3631,30 @@ export async function getTasks(): Promise<Task[]> {
       from tasks t
       left join task_assignees ta on ta.task_id = t.id
       left join problem_reports pr on pr.task_id = t.id
-      where pr.id is null
-        or exists (
-          select 1
-          from task_assignees ready_ta
-          where ready_ta.task_id = t.id
-          limit 1
+      where (
+          pr.id is null
+          or exists (
+            select 1
+            from task_assignees ready_ta
+            where ready_ta.task_id = t.id
+            limit 1
+          )
         )
+        ${scopeFilter}
       group by t.id
       order by t.created_at desc
     `,
+    params,
   );
 
   if (!rows) {
-    return mockTasks;
+    return assigneeUserId
+      ? mockTasks.filter(
+          (task) =>
+            task.assigneeIds.includes(assigneeUserId) ||
+            (includeInfoTasks && task.info),
+        )
+      : mockTasks;
   }
 
   return rows.map((row) => ({
@@ -3438,6 +3667,7 @@ export async function getTasks(): Promise<Task[]> {
     status: row.status,
     priority: row.priority,
     tags: normalizeTaskTags(row.tags),
+    info: Boolean(row.is_info),
     startsAt: row.starts_at ? toDateTimeString(row.starts_at) : undefined,
     dueDate: toDateString(row.due_date),
     createdAt: toDateTimeString(row.created_at),
@@ -3464,8 +3694,8 @@ export async function createTask(
     try {
       await connection.query<ResultSetHeader>(
         `
-          insert into tasks (id, title, issue, comment_text, phone, device_id, status, priority, tags, starts_at, due_date)
-          values (?, ?, ?, ?, ?, ?, ?, ?, cast(? as json), ?, ?)
+          insert into tasks (id, title, issue, comment_text, phone, device_id, status, priority, tags, is_info, starts_at, due_date)
+          values (?, ?, ?, ?, ?, ?, ?, ?, cast(? as json), ?, ?, ?)
         `,
         [
           task.id,
@@ -3477,6 +3707,7 @@ export async function createTask(
           task.status,
           task.priority,
           JSON.stringify(task.tags),
+          Boolean(task.info),
           task.startsAt ?? null,
           task.dueDate,
         ],
@@ -3525,6 +3756,7 @@ export async function updateTask(
             status = ?,
             priority = ?,
             tags = cast(? as json),
+            is_info = ?,
             starts_at = ?,
             due_date = ?
           where id = ?
@@ -3538,6 +3770,7 @@ export async function updateTask(
           input.status,
           input.priority,
           JSON.stringify(tags),
+          Boolean(input.info),
           input.startsAt ?? null,
           input.dueDate,
           id,

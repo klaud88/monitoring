@@ -663,6 +663,29 @@ textarea:focus {
   padding: 42px;
 }
 
+.login-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: -6px;
+}
+
+.login-form-link {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--brand);
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.login-form-link:hover {
+  text-decoration: underline;
+}
+
 .login-form label,
 .admin-form label,
 .quick-task-form label,
@@ -9292,4 +9315,139 @@ html.wheel-locked body {
   .topbar-logout:active {
     background: var(--tint-red);
   }
+}
+
+/* ==========================================================================
+   Two-factor authentication (profile settings + login step)
+   ========================================================================== */
+
+.twofa-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.twofa-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.twofa-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.twofa-status-badge.on {
+  background: var(--tint-green);
+  color: var(--green);
+}
+
+.twofa-status-badge.off {
+  background: var(--surface-soft);
+  color: var(--muted);
+}
+
+.twofa-qr-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.twofa-qr-row img {
+  width: 176px;
+  height: 176px;
+  border-radius: 10px;
+  background: #fff;
+  padding: 8px;
+  border: 1px solid var(--line);
+}
+
+.twofa-secret-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  word-break: break-all;
+}
+
+.twofa-code-input {
+  width: 100%;
+  max-width: 220px;
+  min-height: 40px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 18px;
+  letter-spacing: 0.3em;
+  text-align: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.twofa-backup-codes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 14px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-soft);
+}
+
+.twofa-backup-codes span {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  letter-spacing: 0.03em;
+}
+
+.twofa-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 480px) {
+  .twofa-backup-codes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ==========================================================================
+   INFO task flag — green-ringed badge in the assignee stack, and the
+   form toggle that sets it ("საინფორმაციოს აქტივაცია").
+   ========================================================================== */
+
+.avatar.small.info-badge {
+  width: auto;
+  min-width: 32px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--green);
+  border: 1.5px solid var(--green);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.tag-toggle.info-toggle.active {
+  border-color: var(--green);
+  background: var(--tint-green);
+  color: var(--green);
 }

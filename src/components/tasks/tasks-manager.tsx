@@ -24,7 +24,13 @@ import {
 import { useConfirmDialog } from "@/components/common/confirm-dialog";
 import { FiltersToggle } from "@/components/common/filters-toggle";
 import { TaskTagPicker } from "@/components/tasks/task-tag-picker";
-import { findDeviceByName, sortDevicesByName } from "@/lib/device-options";
+import {
+  buildGardenOptions,
+  findGardenOptionByLabel,
+  getGardenCode,
+  getGardenDisplayName,
+  sortDevicesByName,
+} from "@/lib/device-options";
 import { formatShortDate, withoutDeviceCodes } from "@/lib/display";
 import { mergeTags } from "@/lib/tags";
 import { getAssignableTaskUsers } from "@/lib/task-assignees";
@@ -65,6 +71,7 @@ type TaskDraft = {
   priority: TaskPriority;
   tags: string[];
   dueDate: string;
+  info: boolean;
 };
 
 type ViewMode = "lanes" | "columns" | "list";
@@ -104,6 +111,13 @@ export function TasksManager({
     ),
   );
   const sortedDevices = useMemo(() => sortDevicesByName(devices), [devices]);
+  /** One entry per garden, regardless of how many physical devices it has —
+   *  this is what the device pickers below show, so "34-1"/"34-2" don't
+   *  appear as two separate "34" options. */
+  const gardenOptions = useMemo(
+    () => buildGardenOptions(sortedDevices),
+    [sortedDevices],
+  );
   const assignableUsers = useMemo(
     () => getAssignableTaskUsers(users),
     [users],
@@ -117,6 +131,26 @@ export function TasksManager({
   const [query, setQuery] = useState("");
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<TaskDraft | null>(null);
+  /** The task being edited may be on a device that isn't its garden's
+   *  representative in gardenOptions (e.g. it's "34-2" but "34-1" got
+   *  picked to stand for garden 34) — swap that garden's option to point at
+   *  the task's actual device so the <select> below always has a matching
+   *  value instead of silently falling back to nothing selected. */
+  const editGardenOptions = useMemo(() => {
+    if (!editDraft) {
+      return gardenOptions;
+    }
+    const currentDevice = devices.find((item) => item.id === editDraft.deviceId);
+    if (!currentDevice) {
+      return gardenOptions;
+    }
+    const currentCode = getGardenCode(currentDevice);
+    return gardenOptions.map((option) =>
+      option.code === currentCode
+        ? { ...option, deviceId: currentDevice.id }
+        : option,
+    );
+  }, [gardenOptions, devices, editDraft]);
   const [savingTaskId, setSavingTaskId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -126,12 +160,13 @@ export function TasksManager({
     title: "",
     issue: "",
     phone: "",
-    deviceId: sortedDevices[0]?.id || "",
-    deviceQuery: sortedDevices[0]?.name || "",
+    deviceId: gardenOptions[0]?.deviceId || "",
+    deviceQuery: gardenOptions[0]?.label || "",
     assigneeIds: [] as string[],
     priority: "normal" as TaskPriority,
     tags: [] as string[],
     dueDate: taskDueDateForPriority("normal"),
+    info: false,
   }));
 
   const deviceMap = useMemo(
@@ -324,6 +359,7 @@ export function TasksManager({
       priority: draft.priority,
       tags: draft.tags,
       dueDate: draft.dueDate,
+      info: draft.info,
       createdAt: new Date().toISOString(),
     };
 
@@ -352,6 +388,7 @@ export function TasksManager({
         assigneeIds: [],
         tags: [],
         dueDate: taskDueDateForPriority(current.priority),
+        info: false,
       }));
       setCreateOpen(false);
     } else {
@@ -788,21 +825,21 @@ export function TasksManager({
                   value={draft.deviceQuery}
                   onChange={(event) => {
                     const deviceQuery = event.target.value;
-                    const selectedDevice = findDeviceByName(
-                      sortedDevices,
+                    const selectedOption = findGardenOptionByLabel(
+                      gardenOptions,
                       deviceQuery,
                     );
                     setDraft((current) => ({
                       ...current,
                       deviceQuery,
-                      deviceId: selectedDevice?.id ?? "",
+                      deviceId: selectedOption?.deviceId ?? "",
                     }));
                   }}
                   required
                 />
                 <datalist id="new-task-device-options">
-                  {sortedDevices.map((device) => (
-                    <option key={device.id} value={device.name} />
+                  {gardenOptions.map((option) => (
+                    <option key={option.code} value={option.label} />
                   ))}
                 </datalist>
               </label>
@@ -903,6 +940,19 @@ export function TasksManager({
                   ))}
                 </div>
               </div>
+              <div className="task-field span-full">
+                <span>საინფორმაციოს აქტივაცია</span>
+                <button
+                  type="button"
+                  className={`tag-toggle compact info-toggle ${draft.info ? "active" : ""}`}
+                  aria-pressed={draft.info}
+                  onClick={() =>
+                    setDraft((current) => ({ ...current, info: !current.info }))
+                  }
+                >
+                  INFO
+                </button>
+              </div>
               <TaskTagPicker
                 className="task-field span-full"
                 availableTags={availableTags}
@@ -928,9 +978,9 @@ export function TasksManager({
                     )
                   }
                 >
-                  {sortedDevices.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name}
+                  {editGardenOptions.map((option) => (
+                    <option key={option.code} value={option.deviceId}>
+                      {option.label}
                     </option>
                   ))}
                 </select>
@@ -1063,6 +1113,21 @@ export function TasksManager({
                     </button>
                   ))}
                 </div>
+              </div>
+              <div className="task-field span-full">
+                <span>საინფორმაციოს აქტივაცია</span>
+                <button
+                  type="button"
+                  className={`tag-toggle compact info-toggle ${editDraft.info ? "active" : ""}`}
+                  aria-pressed={editDraft.info}
+                  onClick={() =>
+                    setEditDraft((current) =>
+                      current ? { ...current, info: !current.info } : current,
+                    )
+                  }
+                >
+                  INFO
+                </button>
               </div>
               <TaskTagPicker
                 className="task-field span-full"
@@ -1239,7 +1304,7 @@ function TaskRow({
         title={device?.name}
       >
         <MapPin size={14} />
-        {device?.name || "ბაღი ვერ მოიძებნა"}
+        {device ? getGardenDisplayName(device) : "ბაღი ვერ მოიძებნა"}
       </Link>
       <span className="task-row-priority">
         <span className={`mini-pill p-${task.priority}`}>
@@ -1276,6 +1341,11 @@ function TaskRow({
             </span>
           ) : null;
         })}
+        {task.info ? (
+          <span className="avatar small info-badge" title="საინფორმაციო">
+            INFO
+          </span>
+        ) : null}
       </span>
       <StatusPill
         task={task}
@@ -1343,7 +1413,7 @@ function TaskCard({
         {displayTitle}
       </Link>
       <p className="task-card2-sub">
-        {device?.name || "ბაღი ვერ მოიძებნა"} · {displayIssue}
+        {device ? getGardenDisplayName(device) : "ბაღი ვერ მოიძებნა"} · {displayIssue}
       </p>
       {task.comment ? (
         <p className="task-card2-comment">{task.comment}</p>
@@ -1366,6 +1436,11 @@ function TaskCard({
               </span>
             ) : null;
           })}
+          {task.info ? (
+            <span className="avatar small info-badge" title="საინფორმაციო">
+              INFO
+            </span>
+          ) : null}
         </span>
       </div>
       <div className="task-card2-foot">
@@ -1488,6 +1563,7 @@ function createEditDraft(task: Task, deviceCode?: string): TaskDraft {
     priority: task.priority,
     tags: task.tags,
     dueDate: task.dueDate,
+    info: Boolean(task.info),
   };
 }
 

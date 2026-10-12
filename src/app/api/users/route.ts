@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
+import { SESSION_COOKIE, hasPermission, isAdmin, verifySessionToken } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { createUser, getRoles, getUsers } from "@/lib/repositories";
 
@@ -39,6 +39,15 @@ export async function POST(request: NextRequest) {
 
   if (!name || !email || !password || !roleNames.has(role)) {
     return NextResponse.json({ message: "Invalid user payload" }, { status: 400 });
+  }
+
+  // Same reasoning as the edit route: users.create shouldn't itself be a way
+  // to mint new admins.
+  if (role === "admin" && !isAdmin(user)) {
+    return NextResponse.json(
+      { message: "მხოლოდ ადმინისტრატორს შეუძლია admin როლის მინიჭება." },
+      { status: 403 },
+    );
   }
 
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {

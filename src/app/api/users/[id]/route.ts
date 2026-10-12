@@ -1,8 +1,8 @@
 import bcrypt from "bcryptjs";
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
+import { SESSION_COOKIE, hasPermission, isAdmin, verifySessionToken } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
-import { deleteUser, getRoles, updateUser } from "@/lib/repositories";
+import { deleteUser, getRoles, getUserById, updateUser } from "@/lib/repositories";
 
 export async function PATCH(
   request: NextRequest,
@@ -30,6 +30,16 @@ export async function PATCH(
 
   if (!name || !email || !roleNames.has(role)) {
     return NextResponse.json({ message: "Invalid user payload" }, { status: 400 });
+  }
+
+  // A users.edit permission is meant to manage accounts, not to hand out
+  // admin — granting the role that bypasses every other permission check is
+  // reserved for existing admins, however this permission ends up assigned.
+  if (role === "admin" && !isAdmin(actor)) {
+    return NextResponse.json(
+      { message: "მხოლოდ ადმინისტრატორს შეუძლია admin როლის მინიჭება." },
+      { status: 403 },
+    );
   }
 
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
@@ -77,7 +87,10 @@ export async function DELETE(
   const actor = await verifySessionToken(
     request.cookies.get(SESSION_COOKIE)?.value,
   );
-  if (!hasPermission(actor, "users.delete")) {
+  // Deleting an account is destructive and permanent, so it takes actual
+  // admin status — a users.delete permission on its own isn't enough,
+  // the same boundary as granting the admin role in PATCH above.
+  if (!isAdmin(actor)) {
     return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   }
 
@@ -86,6 +99,17 @@ export async function DELETE(
     return NextResponse.json(
       { message: "You cannot delete your active session user" },
       { status: 400 },
+    );
+  }
+
+  // No admin account can be deleted through this endpoint, including by
+  // another admin — protects against an accidental or malicious wipeout of
+  // every admin account. Removing an admin is a deliberate, separate action.
+  const target = await getUserById(id);
+  if (target?.role === "admin") {
+    return NextResponse.json(
+      { message: "ადმინისტრატორის ანგარიშის წაშლა შეზღუდულია." },
+      { status: 403 },
     );
   }
 

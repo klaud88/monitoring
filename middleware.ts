@@ -6,6 +6,10 @@ import { isLoginRateLimited } from "@/lib/rate-limit";
 const publicRoutes = [
   "/login",
   "/api/auth/login",
+  // Second step of a 2FA login: the password already checked out, but no
+  // full session cookie exists yet, so this can't require one — it reads
+  // its own short-lived pending-2FA cookie instead (see /lib/auth.ts).
+  "/api/auth/login/2fa",
   "/api/auth/change-password",
   "/api/cron/offline-capture",
   "/api/cron/status-poll",

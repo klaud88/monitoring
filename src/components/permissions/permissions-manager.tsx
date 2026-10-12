@@ -34,6 +34,9 @@ const tagRegistryActions: ActionDef[] = [
 
 const taskActions: ActionDef[] = [
   ...defaultActions,
+  { key: "view_all", label: "დავალებები სრული", dependsOn: "view" },
+  { key: "view_assigned", label: "დავალებები მონიშნული", dependsOn: "view" },
+  { key: "info", label: "INFO", dependsOn: "view" },
   ...tagRegistryActions,
 ];
 

@@ -73,6 +73,7 @@ export async function PATCH(
     body?.tags === undefined
       ? existingTask.tags
       : filterRegisteredTaskTags(body.tags, await getTaskTagNames());
+  const info = body?.info === undefined ? Boolean(existingTask.info) : Boolean(body.info);
 
   if (!title || !issue || !deviceId || !dueDate) {
     return NextResponse.json({ message: "Missing required task fields" }, { status: 400 });
@@ -88,6 +89,7 @@ export async function PATCH(
     status,
     priority,
     tags,
+    info,
     startsAt: body?.startsAt ? String(body.startsAt) : existingTask.startsAt,
     dueDate,
   });

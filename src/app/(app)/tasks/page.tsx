@@ -9,6 +9,7 @@ import {
   getTasks,
   getUsers,
 } from "@/lib/repositories";
+import { resolveTaskVisibilityScope } from "@/lib/task-visibility";
 
 export default async function TasksPage({
   searchParams,
@@ -22,9 +23,10 @@ export default async function TasksPage({
     redirect(getFirstAllowedPath(user));
   }
 
+  const scope = resolveTaskVisibilityScope(user);
   const [devices, tasks, users, taskTags] = await Promise.all([
     getDevices(),
-    getTasks(),
+    getTasks(scope),
     getUsers(),
     getTaskTagNames(),
   ]);
