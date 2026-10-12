@@ -935,7 +935,7 @@ function ReportFields({
       ) : null}
       {permissions.assignUsers ? (
         <div className="task-field span-full">
-          <span>მომხმარებლები</span>
+          <span>დავალების შემსრულებლები</span>
           <div className="row-tags">
             {users.map((user) => (
               <button

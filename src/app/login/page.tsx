@@ -17,7 +17,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         <div className="login-copy">
           <AgencyLogo className="agency-logo agency-logo-login" />
           <h1 className="sr-only">თბილისის საბავშვო ბაგა-ბაღების მართვის სააგენტო</h1>
-          <p>დავაისების სტატუსები, ტასკები, უფლებები და audit log ერთ სამუშაო სივრცეში.</p>
+          <p>დავაისების სტატუსები, დავალებები, უფლებები და audit log ერთ სამუშაო სივრცეში.</p>
           <div className="login-badges">
             <span>
               <Wifi size={16} />

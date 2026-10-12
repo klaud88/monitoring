@@ -5003,6 +5003,46 @@ button.monitor-count-pill {
   font-size: 13.5px;
 }
 
+.tasks-stat-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 14.5px;
+}
+
+.tasks-stat-line strong {
+  color: var(--text);
+  font-weight: 800;
+}
+
+.tasks-stat {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+/* Same status colors used everywhere else (status-dot, task-module-count):
+   blue = planned/in_progress ("active"), red = blocked, green = done. */
+.tasks-stat.active {
+  background: var(--tint-blue);
+  color: var(--tint-blue-ink);
+}
+
+.tasks-stat.blocked {
+  background: var(--tint-red);
+  color: var(--tint-red-ink);
+}
+
+.tasks-stat.done {
+  background: var(--tint-green);
+  color: var(--tint-green-ink);
+}
+
 .tasks-head-actions {
   display: flex;
   align-items: center;

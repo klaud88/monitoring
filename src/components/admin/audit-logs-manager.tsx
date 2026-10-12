@@ -48,8 +48,8 @@ const ACTION_LABELS: Record<string, string> = {
   "region.delete":                 "რეგიონი წაიშალა",
   "device_tag.create":             "Tag შეიქმნა",
   "device_tag.delete":             "Tag წაიშალა",
-  "task_tag.create":               "Task tag შეიქმნა",
-  "task_tag.delete":               "Task tag წაიშალა",
+  "task_tag.create":               "დავალების ტეგი შეიქმნა",
+  "task_tag.delete":               "დავალების ტეგი წაიშალა",
 };
 
 const ENTITY_OPTIONS = [
@@ -62,7 +62,7 @@ const ENTITY_OPTIONS = [
   { value: "device",            label: "მოწყობილობა" },
   { value: "region",            label: "რეგიონი" },
   { value: "device_tag",        label: "Device Tag" },
-  { value: "task_tag",          label: "Task Tag" },
+  { value: "task_tag",          label: "დავალების ტეგი" },
 ];
 
 const ACTION_BADGE_CLASS: Record<string, string> = {

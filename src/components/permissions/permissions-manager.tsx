@@ -37,6 +37,7 @@ const taskActions: ActionDef[] = [
   { key: "view_all", label: "დავალებები სრული", dependsOn: "view" },
   { key: "view_assigned", label: "დავალებები მონიშნული", dependsOn: "view" },
   { key: "info", label: "INFO", dependsOn: "view" },
+  { key: "assignable", label: "შემსრულებლებში დამატება", dependsOn: "view" },
   ...tagRegistryActions,
 ];
 
@@ -76,7 +77,7 @@ const pages: {
   { key: "dashboard", label: "რუკა" },
   { key: "devices", label: "X-Stations" },
   { key: "regions", label: "რაიონები" },
-  { key: "tasks", label: "ტასკები", actions: taskActions },
+  { key: "tasks", label: "დავალებები", actions: taskActions },
   {
     key: "problem_reports",
     label: "პრობლემის დაფიქსირება",

@@ -951,8 +951,8 @@ export function Dashboard({
               </div>
 
               {availableTags.length ? (
-                <div className="map-tag-group" aria-label="ტასკების ტეგები">
-                  <span className="map-tag-label">ტასკები</span>
+                <div className="map-tag-group" aria-label="დავალებების ტეგები">
+                  <span className="map-tag-label">დავალებები</span>
                   <div className="map-tag-chips">
                     {availableTags.map((tagName) => (
                       <button
@@ -1111,7 +1111,7 @@ export function Dashboard({
             </div>
 
             <Link className="map-rail-link" href="/tasks">
-              ყველა ტასკის ნახვა
+              ყველა დავალების ნახვა
             </Link>
           </>
         ) : null}
@@ -1163,7 +1163,7 @@ export function Dashboard({
           >
             <header>
               <div>
-                <p className="eyebrow">ტასკი</p>
+                <p className="eyebrow">დავალება</p>
                 <h2 id="quick-task-modal-title">დამატება</h2>
               </div>
               <button
@@ -1227,7 +1227,7 @@ export function Dashboard({
                       title: event.target.value,
                     }))
                   }
-                  placeholder="ტასკის სათაური"
+                  placeholder="დავალების სათაური"
                   required
                 />
               </label>

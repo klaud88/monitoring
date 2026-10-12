@@ -26,6 +26,7 @@ const permissionActions = new Set<PermissionAction>([
   "view_all",
   "view_assigned",
   "info",
+  "assignable",
   "comment_edit",
   "completion_request",
   "completion_response",

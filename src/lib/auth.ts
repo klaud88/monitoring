@@ -120,7 +120,13 @@ export async function verifyPassword(password: string, storedHash?: string) {
   return bcrypt.compare(password, storedHash);
 }
 
-export function hasPermission(user: SessionUser | null, permission: PermissionKey) {
+// Narrowed to just the two fields actually used (rather than requiring a
+// full SessionUser) so callers like isAssignableTaskUser can check an
+// arbitrary candidate user's permissions, not only the viewer's own.
+export function hasPermission(
+  user: Pick<SessionUser, "role" | "permissions"> | null,
+  permission: PermissionKey,
+) {
   if (!user) {
     return false;
   }

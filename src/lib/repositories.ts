@@ -295,12 +295,12 @@ const TASK_TAG_PERMISSIONS: {
 }[] = [
   {
     code: "tasks.tag_create",
-    label: "ტასკები: ახალი ტეგის დამატება",
+    label: "დავალებები: ახალი ტეგის დამატება",
     roles: ["admin", "dispatcher"],
   },
   {
     code: "tasks.tag_delete",
-    label: "ტასკები: ტეგის წაშლა",
+    label: "დავალებები: ტეგის წაშლა",
     roles: ["admin"],
   },
   {
@@ -657,7 +657,12 @@ async function ensureOperationalSchema() {
       );
       // Seed the task-visibility permission rows so they exist to grant even
       // before any role is saved through the Permissions UI.
-      for (const key of ["tasks.view_all", "tasks.view_assigned", "tasks.info"]) {
+      for (const key of [
+        "tasks.view_all",
+        "tasks.view_assigned",
+        "tasks.info",
+        "tasks.assignable",
+      ]) {
         const [pageKey, actionKey] = key.split(".");
         await connection.query(
           `insert ignore into permissions (id, code, label, page_key, action_key)
@@ -693,6 +698,29 @@ async function ensureOperationalSchema() {
         }
         await connection.query(
           `insert ignore into app_migrations (id) values ('tasks_view_all_seed_v1')`,
+        );
+      }
+      // One-time: who can be a task/problem-report assignee used to be the
+      // hardcoded admin/dispatcher/technician role list in
+      // src/lib/task-assignees.ts — now it's the tasks.assignable
+      // permission instead, seeded onto exactly those same three roles so
+      // assignment behavior doesn't change. Marker-gated for the same
+      // reason as tasks_view_all_seed_v1: an admin's later removal of this
+      // via the Permissions page must stick across restarts.
+      const [assignableSeedRows] = await connection.query<RowDataPacket[]>(
+        `select 1 from app_migrations where id = 'tasks_assignable_seed_v1' limit 1`,
+      );
+      if (assignableSeedRows.length === 0) {
+        for (const roleName of ["admin", "dispatcher", "technician"]) {
+          await connection.query(
+            `insert ignore into role_permissions (role_id, permission_id)
+             select r.id, p.id from roles r, permissions p
+             where r.name = ? and p.code = 'tasks.assignable'`,
+            [roleName],
+          );
+        }
+        await connection.query(
+          `insert ignore into app_migrations (id) values ('tasks_assignable_seed_v1')`,
         );
       }
       // Drop FK on audit_logs.user_id so unknown/deleted user IDs are accepted

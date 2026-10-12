@@ -638,9 +638,11 @@ export function TasksManager({
       <section className="tasks-head">
         <div>
           <h1>დავალებები და ვიზიტები</h1>
-          <p>
-            {tasks.length} ტასკი · {activeCount} აქტიური · {blockedCount}{" "}
-            შეჩერებული · {doneCount} დასრულებული
+          <p className="tasks-stat-line">
+            <strong>{tasks.length}</strong> დავალება
+            <span className="tasks-stat active">{activeCount} აქტიური</span>
+            <span className="tasks-stat blocked">{blockedCount} შეჩერებული</span>
+            <span className="tasks-stat done">{doneCount} დასრულებული</span>
           </p>
         </div>
         <div className="tasks-head-actions">
@@ -684,7 +686,7 @@ export function TasksManager({
               }}
             >
               <Plus size={17} />
-              <span>ახალი ტასკი</span>
+              <span>დამატება</span>
             </button>
           ) : null}
         </div>
@@ -788,12 +790,12 @@ export function TasksManager({
         <section
           className="task-editor"
           ref={editorRef}
-          aria-label={editorMode === "create" ? "ახალი ტასკი" : "ტასკის რედაქტირება"}
+          aria-label={editorMode === "create" ? "ახალი დავალება" : "დავალების რედაქტირება"}
         >
           <header className="task-editor-head">
             <div>
               <h2>
-                {editorMode === "create" ? "ახალი ტასკი" : "ტასკის რედაქტირება"}
+                {editorMode === "create" ? "ახალი დავალება" : "დავალების რედაქტირება"}
               </h2>
               <p>
                 {editorMode === "create"
@@ -919,7 +921,7 @@ export function TasksManager({
                 />
               </label>
               <div className="task-field span-full">
-                <span>მომხმარებლები</span>
+                <span>დავალების შემსრულებლები</span>
                 <div className="row-tags">
                   {assignableUsers.map((user) => (
                     <button
@@ -1100,7 +1102,7 @@ export function TasksManager({
                 />
               </label>
               <div className="task-field span-full">
-                <span>მომხმარებლები</span>
+                <span>დავალების შემსრულებლები</span>
                 <div className="row-tags">
                   {assignableUsers.map((user) => (
                     <button
@@ -1190,7 +1192,7 @@ export function TasksManager({
                   <TaskCard key={task.id} task={task} {...rowProps} />
                 ))
               ) : (
-                <p className="task-module-empty">ტასკი არ არის.</p>
+                <p className="task-module-empty">დავალება არ არის.</p>
               )}
             </div>
           ))}
@@ -1233,21 +1235,21 @@ export function TasksManager({
                         <TaskRow key={task.id} task={task} {...rowProps} />
                       ))
                     ) : (
-                      <p className="task-module-empty">ტასკი არ არის.</p>
+                      <p className="task-module-empty">დავალება არ არის.</p>
                     )}
                   </div>
                 </section>
               ))}
             </div>
           ) : (
-            <section className="task-module" aria-label="ყველა ტასკი">
+            <section className="task-module" aria-label="ყველა დავალება">
               <div className="task-module-body task-list-panel-body">
                 {filteredTasks.length ? (
                   filteredTasks.map((task) => (
                     <TaskRow key={task.id} task={task} {...rowProps} />
                   ))
                 ) : (
-                  <p className="task-module-empty">ტასკი ვერ მოიძებნა.</p>
+                  <p className="task-module-empty">დავალება ვერ მოიძებნა.</p>
                 )}
               </div>
             </section>
