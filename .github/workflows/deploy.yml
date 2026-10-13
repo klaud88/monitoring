@@ -18,7 +18,8 @@ jobs:
           script: |
             set -e
             cd /var/www/monitoring
+               git checkout -- package-lock.json
             git pull origin main
-            npm ci
+            npm install
             npm run build
             pm2 restart monitoring
