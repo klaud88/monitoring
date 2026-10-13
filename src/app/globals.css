@@ -3308,8 +3308,9 @@ button.section-title:hover {
   box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.14);
 }
 
+/* Pulses for 5 seconds after the page opens, then rests. */
 .issue-indicator.active {
-  animation: issue-indicator-pulse 1.1s infinite;
+  animation: issue-indicator-pulse 1s ease-in-out 5;
 }
 
 .issue-indicator.overdue {

@@ -13,7 +13,14 @@ import {
 } from "@/lib/repositories";
 import { canChooseDueDate } from "@/lib/working-days";
 
-export default async function ProblemReportsPage() {
+export default async function ProblemReportsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ edit?: string | string[] }>;
+}) {
+  const resolvedSearchParams = await searchParams;
+  const editParam = resolvedSearchParams?.edit;
+  const initialEditReportId = Array.isArray(editParam) ? editParam[0] : editParam;
   const cookieStore = await cookies();
   const user = await verifySessionToken(cookieStore.get(SESSION_COOKIE)?.value);
   if (!hasPermission(user, "problem_reports.view")) {
@@ -42,6 +49,7 @@ export default async function ProblemReportsPage() {
       users={users}
       initialTags={taskTags}
       canChooseDueDate={canChooseDueDate(user?.role)}
+      initialEditReportId={initialEditReportId}
       permissions={{
         create: hasPermission(user, "problem_reports.create"),
         edit: hasPermission(user, "problem_reports.edit"),

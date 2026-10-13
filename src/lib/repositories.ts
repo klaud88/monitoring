@@ -3825,6 +3825,12 @@ export async function updateTask(
         return null;
       }
 
+      /* A task created from a problem report carries its status back. */
+      await connection.query(
+        "update problem_reports set status = ? where task_id = ?",
+        [input.status, id],
+      );
+
       await connection.query("delete from task_assignees where task_id = ?", [
         id,
       ]);
@@ -5734,6 +5740,10 @@ export async function updateTaskStatus(
       status,
       id,
     ]);
+    await connection.query(
+      "update problem_reports set status = ? where task_id = ?",
+      [status, id],
+    );
     const tasks = await getTasks();
     return tasks.find((task) => task.id === id) ?? null;
   });

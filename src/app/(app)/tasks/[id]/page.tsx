@@ -294,7 +294,10 @@ export default async function TaskDetailsPage({
                 {canViewReports ? (
                   <>
                     {" "}
-                    <Link className="inline-link" href="/problem-reports">
+                    <Link
+                      className="inline-link"
+                      href={`/problem-reports/${task.problemReportId}`}
+                    >
                       პრობლემის დაფიქსირებაზე გადასვლა
                     </Link>
                   </>

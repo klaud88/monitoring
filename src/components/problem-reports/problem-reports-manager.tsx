@@ -48,6 +48,7 @@ type Props = {
   initialTags: string[];
   canChooseDueDate: boolean;
   permissions: ProblemReportPermissions;
+  initialEditReportId?: string;
 };
 
 type ReportDraft = {
@@ -106,6 +107,7 @@ export function ProblemReportsManager({
   initialTags,
   canChooseDueDate,
   permissions,
+  initialEditReportId,
 }: Props) {
   const [reports, setReports] = useState(initialReports);
   const [availableTags, setAvailableTags] = useState(() =>
@@ -128,6 +130,7 @@ export function ProblemReportsManager({
   const [draft, setDraft] = useState<ReportDraft>(() =>
     emptyDraft(devices[0]?.id || ""),
   );
+  const initialEditHandledRef = useRef<string | null>(null);
 
   const canUpdate =
     permissions.edit ||
@@ -249,6 +252,50 @@ export function ProblemReportsManager({
     setDraft(emptyDraft(draft.deviceId));
     setCreateOpen(false);
   }
+
+  /* "რედაქტირება" on the detail page links back here with ?edit=<id>. */
+  useEffect(() => {
+    if (
+      !initialEditReportId ||
+      !canUpdate ||
+      initialEditHandledRef.current === initialEditReportId
+    ) {
+      return;
+    }
+
+    const report = reports.find((item) => item.id === initialEditReportId);
+    if (!report) {
+      return;
+    }
+
+    setCreateOpen(false);
+    setEditingReportId(report.id);
+    setEditDraft({
+      deviceId: report.deviceId,
+      title: report.title,
+      issue: report.issue,
+      phone: report.phone ?? "",
+      status: report.status,
+      priority: report.priority,
+      tags: report.tags,
+      assigneeIds: report.assigneeIds,
+      dueDate: report.dueDate,
+    });
+    setStatusFilter("all");
+    setDeviceFilter("all");
+    setQuery("");
+    setError("");
+    initialEditHandledRef.current = initialEditReportId;
+
+    const frameId = window.requestAnimationFrame(() => {
+      document.getElementById(`report-${report.id}`)?.scrollIntoView({
+        block: "center",
+        behavior: "smooth",
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [canUpdate, initialEditReportId, reports]);
 
   function startEdit(report: ProblemReport) {
     setCreateOpen(false);
@@ -684,14 +731,17 @@ export function ProblemReportsManager({
                           {priorityLabels[report.priority]}
                         </span>
                       </span>
-                      <span className="task-row-summary">
+                      <Link
+                        className="task-row-summary"
+                        href={`/problem-reports/${report.id}`}
+                      >
                         <span className="task-row-title" title={report.title}>
                           {report.title}
                         </span>
                         <span className="task-row-sub" title={report.issue}>
                           {report.issue}
                         </span>
-                      </span>
+                      </Link>
                       <TagCell tags={report.tags} />
                       <span className="task-row-phone">
                         {report.phone || "—"}
