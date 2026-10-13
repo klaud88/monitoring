@@ -17,7 +17,7 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           script: |
             set -e
-            cd /თქვენი/პროექტის/გზა
+            cd /var/www/monitoring
             git pull origin main
             npm ci
             npm run build
