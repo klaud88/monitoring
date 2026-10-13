@@ -1509,6 +1509,15 @@ export async function getUserByEmail(email: string): Promise<AppUser | null> {
   );
 
   if (!rows) {
+    // mockUsers (including its fixed, publicly-visible admin credential) is
+    // meant only for `next build`'s static generation, when no real DB is
+    // reachable — never as a live login fallback. A transient DB hiccup at
+    // runtime must fail the lookup, not silently authenticate against a
+    // hardcoded account.
+    if (!isBuildTime()) {
+      console.warn("[auth] DB unavailable during login lookup by email; refusing to fall back to mock data.");
+      return null;
+    }
     return (
       mockUsers.find(
         (user) => user.email.toLowerCase() === email.toLowerCase(),
@@ -1576,6 +1585,12 @@ export async function getUserByLogin(identifier: string): Promise<AppUser | null
   );
 
   if (!rows) {
+    // Same reasoning as getUserByEmail above: mock fallback is a build-time
+    // convenience only, never a live authentication path.
+    if (!isBuildTime()) {
+      console.warn("[auth] DB unavailable during login lookup by device group; refusing to fall back to mock data.");
+      return null;
+    }
     return (
       mockUsers.find(
         (user) => normalizeDeviceGroupCode(user.deviceGroupCode) === deviceGroupCode,

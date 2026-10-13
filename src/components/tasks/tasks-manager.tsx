@@ -942,19 +942,12 @@ export function TasksManager({
                   ))}
                 </div>
               </div>
-              <div className="task-field span-full">
-                <span>საინფორმაციოს აქტივაცია</span>
-                <button
-                  type="button"
-                  className={`tag-toggle compact info-toggle ${draft.info ? "active" : ""}`}
-                  aria-pressed={draft.info}
-                  onClick={() =>
-                    setDraft((current) => ({ ...current, info: !current.info }))
-                  }
-                >
-                  INFO
-                </button>
-              </div>
+              <InfoSwitch
+                checked={draft.info}
+                onToggle={() =>
+                  setDraft((current) => ({ ...current, info: !current.info }))
+                }
+              />
               <TaskTagPicker
                 className="task-field span-full"
                 availableTags={availableTags}
@@ -1116,21 +1109,14 @@ export function TasksManager({
                   ))}
                 </div>
               </div>
-              <div className="task-field span-full">
-                <span>საინფორმაციოს აქტივაცია</span>
-                <button
-                  type="button"
-                  className={`tag-toggle compact info-toggle ${editDraft.info ? "active" : ""}`}
-                  aria-pressed={editDraft.info}
-                  onClick={() =>
-                    setEditDraft((current) =>
-                      current ? { ...current, info: !current.info } : current,
-                    )
-                  }
-                >
-                  INFO
-                </button>
-              </div>
+              <InfoSwitch
+                checked={editDraft.info}
+                onToggle={() =>
+                  setEditDraft((current) =>
+                    current ? { ...current, info: !current.info } : current,
+                  )
+                }
+              />
               <TaskTagPicker
                 className="task-field span-full"
                 availableTags={availableTags}
@@ -1518,6 +1504,32 @@ function StatusPill({
 }
 
 /** Two tags fit the column; the rest collapse into a hoverable counter. */
+function InfoSwitch({
+  checked,
+  onToggle,
+}: {
+  checked: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="task-field span-full">
+      <span>საინფორმაციოს აქტივაცია</span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        className={`info-switch${checked ? " on" : ""}`}
+        onClick={onToggle}
+      >
+        <span className="info-switch-track" aria-hidden="true">
+          <span className="info-switch-thumb" />
+        </span>
+        <span className="info-switch-label">INFO</span>
+      </button>
+    </div>
+  );
+}
+
 function TagCell({ tags }: { tags: string[] }) {
   if (!tags.length) {
     return <span className="task-row-tags empty">—</span>;

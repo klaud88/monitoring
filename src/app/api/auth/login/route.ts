@@ -4,14 +4,25 @@ import { createPendingTwoFactorToken, createSessionToken, sanitizeUser, SESSION_
 import { logAudit } from "@/lib/audit";
 import { getUserByLogin } from "@/lib/repositories";
 import { PENDING_2FA_COOKIE, shouldUseSecureCookie } from "@/lib/session";
-import { clearLoginAttempts, getClientIp, recordFailedLogin } from "@/lib/rate-limit";
+import { clearLoginAttempts, getClientIp, isLoginRateLimited, recordFailedLogin } from "@/lib/rate-limit";
 
 const DUMMY_HASH = "$2a$10$dummy.hash.to.prevent.timing.oracle.attacks.XXXXXXXX";
 
-// Rate limiting for this exact path is enforced in middleware.ts, which runs
-// before this handler and shares the same in-memory attempt counter.
 export async function POST(request: NextRequest) {
   const ip = getClientIp(request);
+
+  // Middleware runs in the Edge runtime while this route runs in the
+  // Node.js runtime — they are separate execution contexts, so the
+  // in-memory attempt counter is NOT actually shared between a check in
+  // middleware and a record here. The check has to live in the same
+  // runtime as the record, exactly like /api/auth/login/2fa already does.
+  if (isLoginRateLimited(ip)) {
+    return NextResponse.json(
+      { message: "ძალიან ბევრი მცდელობა. სცადეთ მოგვიანებით." },
+      { status: 429 },
+    );
+  }
+
   const body = await request.json().catch(() => null);
   const identifier = String(body?.email || body?.identifier || "").trim().toLowerCase();
   const password = String(body?.password || "");

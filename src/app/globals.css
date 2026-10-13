@@ -1,4 +1,5 @@
 :root {
+  --credit-h: 28px;
   color-scheme: light;
   --bg: #eef3f8;
   --surface: #ffffff;
@@ -247,6 +248,55 @@ textarea:focus {
 .agency-logo-login {
   width: min(250px, 100%);
   margin-bottom: 22px;
+}
+
+/* OneBit wordmark on the login panel. The animation's own charcoal backdrop
+   is feathered at the edges so it melts into the panel behind it. */
+.onebit-logo {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.onebit-logo-login {
+  max-width: 420px;
+  margin: -12px 0 18px -14px;
+  -webkit-mask-image:
+    linear-gradient(90deg, transparent, #000 9%, #000 91%, transparent),
+    linear-gradient(180deg, transparent, #000 22%, #000 78%, transparent);
+  -webkit-mask-composite: source-in;
+  mask-image:
+    linear-gradient(90deg, transparent, #000 9%, #000 91%, transparent),
+    linear-gradient(180deg, transparent, #000 22%, #000 78%, transparent);
+  mask-composite: intersect;
+}
+
+/* "Created by OneBit" — under every page's content and on the login screen */
+.app-credit {
+  height: var(--credit-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--muted-2);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.app-credit strong {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.login-page {
+  position: relative;
+}
+
+.login-page .app-credit {
+  position: absolute;
+  right: 0;
+  bottom: 6px;
+  left: 0;
 }
 
 .ghost-button,
@@ -622,7 +672,7 @@ textarea:focus {
 
 .login-copy {
   padding: 42px;
-  background: linear-gradient(135deg, var(--nav-bg), #123655);
+  background: linear-gradient(135deg, #3f4244, #2b2f31 55%, #1d2523);
   color: #fff;
 }
 
@@ -636,6 +686,39 @@ textarea:focus {
   max-width: 420px;
   margin: 0;
   color: #cbd5e1;
+  line-height: 1.6;
+}
+
+/* short intro under the OneBit logo; red accents echo the logo's trace */
+.login-intro {
+  display: grid;
+  gap: 10px;
+  max-width: 400px;
+}
+
+.login-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #f87171;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.login-eyebrow::before {
+  content: "";
+  width: 22px;
+  height: 2px;
+  border-radius: 2px;
+  background: #ef4444;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.8);
+}
+
+.login-intro p {
+  margin: 0;
+  color: #a8b0ba;
+  font-size: 14px;
   line-height: 1.6;
 }
 
@@ -3523,17 +3606,114 @@ progress::-webkit-progress-value {
   background: var(--brand);
 }
 
-.region-device-row {
+/* X-Stations: one card per garden, its devices as rows inside */
+.garden-group {
   display: grid;
-  grid-template-columns:
-    minmax(160px, 0.55fr) minmax(150px, 0.45fr) minmax(180px, 0.75fr)
-    minmax(130px, 0.35fr) auto;
+  grid-template-columns: minmax(90px, 140px) minmax(0, 1fr);
   gap: 12px;
   align-items: start;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 12px;
   background: var(--surface);
+}
+
+.garden-group-head {
+  display: grid;
+  align-self: stretch;
+  align-content: center;
+  justify-items: center;
+  gap: 4px;
+  text-align: center;
+}
+
+.garden-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.garden-totals span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  padding: 6px 10px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.garden-totals strong {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.garden-group-head strong {
+  font-size: 20px;
+  font-weight: 850;
+  line-height: 1.1;
+}
+
+.garden-group-head span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.garden-group-devices {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.garden-device-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.garden-device-chip::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.garden-device-chip.online {
+  background: var(--tint-green);
+  color: var(--tint-green-ink);
+}
+
+.garden-device-chip.offline {
+  background: var(--tint-red);
+  color: var(--tint-red-ink);
+}
+
+.garden-device-chip.error {
+  background: var(--tint-amber);
+  color: var(--tint-amber-ink);
+}
+
+.region-device-row {
+  display: grid;
+  grid-template-columns:
+    minmax(90px, 0.3fr) minmax(180px, 1fr) minmax(130px, 0.4fr) auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--surface-soft);
 }
 
 .region-device-row.editing {
@@ -5795,7 +5975,7 @@ button.monitor-count-pill {
 /* cancels .app-main padding so the map reaches every edge */
 .map-console {
   position: relative;
-  height: calc(100vh - 56px);
+  height: calc(100vh - 56px - var(--credit-h));
   margin: -20px -24px -28px;
   overflow: hidden;
   background: var(--surface-muted);
@@ -9009,7 +9189,7 @@ html.wheel-locked body {
     position: relative;
     display: block;
     margin: -12px;
-    height: calc(100dvh - 56px);
+    height: calc(100dvh - 56px - var(--credit-h));
     overflow: hidden;
     background: var(--surface-muted);
   }
@@ -9193,6 +9373,11 @@ html.wheel-locked body {
   /* --- X-Stations: a device row stacks instead of scrolling sideways --- */
 
   .region-device-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .garden-group {
     grid-template-columns: minmax(0, 1fr);
     gap: 8px;
   }
@@ -9486,8 +9671,59 @@ html.wheel-locked body {
   letter-spacing: 0.02em;
 }
 
-.tag-toggle.info-toggle.active {
-  border-color: var(--green);
-  background: var(--tint-green);
+.info-switch {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  background: none;
+  padding: 2px 0;
+  color: var(--ink-muted);
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.info-switch-track {
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--line-strong);
+  transition: background-color 0.18s ease;
+}
+
+.info-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.25);
+  transition: transform 0.18s ease;
+}
+
+.info-switch.on {
   color: var(--green);
+}
+
+.info-switch.on .info-switch-track {
+  background: var(--green);
+}
+
+.info-switch.on .info-switch-thumb {
+  transform: translateX(18px);
+}
+
+.info-switch:focus-visible {
+  outline: none;
+}
+
+.info-switch:focus-visible .info-switch-track {
+  box-shadow: 0 0 0 3px var(--tint-green);
 }

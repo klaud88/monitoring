@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 import { useConfirmDialog } from "@/components/common/confirm-dialog";
 import { FiltersToggle } from "@/components/common/filters-toggle";
+import { getGardenKey } from "@/lib/device-associations";
+import { getGardenDisplayName } from "@/lib/device-options";
 import { TBILISI_CENTER, clampLatLng } from "@/lib/geo";
 import { mergeTags } from "@/lib/tags";
 import type { Device, DeviceStatus, Region } from "@/lib/types";
@@ -49,6 +51,12 @@ type RegionDraft = {
 type DeviceSortMode = "az" | "za" | "region";
 
 const unassignedRegion = "დაუნაწილებელი";
+
+const deviceStatusTitles: Record<DeviceStatus, string> = {
+  online: "Online",
+  offline: "Offline",
+  error: "შეცდომა",
+};
 
 export function RegionManager({
   initialDevices,
@@ -125,6 +133,28 @@ export function RegionManager({
       )
       .sort((a, b) => compareDevices(a, b, deviceSort));
   }, [devices, deviceSort, query, regionFilter, selectedFilterTags]);
+
+  // Devices are named "<garden>-<n>"; the list shows one card per garden in
+  // the order its first device sorts, with that garden's devices inside.
+  const gardenGroups = useMemo(() => {
+    const groups = new Map<
+      string,
+      { key: string; label: string; regions: string[]; devices: Device[] }
+    >();
+    for (const device of filteredDevices) {
+      const key = getGardenKey(device.name) || device.id;
+      let group = groups.get(key);
+      if (!group) {
+        group = { key, label: getGardenDisplayName(device), regions: [], devices: [] };
+        groups.set(key, group);
+      }
+      group.devices.push(device);
+      if (device.region && !group.regions.includes(device.region)) {
+        group.regions.push(device.region);
+      }
+    }
+    return [...groups.values()];
+  }, [filteredDevices]);
 
   function toggleDraftTag(tagName: string) {
     setDraft((current) => ({
@@ -811,118 +841,143 @@ export function RegionManager({
             </form>
           ) : null}
 
+          <div className="garden-totals" aria-live="polite">
+            <span>
+              ბაღები <strong>{gardenGroups.length}</strong>
+            </span>
+            <span>
+              მოწყობილობები <strong>{filteredDevices.length}</strong>
+            </span>
+          </div>
+
           <div className="region-device-list">
-            {filteredDevices.map((device) =>
-              editingDeviceId === device.id && deviceEdit ? (
-                <article key={device.id} className="region-device-row editing">
-                  <DeviceDraftFields
-                    draft={deviceEdit}
-                    onChange={(partial) =>
-                      setDeviceEdit((current) =>
-                        current ? { ...current, ...partial } : current,
-                      )
-                    }
-                    regionNames={regionNames}
-                    availableTags={availableTags}
-                    toggleTag={toggleEditTag}
-                    canCreateTags={permissions.createTags}
-                    canDeleteTags={permissions.deleteTags}
-                    onCreateTag={createAvailableTag}
-                    onDeleteTag={removeAvailableTag}
-                  />
-                  <div className="row-actions">
-                    <button
-                      className="ghost-button"
-                      type="button"
-                      onClick={() => saveDevice(device.id)}
-                      disabled={saving}
-                    >
-                      <Save size={16} />
-                      <span>შენახვა</span>
-                    </button>
-                    <button
-                      className="ghost-button"
-                      type="button"
-                      onClick={() => {
-                        setEditingDeviceId(null);
-                        setDeviceEdit(null);
-                      }}
-                    >
-                      <X size={16} />
-                      <span>გაუქმება</span>
-                    </button>
-                  </div>
-                </article>
-              ) : (
-                <article key={device.id} className="region-device-row">
-                  <div>
-                    <strong>{device.name}</strong>
-                    <span>{device.status}</span>
-                  </div>
-                  <div>
-                    <strong>{device.region}</strong>
+            {gardenGroups.map((group) => (
+              <article key={group.key} className="garden-group">
+                <div className="garden-group-head">
+                  <strong>{group.label}</strong>
+                  {group.regions.length ? (
                     <span>
-                      Lat {device.position.lat.toFixed(6)}, Lng {device.position.lng.toFixed(6)}
+                      {group.regions
+                        .map((region) =>
+                          region === unassignedRegion ? "რაიონის გარეშე" : region,
+                        )
+                        .join(", ")}
                     </span>
-                  </div>
-                  <div className="row-tags">
-                    {device.tags.length ? (
-                      device.tags.map((tagName) => (
-                        <span key={tagName} className="tag-toggle compact active">
-                          {tagName}
-                        </span>
-                      ))
+                  ) : null}
+                </div>
+                <div className="garden-group-devices">
+                  {group.devices.map((device) =>
+                    editingDeviceId === device.id && deviceEdit ? (
+                      <div key={device.id} className="region-device-row editing">
+                        <DeviceDraftFields
+                          draft={deviceEdit}
+                          onChange={(partial) =>
+                            setDeviceEdit((current) =>
+                              current ? { ...current, ...partial } : current,
+                            )
+                          }
+                          regionNames={regionNames}
+                          availableTags={availableTags}
+                          toggleTag={toggleEditTag}
+                          canCreateTags={permissions.createTags}
+                          canDeleteTags={permissions.deleteTags}
+                          onCreateTag={createAvailableTag}
+                          onDeleteTag={removeAvailableTag}
+                        />
+                        <div className="row-actions">
+                          <button
+                            className="ghost-button"
+                            type="button"
+                            onClick={() => saveDevice(device.id)}
+                            disabled={saving}
+                          >
+                            <Save size={16} />
+                            <span>შენახვა</span>
+                          </button>
+                          <button
+                            className="ghost-button"
+                            type="button"
+                            onClick={() => {
+                              setEditingDeviceId(null);
+                              setDeviceEdit(null);
+                            }}
+                          >
+                            <X size={16} />
+                            <span>გაუქმება</span>
+                          </button>
+                        </div>
+                      </div>
                     ) : (
-                      <span className="muted">ტეგი არ აქვს</span>
-                    )}
-                  </div>
-                  <div className="device-exclusion-cell">
-                    <button
-                      className={`device-exclusion-toggle ${device.isExcluded ? "active" : ""}`}
-                      type="button"
-                      onClick={() => toggleDeviceExclusion(device)}
-                      disabled={!permissions.editDevice || saving}
-                      aria-pressed={device.isExcluded}
-                      title="ჩართვისას X-Station რუკაზე, ანალიტიკაში და Offline აღრიცხვაში აღარ გამოჩნდება"
-                    >
-                      {device.isExcluded ? (
-                        <ToggleRight size={24} />
-                      ) : (
-                        <ToggleLeft size={24} />
-                      )}
-                      <span>
-                        {device.isExcluded ? "გამორიცხულია" : "აქტიურია"}
-                      </span>
-                    </button>
-                    <small>რუკა/აღრიცხვა</small>
-                  </div>
-                  <div className="row-actions">
-                    {permissions.editDevice ? (
-                      <button
-                        className="icon-button"
-                        type="button"
-                        onClick={() => startEditDevice(device)}
-                        aria-label="X-Station-ის რედაქტირება"
-                        title="X-Station-ის რედაქტირება"
-                      >
-                        <Edit3 size={17} />
-                      </button>
-                    ) : null}
-                    {permissions.deleteDevice ? (
-                      <button
-                        className="icon-button danger"
-                        type="button"
-                        onClick={() => removeDevice(device.id)}
-                        aria-label="X-Station-ის წაშლა"
-                        title="X-Station-ის წაშლა"
-                      >
-                        <Trash2 size={17} />
-                      </button>
-                    ) : null}
-                  </div>
-                </article>
-              ),
-            )}
+                      <div key={device.id} className="region-device-row">
+                        <div>
+                          <span
+                            className={`garden-device-chip ${device.status}`}
+                            title={deviceStatusTitles[device.status]}
+                          >
+                            {device.name}
+                          </span>
+                        </div>
+                        <div className="row-tags">
+                          {device.tags.length ? (
+                            device.tags.map((tagName) => (
+                              <span key={tagName} className="tag-toggle compact active">
+                                {tagName}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="muted">ტეგი არ აქვს</span>
+                          )}
+                        </div>
+                        <div className="device-exclusion-cell">
+                          <button
+                            className={`device-exclusion-toggle ${device.isExcluded ? "active" : ""}`}
+                            type="button"
+                            onClick={() => toggleDeviceExclusion(device)}
+                            disabled={!permissions.editDevice || saving}
+                            aria-pressed={device.isExcluded}
+                            title="ჩართვისას X-Station რუკაზე, ანალიტიკაში და Offline აღრიცხვაში აღარ გამოჩნდება"
+                          >
+                            {device.isExcluded ? (
+                              <ToggleRight size={24} />
+                            ) : (
+                              <ToggleLeft size={24} />
+                            )}
+                            <span>
+                              {device.isExcluded ? "გამორიცხულია" : "აქტიურია"}
+                            </span>
+                          </button>
+                          <small>რუკა/აღრიცხვა</small>
+                        </div>
+                        <div className="row-actions">
+                          {permissions.editDevice ? (
+                            <button
+                              className="icon-button"
+                              type="button"
+                              onClick={() => startEditDevice(device)}
+                              aria-label="X-Station-ის რედაქტირება"
+                              title="X-Station-ის რედაქტირება"
+                            >
+                              <Edit3 size={17} />
+                            </button>
+                          ) : null}
+                          {permissions.deleteDevice ? (
+                            <button
+                              className="icon-button danger"
+                              type="button"
+                              onClick={() => removeDevice(device.id)}
+                              aria-label="X-Station-ის წაშლა"
+                              title="X-Station-ის წაშლა"
+                            >
+                              <Trash2 size={17} />
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ),
+                  )}
+                </div>
+              </article>
+            ))}
           </div>
         </section>
       </section>
@@ -1161,12 +1216,13 @@ function compareDevices(a: Device, b: Device, sortMode: DeviceSortMode) {
   if (sortMode === "region") {
     return (
       a.region.localeCompare(b.region) ||
-      a.name.localeCompare(b.name) ||
+      a.name.localeCompare(b.name, undefined, { numeric: true }) ||
       a.id.localeCompare(b.id)
     );
   }
 
   const result =
-    a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
+    a.name.localeCompare(b.name, undefined, { numeric: true }) ||
+    a.id.localeCompare(b.id);
   return sortMode === "za" ? -result : result;
 }

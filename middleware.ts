@@ -1,7 +1,6 @@
 import { jwtVerify } from "jose";
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE } from "@/lib/session";
-import { isLoginRateLimited } from "@/lib/rate-limit";
 
 const publicRoutes = [
   "/login",
@@ -10,7 +9,11 @@ const publicRoutes = [
   // full session cookie exists yet, so this can't require one — it reads
   // its own short-lived pending-2FA cookie instead (see /lib/auth.ts).
   "/api/auth/login/2fa",
-  "/api/auth/change-password",
+  // change-password is intentionally NOT here: the user already holds a
+  // full session cookie when calling it (including the forced-reset flow,
+  // which gets its session at login), so there's no reason to exempt it
+  // from middleware's session check or the CSRF origin check below — it
+  // should be defended exactly like every other mutating route.
   "/api/cron/offline-capture",
   "/api/cron/status-poll",
 ];
@@ -26,14 +29,6 @@ function getSecret() {
     throw new Error("AUTH_SECRET environment variable is not set.");
   }
   return new TextEncoder().encode(secret);
-}
-
-function getClientIp(request: NextRequest): string {
-  return (
-    request.headers.get("cf-connecting-ip") ??
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    "unknown"
-  );
 }
 
 async function isValidSession(token?: string) {
@@ -56,17 +51,12 @@ export async function middleware(request: NextRequest) {
   );
   const token = request.cookies.get(SESSION_COOKIE)?.value;
   const valid = await isValidSession(token);
-  const ip = getClientIp(request);
 
-  // Rate limit login endpoint
-  if (pathname === "/api/auth/login" && request.method === "POST") {
-    if (isLoginRateLimited(ip)) {
-      return NextResponse.json(
-        { message: "ძალიან ბევრი მცდელობა. სცადეთ მოგვიანებით." },
-        { status: 429 },
-      );
-    }
-  }
+  // Login rate limiting lives in the route handler itself
+  // (src/app/api/auth/login/route.ts), not here — middleware runs in the
+  // Edge runtime and the route runs in the Node.js runtime, so a check
+  // here would consult a separate, always-empty copy of the in-memory
+  // attempt counter and never actually block anything.
 
   if (isPublic) {
     return NextResponse.next();
@@ -84,14 +74,15 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // CSRF: reject cross-origin mutation requests
+  // CSRF: reject cross-origin mutation requests. Fails CLOSED: if
+  // APP_URL is ever unset/misconfigured (ALLOWED_ORIGINS empty) or a
+  // mutating request arrives with no Origin header at all, that's treated
+  // as untrusted rather than silently allowed through — a same-origin
+  // browser request always sends a matching Origin on state-changing
+  // methods, so neither case should occur in normal operation.
   if (MUTATION_METHODS.has(request.method) && pathname.startsWith("/api")) {
     const origin = request.headers.get("origin");
-    if (
-      origin &&
-      ALLOWED_ORIGINS.length > 0 &&
-      !ALLOWED_ORIGINS.includes(origin)
-    ) {
+    if (ALLOWED_ORIGINS.length === 0 || !origin || !ALLOWED_ORIGINS.includes(origin)) {
       return NextResponse.json({ message: "Forbidden" }, { status: 403 });
     }
   }

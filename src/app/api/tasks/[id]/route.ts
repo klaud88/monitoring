@@ -11,10 +11,26 @@ import {
 } from "@/lib/repositories";
 import { filterAssignableTaskUserIds } from "@/lib/task-assignees";
 import { diffTrackedTaskFields } from "@/lib/task-history";
-import type { TaskPriority, TaskStatus } from "@/lib/types";
+import { resolveTaskVisibilityScope } from "@/lib/task-visibility";
+import type { SessionUser, Task, TaskPriority, TaskStatus } from "@/lib/types";
 
 const taskStatuses: TaskStatus[] = ["planned", "in_progress", "blocked", "done"];
 const priorities: TaskPriority[] = ["low", "normal", "high", "urgent"];
+
+// A role with plain tasks.edit/tasks.delete (no tasks.view_all) is meant to
+// act only on tasks it can actually see — mirrors the GET list's own
+// resolveTaskVisibilityScope so PATCH/DELETE can't reach a task outside
+// that scope just because the id is guessable.
+function canAccessTask(user: SessionUser | null, task: Task): boolean {
+  const scope = resolveTaskVisibilityScope(user);
+  if (!scope.assigneeUserId) {
+    return true;
+  }
+  if (task.assigneeIds.includes(scope.assigneeUserId)) {
+    return true;
+  }
+  return scope.includeInfoTasks && Boolean(task.info);
+}
 
 export async function PATCH(
   request: NextRequest,
@@ -28,7 +44,7 @@ export async function PATCH(
   const { id } = await context.params;
   const body = await request.json().catch(() => null);
   const existingTask = (await getTasks()).find((task) => task.id === id);
-  if (!existingTask) {
+  if (!existingTask || !canAccessTask(user, existingTask)) {
     return NextResponse.json({ message: "Task not found" }, { status: 404 });
   }
 
@@ -128,6 +144,11 @@ export async function DELETE(
   }
 
   const { id } = await context.params;
+  const existingTask = (await getTasks()).find((task) => task.id === id);
+  if (!existingTask || !canAccessTask(user, existingTask)) {
+    return NextResponse.json({ message: "Task not found" }, { status: 404 });
+  }
+
   const deleted = await deleteTask(id);
   if (!deleted) {
     return NextResponse.json({ message: "Task not found" }, { status: 404 });

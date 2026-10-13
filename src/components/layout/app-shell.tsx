@@ -4,6 +4,7 @@ import { SESSION_COOKIE, hasPermission, isAdmin, verifySessionToken } from "@/li
 import { getFirstAllowedPath } from "@/lib/navigation";
 import type { PermissionKey } from "@/lib/types";
 import { MustChangePasswordModal } from "@/components/auth/must-change-password-modal";
+import { AppCredit } from "./app-credit";
 import { AppSidebar } from "./app-sidebar";
 import { MobileNavToggle } from "./mobile-nav-toggle";
 import { MobileWheelNav } from "./mobile-wheel-nav";
@@ -117,6 +118,7 @@ export async function AppShell({
           </header>
 
           <main className="app-main">{children}</main>
+          <AppCredit />
         </div>
       </div>
     </>

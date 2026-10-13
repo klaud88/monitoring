@@ -1,11 +1,23 @@
 import type { NextRequest } from "next/server";
 
+// nginx sits directly in front of this app and forwards with
+// `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for`, which
+// APPENDS its own observed $remote_addr to whatever X-Forwarded-For the
+// client already sent — it never strips a client-supplied value. That
+// means the FIRST entry is attacker-controlled (trivially spoofable to
+// defeat the rate limiter below) and the LAST entry is always the one
+// nginx itself appended, which a client cannot forge. Cloudflare is not in
+// front of this deployment (its DNS resolves straight to the origin IP),
+// so cf-connecting-ip isn't a trustworthy signal here either and is no
+// longer consulted.
 export function getClientIp(request: NextRequest): string {
-  return (
-    request.headers.get("cf-connecting-ip") ??
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    "unknown"
-  );
+  const forwardedFor = request.headers.get("x-forwarded-for");
+  if (!forwardedFor) {
+    return "unknown";
+  }
+
+  const parts = forwardedFor.split(",").map((part) => part.trim()).filter(Boolean);
+  return parts[parts.length - 1] ?? "unknown";
 }
 
 const loginAttempts = new Map<string, { count: number; resetAt: number }>();
