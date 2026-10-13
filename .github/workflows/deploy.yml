@@ -6,7 +6,20 @@ on:
   workflow_dispatch:
 
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npx prisma generate
+      - run: npm run lint
+      - run: npx tsc --noEmit
+
   deploy:
+    needs: check
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to server
@@ -18,8 +31,9 @@ jobs:
           script: |
             set -e
             cd /var/www/monitoring
-               git checkout -- package-lock.json
+            git checkout -- package-lock.json
             git pull origin main
             npm install
+            # npx prisma migrate deploy
             npm run build
             pm2 restart monitoring
