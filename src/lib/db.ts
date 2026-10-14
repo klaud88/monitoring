@@ -14,7 +14,10 @@ const recoverableDatabaseErrorCodes = new Set([
   "PROTOCOL_CONNECTION_LOST",
 ]);
 
+// The portal (PORTAL_MODE=1, src/lib/portal.ts) holds no data and must
+// never open a connection, even if a stray .env supplies a DATABASE_URL.
 const hasDatabaseConfig = () =>
+  process.env.PORTAL_MODE !== "1" &&
   Boolean(process.env.DATABASE_URL || process.env.MYSQL_HOST || process.env.MYSQL_DATABASE);
 
 export function getPool(): Pool | null {

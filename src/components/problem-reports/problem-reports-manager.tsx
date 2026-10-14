@@ -12,9 +12,9 @@ import {
   Save,
   Search,
   Trash2,
-  UserRound,
   X,
 } from "lucide-react";
+import { AssigneeToggle } from "@/components/common/assignee-toggle";
 import { useConfirmDialog } from "@/components/common/confirm-dialog";
 import { FiltersToggle } from "@/components/common/filters-toggle";
 import { TaskTagPicker } from "@/components/tasks/task-tag-picker";
@@ -41,8 +41,17 @@ type ProblemReportPermissions = {
   manageStatus: boolean;
 };
 
+/** A category as the report form sees it; resolvedUserIds only reaches
+    users who may assign, so their assignee picker can be pre-filled. */
+export type ReportCategoryOption = {
+  id: string;
+  title: string;
+  resolvedUserIds?: string[];
+};
+
 type Props = {
   initialReports: ProblemReport[];
+  categories: ReportCategoryOption[];
   devices: Device[];
   users: AppUser[];
   initialTags: string[];
@@ -52,6 +61,8 @@ type Props = {
 };
 
 type ReportDraft = {
+  /** "" = not chosen yet, OTHER_CATEGORY = free-text title. */
+  categoryId?: string;
   deviceId: string;
   title: string;
   issue: string;
@@ -84,12 +95,14 @@ const priorityLabels: Record<TaskPriority, string> = {
 };
 
 const statusOrder: TaskStatus[] = ["planned", "in_progress", "blocked", "done"];
+const OTHER_CATEGORY = "__other__";
 /* List order: active work first, finished last. */
 const listStatusOrder: TaskStatus[] = ["in_progress", "planned", "blocked", "done"];
 const today = new Date().toISOString().slice(0, 10);
 
 function emptyDraft(deviceId: string): ReportDraft {
   return {
+    categoryId: "",
     deviceId,
     title: "",
     issue: "",
@@ -104,6 +117,7 @@ function emptyDraft(deviceId: string): ReportDraft {
 
 export function ProblemReportsManager({
   initialReports,
+  categories,
   devices,
   users,
   initialTags,
@@ -232,6 +246,10 @@ export function ProblemReportsManager({
 
   async function createReport(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (categories.length && !draft.categoryId) {
+      setError("აირჩიეთ პრობლემის კატეგორია.");
+      return;
+    }
     if (
       !permissions.create ||
       !draft.deviceId ||
@@ -642,6 +660,7 @@ export function ProblemReportsManager({
                 onCreateTag={createAvailableTag}
                 onDeleteTag={removeAvailableTag}
                 onToggleAssignee={toggleDraftAssignee}
+                categories={categories}
                 mode="create"
               />
             </form>
@@ -856,6 +875,7 @@ function ReportFields({
   onCreateTag,
   onDeleteTag,
   onToggleAssignee,
+  categories = [],
   mode,
 }: {
   draft: ReportDraft;
@@ -872,6 +892,7 @@ function ReportFields({
   onCreateTag: (tagName: string) => Promise<boolean> | boolean;
   onDeleteTag: (tagName: string) => Promise<boolean> | boolean;
   onToggleAssignee: (userId: string) => void;
+  categories?: ReportCategoryOption[];
   mode: "create" | "edit";
 }) {
   const canEditCore = mode === "create" || permissions.edit;
@@ -904,15 +925,69 @@ function ReportFields({
           ))}
         </select>
       </label>
-      <label className="task-field span-2">
-        <span>სათაური</span>
-        <input
-          value={draft.title}
-          onChange={(event) => update({ title: event.target.value })}
-          disabled={!canEditCore}
-          required
-        />
-      </label>
+      {/* New reports pick a category: it becomes the title, and the server
+          assigns the people linked to it on /admin/problem-categories. */}
+      {mode === "create" && categories.length ? (
+        <div className="task-field span-full">
+          <span>რა პრობლემაა?</span>
+          <div className="report-category-picker" role="radiogroup">
+            {categories.map((category) => (
+              <button
+                key={category.id}
+                type="button"
+                role="radio"
+                aria-checked={draft.categoryId === category.id}
+                className={`report-category${draft.categoryId === category.id ? " active" : ""}`}
+                onClick={() =>
+                  update({
+                    categoryId: category.id,
+                    title: category.title,
+                    ...(permissions.assignUsers && category.resolvedUserIds
+                      ? { assigneeIds: category.resolvedUserIds }
+                      : {}),
+                  })
+                }
+              >
+                {category.title}
+              </button>
+            ))}
+            <button
+              type="button"
+              role="radio"
+              aria-checked={draft.categoryId === OTHER_CATEGORY}
+              className={`report-category other${draft.categoryId === OTHER_CATEGORY ? " active" : ""}`}
+              onClick={() =>
+                update({
+                  categoryId: OTHER_CATEGORY,
+                  title: "",
+                  ...(permissions.assignUsers ? { assigneeIds: [] } : {}),
+                })
+              }
+            >
+              სხვა
+            </button>
+          </div>
+          {draft.categoryId === OTHER_CATEGORY ? (
+            <input
+              className="report-category-title"
+              value={draft.title}
+              onChange={(event) => update({ title: event.target.value })}
+              placeholder="მოკლედ აღწერეთ პრობლემის სათაური"
+              required
+            />
+          ) : null}
+        </div>
+      ) : (
+        <label className="task-field span-2">
+          <span>სათაური</span>
+          <input
+            value={draft.title}
+            onChange={(event) => update({ title: event.target.value })}
+            disabled={!canEditCore}
+            required
+          />
+        </label>
+      )}
       <label className="task-field">
         <span>ტელეფონი</span>
         <input
@@ -997,15 +1072,12 @@ function ReportFields({
           <span>დავალების შემსრულებლები</span>
           <div className="row-tags">
             {users.map((user) => (
-              <button
+              <AssigneeToggle
                 key={user.id}
-                type="button"
-                className={`tag-toggle compact ${draft.assigneeIds.includes(user.id) ? "active" : ""}`}
-                onClick={() => onToggleAssignee(user.id)}
-              >
-                <UserRound size={13} />
-                {user.name}
-              </button>
+                user={user}
+                selected={draft.assigneeIds.includes(user.id)}
+                onToggle={() => onToggleAssignee(user.id)}
+              />
             ))}
           </div>
         </div>
@@ -1063,6 +1135,10 @@ function normalizeDraftForSave(
   const canManagePriority = permissions.edit || permissions.manageStatus;
 
   return {
+    categoryId:
+      draft.categoryId && draft.categoryId !== OTHER_CATEGORY
+        ? draft.categoryId
+        : undefined,
     deviceId: draft.deviceId,
     title: draft.title.trim(),
     issue: draft.issue.trim(),

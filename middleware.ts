@@ -1,6 +1,6 @@
 import { jwtVerify } from "jose";
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE } from "@/lib/session";
+import { SESSION_COOKIE, TENANT_COOKIE } from "@/lib/session";
 
 const publicRoutes = [
   "/login",
@@ -16,6 +16,8 @@ const publicRoutes = [
   // should be defended exactly like every other mutating route.
   "/api/cron/offline-capture",
   "/api/cron/status-poll",
+  // Called by the portal on localhost; guarded by PORTAL_SYNC_SECRET.
+  "/api/internal/login-identifiers",
 ];
 
 const MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -46,6 +48,19 @@ async function isValidSession(token?: string) {
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // The portal process only serves the login page and the login call it
+  // forwards to an organisation; it holds no data of its own.
+  if (process.env.PORTAL_MODE === "1") {
+    if (pathname === "/login" || pathname === "/api/auth/login") {
+      return NextResponse.next();
+    }
+    if (pathname.startsWith("/api")) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    }
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+
   const isPublic = publicRoutes.some(
     (route) => pathname === route || pathname.startsWith(`${route}/`),
   );
@@ -58,12 +73,37 @@ export async function middleware(request: NextRequest) {
   // here would consult a separate, always-empty copy of the in-memory
   // attempt counter and never actually block anything.
 
+  // Behind the portal, an organisation process never shows its own login
+  // page: without a valid session it drops the routing cookie and sends
+  // the browser back to the portal (same URL, nginx now routes there), so
+  // a user of any organisation can sign in on this browser.
+  const routedByPortal =
+    Boolean(process.env.TENANT_SLUG) && request.cookies.has(TENANT_COOKIE);
+  if (
+    routedByPortal &&
+    !valid &&
+    !pathname.startsWith("/api") &&
+    (!isPublic || pathname === "/login")
+  ) {
+    const loginUrl = new URL("/login", request.url);
+    if (pathname !== "/" && pathname !== "/login") {
+      loginUrl.searchParams.set("next", `${pathname}${request.nextUrl.search}`);
+    }
+    const response = NextResponse.redirect(loginUrl);
+    response.cookies.delete(TENANT_COOKIE);
+    return response;
+  }
+
   if (isPublic) {
     return NextResponse.next();
   }
 
   if (pathname.startsWith("/api") && !valid) {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    const response = NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    if (routedByPortal) {
+      response.cookies.delete(TENANT_COOKIE);
+    }
+    return response;
   }
 
   if (!valid) {

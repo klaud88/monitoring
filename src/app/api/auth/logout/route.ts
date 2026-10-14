@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
-import { shouldUseSecureCookie } from "@/lib/session";
+import { shouldUseSecureCookie, TENANT_COOKIE } from "@/lib/session";
 
 export async function POST(request: NextRequest) {
   const user = await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
@@ -26,6 +26,8 @@ export async function POST(request: NextRequest) {
     path: "/",
     maxAge: 0
   });
+  // Next request goes back to the portal's login page.
+  response.cookies.delete(TENANT_COOKIE);
 
   return response;
 }

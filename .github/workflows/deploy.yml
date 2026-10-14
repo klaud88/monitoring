@@ -33,10 +33,25 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           script: |
             set -e
-            cd /var/www/monitoring
-            git checkout -- package-lock.json
-            git pull origin main
-            npm install
-            # npx prisma migrate deploy
-            npm run build
-            pm2 restart monitoring
+            # Multi-organisation layout (deploy/MULTI_TENANT.md): one build,
+            # one pm2 process per /etc/kgm/*.env. Until the server is moved
+            # there, deploy the single-organisation app as before.
+            if [ -f /var/www/kgm/ecosystem.config.cjs ]; then
+              cd /var/www/kgm
+              git checkout -- package-lock.json
+              git pull origin main
+              npm ci
+              # prisma generate needs a URL but never connects; runtime
+              # config comes from /etc/kgm/*.env, not from a .env here.
+              DATABASE_URL="mysql://build:build@127.0.0.1:3306/build" npm run build
+              pm2 startOrReload ecosystem.config.cjs --update-env
+              pm2 save
+            else
+              cd /var/www/monitoring
+              git checkout -- package-lock.json
+              git pull origin main
+              npm install
+              # npx prisma migrate deploy
+              npm run build
+              pm2 restart monitoring
+            fi

@@ -55,3 +55,7 @@ curl -X POST "$APP_URL/api/cron/offline-capture" -H "Authorization: Bearer $OFFL
 ```
 
 The `/offline-records` page also backfills today's snapshot after 09:00 when it is opened.
+
+## Several organisations on one domain
+
+Production can serve several organisations on `kgm.online.ge`, each with its own database, BioStar and pm2 process, behind a login portal. See [deploy/MULTI_TENANT.md](deploy/MULTI_TENANT.md). In that layout cron jobs call each organisation's port directly (`http://127.0.0.1:<PORT>/api/cron/...`), not `$APP_URL`.

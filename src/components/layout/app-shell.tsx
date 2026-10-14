@@ -27,6 +27,7 @@ const navPermissions: NavPermission[] = [
   { href: "/admin/users", permission: "users.view" },
   { href: "/admin/permissions", permission: "permissions.view" },
   { href: "/analytics", permission: "analytics.view" },
+  { href: "/admin/problem-categories", adminOnly: true },
   { href: "/admin/audit-logs", adminOnly: true },
 ];
 

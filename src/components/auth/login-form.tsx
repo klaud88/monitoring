@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { KeyRound, LogIn, Mail, ShieldCheck } from "lucide-react";
 import { canAccessPath, getFirstAllowedPath } from "@/lib/navigation";
 import type { SessionUser } from "@/lib/types";
@@ -38,7 +37,6 @@ function getLoginMessage(p: number) {
 }
 
 export function LoginForm({ nextPath }: LoginFormProps) {
-  const router = useRouter();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   // "credentials" is email/password; a 2FA account moves to "code" once the
@@ -79,8 +77,9 @@ export function LoginForm({ nextPath }: LoginFormProps) {
     const target = canAccessPath(user, redirectTo)
       ? redirectTo
       : getFirstAllowedPath(user);
-    router.replace(target);
-    router.refresh();
+    // Full page load: behind the portal the next request is served by the
+    // organisation's own process, not the one that rendered this form.
+    window.location.assign(target);
   }
 
   async function submitCredentials(
@@ -173,6 +172,7 @@ export function LoginForm({ nextPath }: LoginFormProps) {
                 type="text"
                 value={identifier}
                 onChange={(event) => setIdentifier(event.target.value)}
+                placeholder="name@example.ge ან 101 / TB-101"
                 autoComplete="username"
                 required
               />

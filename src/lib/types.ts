@@ -120,6 +120,7 @@ export type Task = {
 export type ProblemReport = {
   id: string;
   taskId?: string;
+  categoryId?: string;
   deviceId: string;
   deviceGroupCode: string;
   title: string;
@@ -133,6 +134,19 @@ export type ProblemReport = {
   createdBy?: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type ProblemCategory = {
+  id: string;
+  title: string;
+  isActive: boolean;
+  deletedAt?: string;
+  sortOrder: number;
+  userIds: string[];
+  roleIds: string[];
+  /** Linked users plus the current members of linked roles, limited to
+      users allowed to be task assignees (tasks.assignable). */
+  resolvedUserIds: string[];
 };
 
 export type FormOneRecordItem = {

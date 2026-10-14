@@ -121,8 +121,9 @@ model roles {
   id               String             @id @db.VarChar(64)
   name             String             @unique(map: "name") @db.VarChar(80)
   label            String             @db.VarChar(120)
-  role_permissions role_permissions[]
-  users            users[]
+  role_permissions       role_permissions[]
+  problem_category_roles problem_category_roles[]
+  users                  users[]
 }
 
 model status_events {
@@ -227,6 +228,7 @@ model problem_report_assignees {
 model problem_reports {
   id                       String                     @id @db.VarChar(64)
   task_id                  String?                    @unique(map: "task_id") @db.VarChar(64)
+  category_id              String?                    @db.VarChar(64)
   device_id                String                     @db.VarChar(64)
   device_group_code        String                     @db.VarChar(80)
   title                    String                     @db.VarChar(220)
@@ -355,6 +357,7 @@ model users {
   device_issues  device_issues[]
   form_one_records form_one_records[]
   problem_report_assignees problem_report_assignees[]
+  problem_category_users problem_category_users[]
   problem_reports problem_reports[]
   task_assignees task_assignees[]
   tasks          tasks[]
@@ -406,4 +409,40 @@ enum tasks_priority {
   normal
   high
   urgent
+}
+
+/// Created at runtime by ensureProblemCategorySchema (src/lib/repositories.ts).
+model problem_categories {
+  id                     String                   @id @db.VarChar(64)
+  title                  String                   @db.VarChar(160)
+  is_active              Boolean                  @default(true)
+  sort_order             Int                      @default(0)
+  deleted_at             DateTime?                @db.Timestamp(0)
+  created_by             String?                  @db.VarChar(64)
+  created_at             DateTime                 @default(now()) @db.Timestamp(0)
+  updated_at             DateTime                 @default(now()) @db.Timestamp(0)
+  problem_category_users problem_category_users[]
+  problem_category_roles problem_category_roles[]
+
+  @@index([deleted_at, is_active, sort_order], map: "idx_problem_categories_state")
+}
+
+model problem_category_users {
+  category_id        String             @db.VarChar(64)
+  user_id            String             @db.VarChar(64)
+  problem_categories problem_categories @relation(fields: [category_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_problem_category_users_category")
+  users              users              @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_problem_category_users_user")
+
+  @@id([category_id, user_id])
+  @@index([user_id], map: "fk_problem_category_users_user")
+}
+
+model problem_category_roles {
+  category_id        String             @db.VarChar(64)
+  role_id            String             @db.VarChar(64)
+  problem_categories problem_categories @relation(fields: [category_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_problem_category_roles_category")
+  roles              roles              @relation(fields: [role_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_problem_category_roles_role")
+
+  @@id([category_id, role_id])
+  @@index([role_id], map: "fk_problem_category_roles_role")
 }

@@ -21,6 +21,7 @@ import {
   UserRound,
   X,
 } from "lucide-react";
+import { AssigneeToggle } from "@/components/common/assignee-toggle";
 import { useConfirmDialog } from "@/components/common/confirm-dialog";
 import { FiltersToggle } from "@/components/common/filters-toggle";
 import { TaskTagPicker } from "@/components/tasks/task-tag-picker";
@@ -924,11 +925,11 @@ export function TasksManager({
                 <span>დავალების შემსრულებლები</span>
                 <div className="row-tags">
                   {assignableUsers.map((user) => (
-                    <button
+                    <AssigneeToggle
                       key={user.id}
-                      type="button"
-                      className={`tag-toggle compact ${draft.assigneeIds.includes(user.id) ? "active" : ""}`}
-                      onClick={() =>
+                      user={user}
+                      selected={draft.assigneeIds.includes(user.id)}
+                      onToggle={() =>
                         setDraft((current) => ({
                           ...current,
                           assigneeIds: current.assigneeIds.includes(user.id)
@@ -936,9 +937,7 @@ export function TasksManager({
                             : [...current.assigneeIds, user.id],
                         }))
                       }
-                    >
-                      {user.name}
-                    </button>
+                    />
                   ))}
                 </div>
               </div>
@@ -1098,14 +1097,12 @@ export function TasksManager({
                 <span>დავალების შემსრულებლები</span>
                 <div className="row-tags">
                   {assignableUsers.map((user) => (
-                    <button
+                    <AssigneeToggle
                       key={user.id}
-                      type="button"
-                      className={`tag-toggle compact ${editDraft.assigneeIds.includes(user.id) ? "active" : ""}`}
-                      onClick={() => toggleEditAssignee(user.id)}
-                    >
-                      {user.name}
-                    </button>
+                      user={user}
+                      selected={editDraft.assigneeIds.includes(user.id)}
+                      onToggle={() => toggleEditAssignee(user.id)}
+                    />
                   ))}
                 </div>
               </div>

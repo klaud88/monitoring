@@ -6,6 +6,7 @@ import { getFirstAllowedPath } from "@/lib/navigation";
 import {
   getDevices,
   getDeviceGroupCode,
+  getProblemCategories,
   getProblemReports,
   getTaskTagNames,
   getUsers,
@@ -30,11 +31,12 @@ export default async function ProblemReportsPage({
   const deviceGroupCode =
     user?.role === "garden" ? normalizeDeviceGroupCode(user.deviceGroupCode) : "";
   const canAssignUsers = hasPermission(user, "problem_reports.assign");
-  const [devices, reports, users, taskTags] = await Promise.all([
+  const [devices, reports, users, taskTags, categories] = await Promise.all([
     getDevices(),
     getProblemReports({ deviceGroupCode }),
     canAssignUsers ? getUsers() : Promise.resolve([]),
     getTaskTagNames(),
+    getProblemCategories({ activeOnly: true }),
   ]);
   const visibleDevices = deviceGroupCode
     ? devices.filter(
@@ -45,6 +47,12 @@ export default async function ProblemReportsPage({
   return (
     <ProblemReportsManager
       initialReports={reports}
+      categories={categories.map(({ id, title, resolvedUserIds }) => ({
+        id,
+        title,
+        // Who a category reaches is only shown to those who may assign.
+        ...(canAssignUsers ? { resolvedUserIds } : {}),
+      }))}
       devices={visibleDevices}
       users={users}
       initialTags={taskTags}

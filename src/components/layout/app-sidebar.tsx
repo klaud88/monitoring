@@ -8,6 +8,7 @@ import {
   BarChart3,
   ClipboardList,
   FileText,
+  Layers,
   LogOut,
   MapPinned,
   MonitorCog,
@@ -73,6 +74,7 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/admin/users", label: "მომხმარებლები", icon: Users },
       { href: "/admin/permissions", label: "წვდომის უფლებები", icon: ShieldCheck },
+      { href: "/admin/problem-categories", label: "პრობლემის კატეგორიები", icon: Layers },
       { href: "/admin/audit-logs", label: "Audit Logs", icon: ScrollText },
     ],
   },

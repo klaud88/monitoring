@@ -10,9 +10,18 @@ const eslintConfig = [
   {
     // React Compiler rules added in eslint-config-next 16; existing effects
     // (localStorage reads, ?edit= deep links) trip them, so warn for now.
+    // Scoped to the files the react-hooks plugin is registered for.
+    files: ["**/*.{js,jsx,mjs,ts,tsx,mts,cts}"],
     rules: {
       "react-hooks/set-state-in-effect": "warn",
       "react-hooks/immutability": "warn"
+    }
+  },
+  {
+    // CommonJS by necessity (pm2 loads ecosystem.config.cjs with require).
+    files: ["**/*.cjs"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off"
     }
   }
 ];

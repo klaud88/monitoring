@@ -30,6 +30,7 @@ import type {
   Region,
   SessionUser,
   StatusEvent,
+  ProblemCategory,
   Task,
   TaskStatus,
 } from "./types";
@@ -41,6 +42,7 @@ import {
   taskTagCatalog,
 } from "./catalog";
 import { queryRows, withConnection } from "./db";
+import { getAssignableTaskUsers } from "./task-assignees";
 import { TBILISI_BOUNDS, clampLatLng, type LatLng } from "./geo";
 
 type UserRow = {
@@ -374,6 +376,7 @@ type ProblemReportRow = {
   created_at: DatabaseDate;
   updated_at: DatabaseDate;
   assignee_ids: string | null;
+  category_id: string | null;
 };
 
 type FormOneRecordRow = {
@@ -1176,6 +1179,7 @@ async function ensureOperationalSchema() {
           index idx_form_one_notifications_role (recipient_role, read_at)
         )
       `);
+      await ensureProblemCategorySchema(connection);
       await ensureTaskTagCatalog(connection);
       await ensureProblemReportAccess(connection);
       await ensureGardenUsersForDevices(connection);
@@ -1212,7 +1216,8 @@ async function addColumnIfMissing(
     | "tasks"
     | "users"
     | "monitored_devices"
-    | "form_one_records",
+    | "form_one_records"
+    | "problem_reports",
   columnName: string,
   columnDefinition: string,
 ) {
@@ -1285,6 +1290,85 @@ function isDuplicateIndexError(error: unknown) {
     "code" in error &&
     (error as { code?: unknown }).code === "ER_DUP_KEYNAME"
   );
+}
+
+/* Problem categories (admin page /admin/problem-categories): a garden
+   picks one instead of typing a title, and the category's linked users and
+   roles become the report's assignees automatically. */
+const DEFAULT_PROBLEM_CATEGORIES = [
+  "კამერები",
+  "სწრებადობა",
+  "ინტერნეტი",
+  "UPS",
+  "პროგრამების ინსტალაცია",
+];
+
+async function ensureProblemCategorySchema(connection: PoolConnection) {
+  await connection.query(`
+    create table if not exists problem_categories (
+      id varchar(64) primary key,
+      title varchar(160) not null,
+      is_active boolean not null default true,
+      sort_order int not null default 0,
+      deleted_at timestamp null,
+      created_by varchar(64) null,
+      created_at timestamp not null default current_timestamp,
+      updated_at timestamp not null default current_timestamp on update current_timestamp,
+      index idx_problem_categories_state (deleted_at, is_active, sort_order)
+    )
+  `);
+  await connection.query(`
+    create table if not exists problem_category_users (
+      category_id varchar(64) not null,
+      user_id varchar(64) not null,
+      primary key (category_id, user_id),
+      constraint fk_problem_category_users_category foreign key (category_id) references problem_categories(id) on delete cascade,
+      constraint fk_problem_category_users_user foreign key (user_id) references users(id) on delete cascade,
+      index fk_problem_category_users_user (user_id)
+    )
+  `);
+  await connection.query(`
+    create table if not exists problem_category_roles (
+      category_id varchar(64) not null,
+      role_id varchar(64) not null,
+      primary key (category_id, role_id),
+      constraint fk_problem_category_roles_category foreign key (category_id) references problem_categories(id) on delete cascade,
+      constraint fk_problem_category_roles_role foreign key (role_id) references roles(id) on delete cascade,
+      index fk_problem_category_roles_role (role_id)
+    )
+  `);
+
+  const reportColumns = await getTableColumns(connection, "problem_reports");
+  await addColumnIfMissing(
+    connection,
+    reportColumns,
+    "problem_reports",
+    "category_id",
+    "category_id varchar(64) null after task_id",
+  );
+
+  // One-time starter list, marker-gated so a category an admin deletes
+  // doesn't come back on the next restart.
+  await connection.query(`
+    create table if not exists app_migrations (
+      id varchar(64) primary key,
+      applied_at timestamp not null default current_timestamp
+    )
+  `);
+  const [seedRows] = await connection.query<RowDataPacket[]>(
+    "select 1 from app_migrations where id = 'problem_categories_seed_v1' limit 1",
+  );
+  if (seedRows.length === 0) {
+    for (const [index, title] of DEFAULT_PROBLEM_CATEGORIES.entries()) {
+      await connection.query(
+        "insert ignore into problem_categories (id, title, sort_order) values (?, ?, ?)",
+        [makeStableId("pcat", title), title, index],
+      );
+    }
+    await connection.query(
+      "insert ignore into app_migrations (id) values ('problem_categories_seed_v1')",
+    );
+  }
 }
 
 async function ensureProblemReportAccess(connection: PoolConnection) {
@@ -1537,6 +1621,33 @@ export async function getUserByEmail(email: string): Promise<AppUser | null> {
     twoFactorSecret: row.twofa_secret ?? undefined,
     permissions: csv(row.permissions) as PermissionKey[],
   };
+}
+
+/**
+ * Every identifier getUserByLogin accepts for an active user, in the
+ * portal's key format: a lower-cased email, or "xstation:<group code>".
+ */
+export async function getLoginIdentifiers(): Promise<string[] | null> {
+  await ensureOperationalSchema();
+  const rows = await queryRows<{ email: string | null; device_group_code: string | null }>(
+    "select email, device_group_code from users where is_active = true",
+  );
+  if (!rows) {
+    return null;
+  }
+
+  const identifiers = new Set<string>();
+  for (const row of rows) {
+    const email = String(row.email || "").trim().toLowerCase();
+    if (email) {
+      identifiers.add(email);
+    }
+    const groupCode = normalizeDeviceGroupCode(row.device_group_code);
+    if (groupCode) {
+      identifiers.add(`xstation:${groupCode}`);
+    }
+  }
+  return [...identifiers];
 }
 
 export async function getUserByLogin(identifier: string): Promise<AppUser | null> {
@@ -3892,6 +4003,7 @@ export async function getProblemReports({
       select
         pr.id,
         pr.task_id,
+        pr.category_id,
         pr.device_id,
         pr.device_group_code,
         pr.title,
@@ -3990,12 +4102,13 @@ export async function createProblemReport(
       await connection.query<ResultSetHeader>(
         `
           insert into problem_reports
-            (id, task_id, device_id, device_group_code, title, issue, phone, status, priority, tags, due_date, created_by)
-          values (?, ?, ?, ?, ?, ?, ?, ?, ?, cast(? as json), ?, ?)
+            (id, task_id, category_id, device_id, device_group_code, title, issue, phone, status, priority, tags, due_date, created_by)
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, cast(? as json), ?, ?)
         `,
         [
           reportId,
           syncTask ? taskId : null,
+          input.categoryId ?? null,
           input.deviceId,
           deviceGroupCode,
           input.title,
@@ -5237,6 +5350,7 @@ function mapProblemReportRow(row: ProblemReportRow): ProblemReport {
   return {
     id: row.id,
     taskId: row.task_id ?? undefined,
+    categoryId: row.category_id ?? undefined,
     deviceId: row.device_id,
     deviceGroupCode: row.device_group_code,
     title: row.title,
@@ -5747,6 +5861,197 @@ export async function updateTaskStatus(
 
   const task = mockTasks.find((item) => item.id === id);
   return task ? { ...task, status } : null;
+}
+
+type ProblemCategoryRow = {
+  id: string;
+  title: string;
+  is_active: boolean | number;
+  sort_order: number;
+  deleted_at: DatabaseDate | null;
+};
+
+/**
+ * Problem categories with their links. resolvedUserIds is who a new report
+ * in that category is assigned to: linked users plus the current members
+ * of linked roles, limited to task-assignable users — so a role link keeps
+ * following the role as people join or leave it.
+ */
+export async function getProblemCategories({
+  includeDeleted = false,
+  activeOnly = false,
+}: { includeDeleted?: boolean; activeOnly?: boolean } = {}): Promise<ProblemCategory[]> {
+  await ensureOperationalSchema();
+
+  const filters = [
+    includeDeleted ? "" : "deleted_at is null",
+    activeOnly ? "is_active = true" : "",
+  ].filter(Boolean);
+  const [rows, userLinks, roleLinks, users, roles] = await Promise.all([
+    queryRows<ProblemCategoryRow>(
+      `
+        select id, title, is_active, sort_order, deleted_at
+        from problem_categories
+        ${filters.length ? `where ${filters.join(" and ")}` : ""}
+        order by sort_order, created_at
+      `,
+    ),
+    queryRows<{ category_id: string; user_id: string }>(
+      "select category_id, user_id from problem_category_users",
+    ),
+    queryRows<{ category_id: string; role_id: string }>(
+      "select category_id, role_id from problem_category_roles",
+    ),
+    getUsers(),
+    getRoles(),
+  ]);
+
+  if (!rows) {
+    return [];
+  }
+
+  const assignable = getAssignableTaskUsers(users);
+  const assignableIds = new Set(assignable.map((user) => user.id));
+  const roleNameById = new Map(roles.map((role) => [role.id, role.name]));
+  const groupBy = <T extends { category_id: string }>(
+    links: T[] | null,
+    pick: (link: T) => string,
+  ) => {
+    const grouped = new Map<string, string[]>();
+    for (const link of links ?? []) {
+      grouped.set(link.category_id, [...(grouped.get(link.category_id) ?? []), pick(link)]);
+    }
+    return grouped;
+  };
+  const usersByCategory = groupBy(userLinks, (link) => link.user_id);
+  const rolesByCategory = groupBy(roleLinks, (link) => link.role_id);
+
+  return rows.map((row) => {
+    const userIds = usersByCategory.get(row.id) ?? [];
+    const roleIds = rolesByCategory.get(row.id) ?? [];
+    const roleNames = new Set(
+      roleIds.map((roleId) => roleNameById.get(roleId)).filter(Boolean),
+    );
+    const resolved = new Set(userIds.filter((userId) => assignableIds.has(userId)));
+    for (const user of assignable) {
+      if (roleNames.has(user.role)) {
+        resolved.add(user.id);
+      }
+    }
+
+    return {
+      id: row.id,
+      title: row.title,
+      isActive: toBoolean(row.is_active),
+      deletedAt: row.deleted_at ? toDateTimeString(row.deleted_at) : undefined,
+      sortOrder: Number(row.sort_order) || 0,
+      userIds,
+      roleIds,
+      resolvedUserIds: [...resolved],
+    };
+  });
+}
+
+/** An active, non-deleted category, or null — used when a report is filed. */
+export async function getActiveProblemCategory(id: string) {
+  if (!id) {
+    return null;
+  }
+  const categories = await getProblemCategories({ activeOnly: true });
+  return categories.find((category) => category.id === id) ?? null;
+}
+
+export async function saveProblemCategory(
+  input: {
+    id?: string;
+    title?: string;
+    userIds?: string[];
+    roleIds?: string[];
+    isActive?: boolean;
+    deleted?: boolean;
+  },
+  options: { createdBy?: string } = {},
+): Promise<ProblemCategory | null> {
+  await ensureOperationalSchema();
+
+  const savedId = await withConnection(async (connection) => {
+    await connection.beginTransaction();
+    try {
+      let id = input.id;
+      if (id) {
+        const [existing] = await connection.query<RowDataPacket[]>(
+          "select id from problem_categories where id = ? limit 1 for update",
+          [id],
+        );
+        if (!existing.length) {
+          await connection.rollback();
+          return null;
+        }
+      } else {
+        id = makeId("pcat");
+        const [orderRows] = await connection.query<RowDataPacket[]>(
+          "select coalesce(max(sort_order), -1) + 1 as next_order from problem_categories",
+        );
+        await connection.query(
+          "insert into problem_categories (id, title, sort_order, created_by) values (?, ?, ?, ?)",
+          [id, input.title ?? "", Number(orderRows[0]?.next_order) || 0, options.createdBy ?? null],
+        );
+      }
+
+      const updates: string[] = [];
+      const params: unknown[] = [];
+      if (input.id && input.title !== undefined) {
+        updates.push("title = ?");
+        params.push(input.title);
+      }
+      if (input.isActive !== undefined) {
+        updates.push("is_active = ?");
+        params.push(input.isActive);
+      }
+      if (input.deleted !== undefined) {
+        updates.push(input.deleted ? "deleted_at = current_timestamp" : "deleted_at = null");
+      }
+      if (updates.length) {
+        await connection.query(
+          `update problem_categories set ${updates.join(", ")} where id = ?`,
+          [...params, id],
+        );
+      }
+
+      if (input.userIds) {
+        await connection.query("delete from problem_category_users where category_id = ?", [id]);
+        if (input.userIds.length) {
+          await connection.query(
+            `insert ignore into problem_category_users (category_id, user_id)
+             select ?, id from users where id in (?)`,
+            [id, input.userIds],
+          );
+        }
+      }
+      if (input.roleIds) {
+        await connection.query("delete from problem_category_roles where category_id = ?", [id]);
+        if (input.roleIds.length) {
+          await connection.query(
+            `insert ignore into problem_category_roles (category_id, role_id)
+             select ?, id from roles where id in (?)`,
+            [id, input.roleIds],
+          );
+        }
+      }
+
+      await connection.commit();
+      return id;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    }
+  });
+
+  if (!savedId) {
+    return null;
+  }
+  const categories = await getProblemCategories({ includeDeleted: true });
+  return categories.find((category) => category.id === savedId) ?? null;
 }
 
 // Kick off schema migration as soon as this module is first imported so the

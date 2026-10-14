@@ -4,6 +4,7 @@ import { logAudit } from "@/lib/audit";
 import { filterRegisteredTaskTags } from "@/lib/catalog";
 import {
   createProblemReport,
+  getActiveProblemCategory,
   getTaskTagNames,
   getProblemReports,
   getUsers,
@@ -36,7 +37,10 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json().catch(() => null);
-  const title = String(body?.title || "").trim();
+  /* A chosen category sets the title server-side and, below, who the
+     report goes to; without one ("სხვა") the typed title is used. */
+  const category = await getActiveProblemCategory(String(body?.categoryId || "").trim());
+  const title = category ? category.title : String(body?.title || "").trim();
   const issue = String(body?.issue || "").trim();
   const phone = String(body?.phone || "").trim();
   const deviceId = String(body?.deviceId || "").trim();
@@ -65,10 +69,16 @@ export async function POST(request: NextRequest) {
     hasPermission(user, "problem_reports.assign") && Array.isArray(body?.assigneeIds)
       ? body.assigneeIds.map(String).filter(Boolean)
       : [];
-  const assigneeIds = filterAssignableTaskUserIds(
+  const chosenAssigneeIds = filterAssignableTaskUserIds(
     requestedAssigneeIds,
     await getUsers(),
   );
+  // Someone who may assign keeps their own pick (the form pre-fills it from
+  // the category); everyone else — a garden — gets the category's people.
+  const assigneeIds =
+    category && chosenAssigneeIds.length === 0
+      ? category.resolvedUserIds
+      : chosenAssigneeIds;
 
   if (!title || !issue || !deviceId || !dueDate) {
     return NextResponse.json(
@@ -88,6 +98,7 @@ export async function POST(request: NextRequest) {
       priority,
       tags,
       dueDate,
+      categoryId: category?.id,
       createdBy: user?.id,
     },
     {
@@ -101,7 +112,7 @@ export async function POST(request: NextRequest) {
     action: "problem_report.create",
     entityType: "problem_report",
     entityId: report.id,
-    metadata: { deviceId, priority, status, tags, assigneeIds },
+    metadata: { deviceId, priority, status, tags, assigneeIds, categoryId: category?.id },
     ipAddress: request.headers.get("x-forwarded-for") ?? undefined,
     userAgent: request.headers.get("user-agent") ?? undefined,
   });

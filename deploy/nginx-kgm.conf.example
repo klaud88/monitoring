@@ -1,0 +1,40 @@
+# kgm.online.ge — one domain, one app process per organisation.
+# Copy to /etc/nginx/sites-available/kgm, link into sites-enabled,
+# then: nginx -t && systemctl reload nginx
+#
+# The kgm_tenant cookie (set by the portal at login) picks the process.
+# No cookie, or an unknown value, goes to the portal's login page.
+# Add one line per organisation, matching PORT in /etc/kgm/<slug>.env.
+
+map $cookie_kgm_tenant $kgm_upstream {
+    default 127.0.0.1:3000;   # portal
+    org1    127.0.0.1:3001;
+    # org2  127.0.0.1:3002;
+}
+
+server {
+    listen 80;
+    server_name kgm.online.ge;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name kgm.online.ge;
+
+    ssl_certificate     /etc/letsencrypt/live/kgm.online.ge/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/kgm.online.ge/privkey.pem;
+
+    client_max_body_size 20m;
+
+    location / {
+        proxy_pass http://$kgm_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 60s;
+    }
+}
