@@ -641,20 +641,6 @@ async function ensureOperationalSchema() {
 
   if (!operationalSchemaPromise) {
     operationalSchemaPromise = withConnection(async (connection) => {
-      // Revoke offline_records.alerts from all non-admin/non-technician roles
-      await connection.query(
-        `delete rp from role_permissions rp
-         join roles r on r.id = rp.role_id
-         join permissions p on p.id = rp.permission_id
-         where p.code = 'offline_records.alerts' and r.name not in ('admin', 'technician')`,
-      );
-      // Revoke form_one.comment_edit from all non-admin roles (admin-only permission)
-      await connection.query(
-        `delete rp from role_permissions rp
-         join roles r on r.id = rp.role_id
-         join permissions p on p.id = rp.permission_id
-         where p.code = 'form_one.comment_edit' and r.name != 'admin'`,
-      );
       // Seed the task-visibility permission rows so they exist to grant even
       // before any role is saved through the Permissions UI.
       for (const key of [
@@ -1323,16 +1309,15 @@ async function ensureProblemReportAccess(connection: PoolConnection) {
     ],
   );
 
+  /* Default roles are granted only when a permission first appears. After
+     that the Permissions page owns role_permissions, so a restart or deploy
+     never re-enables what an admin switched off. */
   for (const permission of ACCESS_PERMISSIONS) {
     const [pageKey, actionKey] = permission.code.split(".");
-    await connection.query<ResultSetHeader>(
+    const [inserted] = await connection.query<ResultSetHeader>(
       `
-        insert into permissions (id, code, label, page_key, action_key)
+        insert ignore into permissions (id, code, label, page_key, action_key)
         values (?, ?, ?, ?, ?)
-        on duplicate key update
-          label = values(label),
-          page_key = values(page_key),
-          action_key = values(action_key)
       `,
       [
         makeStableId("perm", permission.code),
@@ -1342,8 +1327,16 @@ async function ensureProblemReportAccess(connection: PoolConnection) {
         actionKey,
       ],
     );
+    await connection.query<ResultSetHeader>(
+      `
+        update permissions
+        set label = ?, page_key = ?, action_key = ?
+        where code = ?
+      `,
+      [permission.label, pageKey, actionKey, permission.code],
+    );
 
-    if (permission.roles.length) {
+    if (inserted.affectedRows === 1 && permission.roles.length) {
       await connection.query<ResultSetHeader>(
         `
           insert ignore into role_permissions (role_id, permission_id)
