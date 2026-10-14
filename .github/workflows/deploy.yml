@@ -8,9 +8,12 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+    env:
+     # DATABASE_URL: "postgresql://user:pass@localhost:5432/db"
+      DATABASE_URL: "mysql://user:pass@localhost:3306/db"    
+  steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
       - run: npm install
