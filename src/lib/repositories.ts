@@ -1179,7 +1179,13 @@ async function ensureOperationalSchema() {
           index idx_form_one_notifications_role (recipient_role, read_at)
         )
       `);
-      await ensureProblemCategorySchema(connection);
+      // An optional feature must never take login down with it: if its
+      // tables can't be created, log it and carry on without categories.
+      try {
+        await ensureProblemCategorySchema(connection);
+      } catch (error) {
+        console.error("[schema] problem categories unavailable", error);
+      }
       await ensureTaskTagCatalog(connection);
       await ensureProblemReportAccess(connection);
       await ensureGardenUsersForDevices(connection);
@@ -1303,7 +1309,40 @@ const DEFAULT_PROBLEM_CATEGORIES = [
   "პროგრამების ინსტალაცია",
 ];
 
+/* Columns that reference another table must share its charset and
+   collation, or MySQL rejects the foreign key (ER_FK_INCOMPATIBLE_COLUMNS).
+   Older tables can differ from the server default, so read the real one. */
+async function getColumnCharset(
+  connection: PoolConnection,
+  tableName: string,
+  columnName: string,
+) {
+  const [rows] = await connection.query<RowDataPacket[]>(
+    `
+      select character_set_name, collation_name
+      from information_schema.columns
+      where table_schema = database() and table_name = ? and column_name = ?
+      limit 1
+    `,
+    [tableName, columnName],
+  );
+  const charset = String(rows[0]?.character_set_name ?? rows[0]?.CHARACTER_SET_NAME ?? "");
+  const collation = String(rows[0]?.collation_name ?? rows[0]?.COLLATION_NAME ?? "");
+  const safe = /^[a-z0-9_]+$/;
+  return safe.test(charset) && safe.test(collation) ? { charset, collation } : null;
+}
+
+function charsetClause(target: { charset: string; collation: string } | null) {
+  return target ? `character set ${target.charset} collate ${target.collation}` : "";
+}
+
 async function ensureProblemCategorySchema(connection: PoolConnection) {
+  const userIdCharset = await getColumnCharset(connection, "users", "id");
+  const roleIdCharset = await getColumnCharset(connection, "roles", "id");
+  const tableDefaults = userIdCharset
+    ? `default charset=${userIdCharset.charset} collate=${userIdCharset.collation}`
+    : "";
+
   await connection.query(`
     create table if not exists problem_categories (
       id varchar(64) primary key,
@@ -1315,27 +1354,31 @@ async function ensureProblemCategorySchema(connection: PoolConnection) {
       created_at timestamp not null default current_timestamp,
       updated_at timestamp not null default current_timestamp on update current_timestamp,
       index idx_problem_categories_state (deleted_at, is_active, sort_order)
-    )
+    ) ${tableDefaults}
   `);
+  // The table may already exist with another collation (e.g. from a failed
+  // earlier start), so the link columns follow whatever it really has.
+  const categoryIdCharset = await getColumnCharset(connection, "problem_categories", "id");
+
   await connection.query(`
     create table if not exists problem_category_users (
-      category_id varchar(64) not null,
-      user_id varchar(64) not null,
+      category_id varchar(64) ${charsetClause(categoryIdCharset)} not null,
+      user_id varchar(64) ${charsetClause(userIdCharset)} not null,
       primary key (category_id, user_id),
       constraint fk_problem_category_users_category foreign key (category_id) references problem_categories(id) on delete cascade,
       constraint fk_problem_category_users_user foreign key (user_id) references users(id) on delete cascade,
       index fk_problem_category_users_user (user_id)
-    )
+    ) ${tableDefaults}
   `);
   await connection.query(`
     create table if not exists problem_category_roles (
-      category_id varchar(64) not null,
-      role_id varchar(64) not null,
+      category_id varchar(64) ${charsetClause(categoryIdCharset)} not null,
+      role_id varchar(64) ${charsetClause(roleIdCharset)} not null,
       primary key (category_id, role_id),
       constraint fk_problem_category_roles_category foreign key (category_id) references problem_categories(id) on delete cascade,
       constraint fk_problem_category_roles_role foreign key (role_id) references roles(id) on delete cascade,
       index fk_problem_category_roles_role (role_id)
-    )
+    ) ${tableDefaults}
   `);
 
   const reportColumns = await getTableColumns(connection, "problem_reports");
@@ -5887,7 +5930,7 @@ export async function getProblemCategories({
     includeDeleted ? "" : "deleted_at is null",
     activeOnly ? "is_active = true" : "",
   ].filter(Boolean);
-  const [rows, userLinks, roleLinks, users, roles] = await Promise.all([
+  const loaded = await Promise.all([
     queryRows<ProblemCategoryRow>(
       `
         select id, title, is_active, sort_order, deleted_at
@@ -5904,11 +5947,16 @@ export async function getProblemCategories({
     ),
     getUsers(),
     getRoles(),
-  ]);
-
-  if (!rows) {
+  ]).catch((error) => {
+    // e.g. ER_NO_SUCH_TABLE when the category tables couldn't be created;
+    // the report form then falls back to a typed title.
+    console.error("[problem-categories] unavailable", error);
+    return null;
+  });
+  if (!loaded?.[0]) {
     return [];
   }
+  const [rows, userLinks, roleLinks, users, roles] = loaded;
 
   const assignable = getAssignableTaskUsers(users);
   const assignableIds = new Set(assignable.map((user) => user.id));
