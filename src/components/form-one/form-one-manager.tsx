@@ -353,7 +353,6 @@ export function FormOneManager({
   const isEditing = Boolean(editingRecordId);
   const hasEditableExistingField = hasEditableFormOneFields(permissions);
   const canEditExistingForm = permissions.edit && hasEditableExistingField;
-  const showForm = permissions.create || isEditing;
   const canSubmitCurrentForm = isEditing
     ? canEditExistingForm
     : permissions.create;
@@ -383,7 +382,6 @@ export function FormOneManager({
     isEditing
       ? permissions.edit && permissions.quantityEdit
       : permissions.create;
-  const canEditCurrentDueDate = permissions.dueDateEdit;
   const canChangeEditingDueDate = isEditing
     ? permissions.edit && permissions.dueDateEdit
     : permissions.dueDateEdit;

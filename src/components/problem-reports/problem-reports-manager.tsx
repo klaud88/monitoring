@@ -84,6 +84,8 @@ const priorityLabels: Record<TaskPriority, string> = {
 };
 
 const statusOrder: TaskStatus[] = ["planned", "in_progress", "blocked", "done"];
+/* List order: active work first, finished last. */
+const listStatusOrder: TaskStatus[] = ["in_progress", "planned", "blocked", "done"];
 const today = new Date().toISOString().slice(0, 10);
 
 function emptyDraft(deviceId: string): ReportDraft {
@@ -189,9 +191,16 @@ export function ProblemReportsManager({
 
   const visibleReports = useMemo(
     () =>
-      scopedReports.filter(
-        (report) => statusFilter === "all" || report.status === statusFilter,
-      ),
+      scopedReports
+        .filter(
+          (report) => statusFilter === "all" || report.status === statusFilter,
+        )
+        .sort(
+          (a, b) =>
+            listStatusOrder.indexOf(a.status) -
+              listStatusOrder.indexOf(b.status) ||
+            b.createdAt.localeCompare(a.createdAt),
+        ),
     [scopedReports, statusFilter],
   );
 

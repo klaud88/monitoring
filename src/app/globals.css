@@ -7868,6 +7868,41 @@ a.task-card2:hover .task-card2-title {
   font-weight: 600;
 }
 
+/* One continuous list: striped rows, an accent bar on hover. */
+.reports-page .task-row {
+  min-height: 46px;
+  border-bottom-color: var(--panel-line);
+  transition:
+    background-color 0.16s ease,
+    box-shadow 0.16s ease,
+    opacity 0.16s ease;
+}
+
+.reports-page .task-row:nth-child(even) {
+  background: var(--surface-soft);
+}
+
+.reports-page .task-row.urgent {
+  background: var(--row-danger);
+}
+
+.reports-page .task-row:hover {
+  background: var(--brand-soft);
+  box-shadow: inset 3px 0 0 var(--brand);
+}
+
+.reports-page .task-row.urgent:hover {
+  box-shadow: inset 3px 0 0 var(--red);
+}
+
+.reports-page .task-row.muted:hover {
+  opacity: 1;
+}
+
+.reports-page .task-row:hover .task-row-title {
+  color: var(--brand);
+}
+
 .task-field-hint {
   color: var(--ink-subtle);
   font-size: 11.5px;

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { type RefObject, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Bell,
@@ -35,6 +35,67 @@ type AlarmHandle = {
 };
 
 const seenMonitoringStorageKey = "offline-monitor-seen-notifications";
+
+function startAlarm(alarm: RefObject<AlarmHandle | null>) {
+  if (alarm.current || typeof window === "undefined") return;
+  const Ctx =
+    window.AudioContext ||
+    (window as typeof window & { webkitAudioContext?: typeof AudioContext })
+      .webkitAudioContext;
+  if (!Ctx) return;
+
+  const context = new Ctx();
+  const timeoutIds: number[] = [];
+
+  const playTone = (
+    frequency: number,
+    delayMs: number,
+    durationMs: number,
+  ) => {
+    const id = window.setTimeout(() => {
+      const osc = context.createOscillator();
+      const gain = context.createGain();
+      osc.type = "sine";
+      osc.frequency.value = frequency;
+      gain.gain.setValueAtTime(0.0001, context.currentTime);
+      gain.gain.exponentialRampToValueAtTime(
+        0.18,
+        context.currentTime + 0.02,
+      );
+      gain.gain.exponentialRampToValueAtTime(
+        0.0001,
+        context.currentTime + durationMs / 1000,
+      );
+      osc.connect(gain);
+      gain.connect(context.destination);
+      osc.start();
+      osc.stop(context.currentTime + durationMs / 1000 + 0.03);
+    }, delayMs);
+    timeoutIds.push(id);
+  };
+
+  const playMelody = () => {
+    void context.resume().catch(() => undefined);
+    playTone(523, 0, 120);
+    playTone(659, 150, 120);
+    playTone(784, 300, 180);
+  };
+
+  const intervalId = window.setInterval(playMelody, 1200);
+  const stopTimeoutId = window.setTimeout(() => stopAlarm(alarm), 10000);
+  playMelody();
+  alarm.current = { context, intervalId, timeoutIds, stopTimeoutId };
+}
+
+function stopAlarm(alarm: RefObject<AlarmHandle | null>) {
+  if (!alarm.current) return;
+  window.clearInterval(alarm.current.intervalId);
+  if (alarm.current.stopTimeoutId)
+    window.clearTimeout(alarm.current.stopTimeoutId);
+  alarm.current.timeoutIds.forEach((id) => window.clearTimeout(id));
+  void alarm.current.context.close().catch(() => undefined);
+  alarm.current = null;
+}
 
 export function NotificationsBell({
   canOfflineMonitor,
@@ -106,8 +167,8 @@ export function NotificationsBell({
       );
       setMonitoringNotifications(next);
       setHasUnseenMonitoring(nextHasUnseen);
-      if (nextHasUnseen) startAlarm();
-      else stopAlarm();
+      if (nextHasUnseen) startAlarm(alarm);
+      else stopAlarm(alarm);
     }
 
     function handleMonitoringData(event: Event) {
@@ -136,7 +197,7 @@ export function NotificationsBell({
       cancelled = true;
       window.clearInterval(id);
       window.removeEventListener("monitoring-data", handleMonitoringData);
-      stopAlarm();
+      stopAlarm(alarm);
     };
   }, [canOfflineMonitor]);
 
@@ -163,7 +224,7 @@ export function NotificationsBell({
       );
       persistSeenKeys(seenMonitoringKeys.current);
       setHasUnseenMonitoring(false);
-      stopAlarm();
+      stopAlarm(alarm);
     }
   }
 
@@ -198,7 +259,7 @@ export function NotificationsBell({
     persistSeenKeys(seenMonitoringKeys.current);
     setMonitoringNotifications([]);
     setHasUnseenMonitoring(false);
-    stopAlarm();
+    stopAlarm(alarm);
   }
 
   async function respond(action: "approve" | "reject") {
@@ -280,67 +341,6 @@ export function NotificationsBell({
   }
 
   // ── Alarm ─────────────────────────────────────────────────────────────────
-
-  function startAlarm() {
-    if (alarm.current || typeof window === "undefined") return;
-    const Ctx =
-      window.AudioContext ||
-      (window as typeof window & { webkitAudioContext?: typeof AudioContext })
-        .webkitAudioContext;
-    if (!Ctx) return;
-
-    const context = new Ctx();
-    const timeoutIds: number[] = [];
-
-    const playTone = (
-      frequency: number,
-      delayMs: number,
-      durationMs: number,
-    ) => {
-      const id = window.setTimeout(() => {
-        const osc = context.createOscillator();
-        const gain = context.createGain();
-        osc.type = "sine";
-        osc.frequency.value = frequency;
-        gain.gain.setValueAtTime(0.0001, context.currentTime);
-        gain.gain.exponentialRampToValueAtTime(
-          0.18,
-          context.currentTime + 0.02,
-        );
-        gain.gain.exponentialRampToValueAtTime(
-          0.0001,
-          context.currentTime + durationMs / 1000,
-        );
-        osc.connect(gain);
-        gain.connect(context.destination);
-        osc.start();
-        osc.stop(context.currentTime + durationMs / 1000 + 0.03);
-      }, delayMs);
-      timeoutIds.push(id);
-    };
-
-    const playMelody = () => {
-      void context.resume().catch(() => undefined);
-      playTone(523, 0, 120);
-      playTone(659, 150, 120);
-      playTone(784, 300, 180);
-    };
-
-    const intervalId = window.setInterval(playMelody, 1200);
-    const stopTimeoutId = window.setTimeout(() => stopAlarm(), 10000);
-    playMelody();
-    alarm.current = { context, intervalId, timeoutIds, stopTimeoutId };
-  }
-
-  function stopAlarm() {
-    if (!alarm.current) return;
-    window.clearInterval(alarm.current.intervalId);
-    if (alarm.current.stopTimeoutId)
-      window.clearTimeout(alarm.current.stopTimeoutId);
-    alarm.current.timeoutIds.forEach((id) => window.clearTimeout(id));
-    void alarm.current.context.close().catch(() => undefined);
-    alarm.current = null;
-  }
 
   // ── Render ────────────────────────────────────────────────────────────────
 
