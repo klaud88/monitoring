@@ -5,6 +5,7 @@ import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { getFirstAllowedPath } from "@/lib/navigation";
 import {
   getDevices,
+  getRegions,
   getTaskTagNames,
   getTasks,
   getUsers,
@@ -18,11 +19,12 @@ export default async function DashboardPage() {
     redirect(getFirstAllowedPath(user));
   }
 
-  const [devices, tasks, users, taskTags] = await Promise.all([
+  const [devices, tasks, users, taskTags, regions] = await Promise.all([
     getDevices(),
     getTasks(resolveTaskVisibilityScope(user)),
     getUsers(),
     getTaskTagNames(),
+    getRegions(),
   ]);
 
   return (
@@ -30,6 +32,7 @@ export default async function DashboardPage() {
       initialDevices={devices}
       initialTasks={tasks}
       initialTags={taskTags}
+      regionNames={regions.map((region) => region.name)}
       users={users}
       canEditDeviceLocations={hasPermission(user, "devices.edit")}
       canCreateTaskTags={hasPermission(user, "tasks.tag_create")}

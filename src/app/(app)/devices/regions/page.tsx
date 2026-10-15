@@ -6,6 +6,7 @@ import { getFirstAllowedPath } from "@/lib/navigation";
 import {
   getDeviceTagNames,
   getDevices,
+  getGardenRegions,
   getGardenTags,
   getRegions,
 } from "@/lib/repositories";
@@ -19,11 +20,12 @@ export default async function DeviceRegionsPage() {
     redirect(getFirstAllowedPath(user));
   }
 
-  const [devices, regions, tags, gardenTags] = await Promise.all([
+  const [devices, regions, tags, gardenTags, gardenRegions] = await Promise.all([
     getDevices(),
     getRegions(),
     getDeviceTagNames(),
     getGardenTags(),
+    getGardenRegions(),
   ]);
 
   return (
@@ -32,6 +34,7 @@ export default async function DeviceRegionsPage() {
       initialRegions={regions}
       initialTags={tags}
       initialGardenTags={gardenTags}
+      initialGardenRegions={gardenRegions}
       permissions={{
         createDevice: hasPermission(user, "devices.create"),
         editDevice: hasPermission(user, "devices.edit"),

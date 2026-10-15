@@ -43,6 +43,7 @@ import {
 } from "./catalog";
 import { queryRows, withConnection } from "./db";
 import { getAssignableTaskUsers } from "./task-assignees";
+import { getGardenKey } from "./device-associations";
 import { TBILISI_BOUNDS, clampLatLng, type LatLng } from "./geo";
 
 type UserRow = {
@@ -662,6 +663,10 @@ async function runBiostarDeviceSync() {
           );
       }
 
+      // New devices from BioStar join their garden's region straight away.
+      await applyGardenRegions(connection).catch((error) => {
+        console.error("[biostar-sync] garden regions not applied", error);
+      });
       await connection.commit();
       return biostarDevices.length;
     } catch (error) {
@@ -1242,6 +1247,11 @@ async function ensureOperationalSchema() {
       } catch (error) {
         console.error("[schema] garden tags unavailable", error);
       }
+      try {
+        await ensureGardenRegionSchema(connection);
+      } catch (error) {
+        console.error("[schema] garden regions unavailable", error);
+      }
       await ensureTaskTagCatalog(connection);
       await ensureProblemReportAccess(connection);
       await ensureGardenUsersForDevices(connection);
@@ -1483,6 +1493,101 @@ async function ensureGardenTagSchema(connection: PoolConnection) {
       index fk_garden_tags_tag (tag_id)
     ) ${tagIdCharset ? `default charset=${tagIdCharset.charset} collate=${tagIdCharset.collation}` : ""}
   `);
+}
+
+/* The region belongs to the garden ("5" for devices 5-1, 5-2); every device
+   copies it into devices.region_id, so everything that reads a device's
+   region (map, analytics, filters) sees its garden's region. */
+async function ensureGardenRegionSchema(connection: PoolConnection) {
+  const regionIdCharset = await getColumnCharset(connection, "regions", "id");
+  await connection.query(`
+    create table if not exists garden_regions (
+      garden_key varchar(80) primary key,
+      region_id varchar(64) ${charsetClause(regionIdCharset)} not null,
+      constraint fk_garden_regions_region foreign key (region_id) references regions(id) on delete cascade,
+      index fk_garden_regions_region (region_id)
+    ) ${regionIdCharset ? `default charset=${regionIdCharset.charset} collate=${regionIdCharset.collation}` : ""}
+  `);
+
+  // One-time: each garden takes the region most of its devices already
+  // had (ignoring devices with none), then all its devices are aligned.
+  const [seedRows] = await connection.query<RowDataPacket[]>(
+    "select 1 from app_migrations where id = 'garden_regions_seed_v1' limit 1",
+  );
+  if (seedRows.length) {
+    return;
+  }
+
+  const [devices] = await connection.query<RowDataPacket[]>(
+    "select name, region_id from devices where region_id is not null",
+  );
+  const counts = new Map<string, Map<string, number>>();
+  for (const device of devices) {
+    const key = getGardenKey(String(device.name));
+    if (!key) {
+      continue;
+    }
+    const regionCounts = counts.get(key) ?? new Map<string, number>();
+    const regionId = String(device.region_id);
+    regionCounts.set(regionId, (regionCounts.get(regionId) ?? 0) + 1);
+    counts.set(key, regionCounts);
+  }
+  for (const [gardenKey, regionCounts] of counts) {
+    const [regionId] = [...regionCounts].sort((a, b) => b[1] - a[1])[0];
+    await connection.query(
+      "insert ignore into garden_regions (garden_key, region_id) values (?, ?)",
+      [gardenKey.slice(0, 80), regionId],
+    );
+  }
+  await applyGardenRegions(connection);
+  await connection.query(
+    "insert ignore into app_migrations (id) values ('garden_regions_seed_v1')",
+  );
+}
+
+/**
+ * Copies each garden's region onto its devices (all gardens, or one).
+ * Devices of a garden without a region become unassigned.
+ */
+async function applyGardenRegions(connection: PoolConnection, gardenKey?: string) {
+  const [gardenRows] = await connection.query<RowDataPacket[]>(
+    "select garden_key, region_id from garden_regions",
+  );
+  const regionByGarden = new Map(
+    gardenRows.map((row) => [String(row.garden_key), String(row.region_id)]),
+  );
+  const [devices] = await connection.query<RowDataPacket[]>(
+    "select id, name, region_id from devices",
+  );
+
+  for (const device of devices) {
+    const key = getGardenKey(String(device.name));
+    if (gardenKey !== undefined && key !== gardenKey) {
+      continue;
+    }
+    const target = regionByGarden.get(key) ?? null;
+    const current = device.region_id ? String(device.region_id) : null;
+    if (target !== current) {
+      await connection.query("update devices set region_id = ? where id = ?", [
+        target,
+        device.id,
+      ]);
+    }
+  }
+}
+
+/** The region id a device named `deviceName` gets from its garden;
+    undefined when garden regions aren't available (old behaviour). */
+async function getGardenRegionId(connection: PoolConnection, deviceName: string) {
+  try {
+    const [rows] = await connection.query<RowDataPacket[]>(
+      "select region_id from garden_regions where garden_key = ? limit 1",
+      [getGardenKey(deviceName)],
+    );
+    return rows[0]?.region_id ? String(rows[0].region_id) : null;
+  } catch {
+    return undefined;
+  }
 }
 
 async function ensureProblemReportAccess(connection: PoolConnection) {
@@ -2877,6 +2982,62 @@ export async function renameTaskTag(oldName: string, newName: string) {
   });
 }
 
+/** Garden key → region name. Empty when the table isn't available. */
+export async function getGardenRegions(): Promise<Record<string, string>> {
+  await ensureOperationalSchema();
+  const rows = await queryRows<{ garden_key: string; name: string }>(
+    `
+      select gr.garden_key, r.name
+      from garden_regions gr
+      join regions r on r.id = gr.region_id
+    `,
+  ).catch((error) => {
+    console.error("[garden-regions] unavailable", error);
+    return null;
+  });
+  return Object.fromEntries((rows ?? []).map((row) => [row.garden_key, row.name]));
+}
+
+/** Sets (or, with null, clears) a garden's region and moves its devices. */
+export async function setGardenRegion(gardenKey: string, regionName: string | null) {
+  const key = gardenKey.trim().toLocaleLowerCase().slice(0, 80);
+  if (!key) {
+    return null;
+  }
+
+  await ensureOperationalSchema();
+  return withConnection(async (connection) => {
+    await connection.beginTransaction();
+    try {
+      const regionId = regionName
+        ? await getRegionIdByName(connection, regionName)
+        : null;
+      if (regionName && !regionId) {
+        await connection.rollback();
+        return null;
+      }
+
+      if (regionId) {
+        await connection.query(
+          `
+            insert into garden_regions (garden_key, region_id) values (?, ?)
+            on duplicate key update region_id = values(region_id)
+          `,
+          [key, regionId],
+        );
+      } else {
+        await connection.query("delete from garden_regions where garden_key = ?", [key]);
+      }
+      await applyGardenRegions(connection, key);
+      await connection.commit();
+      return { gardenKey: key, region: regionName ? normalizeRegionName(regionName) : null };
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    }
+  });
+}
+
 export async function createTaskTag(name: string) {
   const tagName = normalizeTaskTagName(name);
   if (!tagName) {
@@ -3121,7 +3282,13 @@ export async function createDevice(input: {
   const inserted = await withConnection(async (connection) => {
     await connection.beginTransaction();
     try {
-      const regionId = await getRegionIdByName(connection, input.region);
+      // The garden decides the region; input.region is only a fallback
+      // for databases without garden regions.
+      const gardenRegionId = await getGardenRegionId(connection, input.name);
+      const regionId =
+        gardenRegionId !== undefined
+          ? gardenRegionId
+          : await getRegionIdByName(connection, input.region);
       const position = clampLatLng(input.position);
       await connection.query<ResultSetHeader>(
         `
@@ -3187,7 +3354,12 @@ export async function updateDevice(
   const updated = await withConnection(async (connection) => {
     await connection.beginTransaction();
     try {
-      const regionId = await getRegionIdByName(connection, input.region);
+      // Renaming into another garden moves the device to that garden's region.
+      const gardenRegionId = await getGardenRegionId(connection, input.name);
+      const regionId =
+        gardenRegionId !== undefined
+          ? gardenRegionId
+          : await getRegionIdByName(connection, input.region);
       const position = clampLatLng(input.position);
       const [result] = await connection.query<ResultSetHeader>(
         `

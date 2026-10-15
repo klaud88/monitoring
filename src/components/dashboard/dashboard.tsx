@@ -21,7 +21,6 @@ import {
 import { taskDueDateForPriority } from "@/lib/working-days";
 import { GoogleTbilisiMap } from "@/components/dashboard/google-tbilisi-map";
 import { TaskTagPicker } from "@/components/tasks/task-tag-picker";
-import { regions } from "@/lib/catalog";
 import { recordAudit } from "@/lib/client-audit";
 import {
   buildGardenOptions,
@@ -50,6 +49,8 @@ type DashboardProps = {
   canEditDeviceLocations: boolean;
   canCreateTaskTags: boolean;
   canDeleteTaskTags: boolean;
+  /** Region names from the database (the regions page), not a fixed list. */
+  regionNames: string[];
 };
 
 type NewTaskForm = {
@@ -85,6 +86,7 @@ export function Dashboard({
   initialDevices,
   initialTasks,
   initialTags,
+  regionNames,
   users,
   canEditDeviceLocations,
   canCreateTaskTags,
@@ -110,6 +112,14 @@ export function Dashboard({
     Record<string, LatLng>
   >(() => createDefaultDeviceLocations(initialDevices));
   const [regionFilter, setRegionFilter] = useState("all");
+  // Filter options are the real regions; "დაუნაწილებელი" is added only
+  // when some device has no region, so every option matches something.
+  const regionFilterOptions = useMemo(() => {
+    const unassigned = "დაუნაწილებელი";
+    return devices.some((device) => device.region === unassigned)
+      ? [...regionNames, unassigned]
+      : regionNames;
+  }, [devices, regionNames]);
   const [statusFilter, setStatusFilter] = useState<DeviceStatus | "all">("all");
   const [userFilter, setUserFilter] = useState("all");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -889,7 +899,7 @@ export function Dashboard({
                     onChange={(event) => updateRegionFilter(event.target.value)}
                   >
                     <option value="all">ყველა რაიონი</option>
-                    {regions.map((region) => (
+                    {regionFilterOptions.map((region) => (
                       <option key={region} value={region}>
                         {region}
                       </option>

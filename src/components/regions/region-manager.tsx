@@ -66,6 +66,7 @@ export function RegionManager({
   initialRegions,
   initialTags,
   initialGardenTags,
+  initialGardenRegions,
   permissions,
 }: {
   initialDevices: Device[];
@@ -73,10 +74,13 @@ export function RegionManager({
   initialTags: string[];
   /** Garden key → tags given to the whole garden. */
   initialGardenTags: Record<string, string[]>;
+  /** Garden key → the garden's region; its devices follow it. */
+  initialGardenRegions: Record<string, string>;
   permissions: RegionPermissions;
 }) {
   const [devices, setDevices] = useState(initialDevices);
   const [gardenTags, setGardenTags] = useState(initialGardenTags);
+  const [gardenRegions, setGardenRegions] = useState(initialGardenRegions);
   const [editingGardenKey, setEditingGardenKey] = useState<string | null>(null);
   const [gardenTagDraft, setGardenTagDraft] = useState<string[]>([]);
   const [regions, setRegions] = useState(initialRegions);
@@ -465,6 +469,14 @@ export function RegionManager({
         ? { ...current, region: data.region.name }
         : current,
     );
+    setGardenRegions((current) =>
+      Object.fromEntries(
+        Object.entries(current).map(([key, name]) => [
+          key,
+          name === region.name ? data.region.name : name,
+        ]),
+      ),
+    );
     setEditingRegionId(null);
   }
 
@@ -503,6 +515,49 @@ export function RegionManager({
     );
     setDraft((current) =>
       current.region === region.name ? { ...current, region: "" } : current,
+    );
+    setGardenRegions((current) =>
+      Object.fromEntries(
+        Object.entries(current).filter(([, name]) => name !== region.name),
+      ),
+    );
+  }
+
+  async function saveGardenRegion(gardenKey: string, regionName: string) {
+    setSaving(true);
+    setError("");
+    const response = await fetch("/api/garden-regions", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ gardenKey, region: regionName || null }),
+    }).catch(() => null);
+    setSaving(false);
+
+    if (!response?.ok) {
+      setError("ბაღის რაიონის შენახვა ვერ მოხერხდა.");
+      return;
+    }
+
+    const data = (await response.json()) as {
+      region: string | null;
+      devices?: { id: string; region: string }[];
+    };
+    setGardenRegions((current) => {
+      const next = { ...current };
+      if (data.region) {
+        next[gardenKey] = data.region;
+      } else {
+        delete next[gardenKey];
+      }
+      return next;
+    });
+    const regionById = new Map((data.devices ?? []).map((item) => [item.id, item.region]));
+    setDevices((current) =>
+      current.map((device) =>
+        regionById.has(device.id)
+          ? { ...device, region: regionById.get(device.id)! }
+          : device,
+      ),
     );
   }
 
@@ -828,7 +883,7 @@ export function RegionManager({
                     onChange={(partial) =>
                       setDraft((current) => ({ ...current, ...partial }))
                     }
-                    regionNames={regionNames}
+                    gardenRegions={gardenRegions}
                     availableTags={availableTags}
                     toggleTag={toggleDraftTag}
                     canCreateTags={permissions.createTags}
@@ -992,15 +1047,27 @@ export function RegionManager({
                 <div className="garden-group-head">
                   <div className="garden-group-title">
                     <strong>{group.label}</strong>
-                    {group.regions.length ? (
-                      <span>
-                        {group.regions
-                          .map((region) =>
-                            region === unassignedRegion ? "რაიონის გარეშე" : region,
-                          )
-                          .join(", ")}
-                      </span>
-                    ) : null}
+                    {/* The garden owns the region; its devices follow it. */}
+                    {permissions.editDevice ? (
+                      <select
+                        className="garden-region-select"
+                        value={gardenRegions[group.key] ?? ""}
+                        onChange={(event) =>
+                          saveGardenRegion(group.key, event.target.value)
+                        }
+                        disabled={saving}
+                        aria-label={`${group.label} — რაიონი`}
+                      >
+                        <option value="">რაიონის გარეშე</option>
+                        {regionNames.map((region) => (
+                          <option key={region} value={region}>
+                            {region}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span>{gardenRegions[group.key] ?? "რაიონის გარეშე"}</span>
+                    )}
                   </div>
                 </div>
                 {/* The garden's own tags: a column on the right of the card. */}
@@ -1095,7 +1162,7 @@ export function RegionManager({
                               current ? { ...current, ...partial } : current,
                             )
                           }
-                          regionNames={regionNames}
+                          gardenRegions={gardenRegions}
                           availableTags={availableTags}
                           toggleTag={toggleEditTag}
                           canCreateTags={permissions.createTags}
@@ -1209,7 +1276,7 @@ export function RegionManager({
 function DeviceDraftFields({
   draft,
   onChange,
-  regionNames,
+  gardenRegions,
   availableTags,
   toggleTag,
   canCreateTags,
@@ -1221,7 +1288,8 @@ function DeviceDraftFields({
 }: {
   draft: DeviceDraft;
   onChange: (partial: Partial<DeviceDraft>) => void;
-  regionNames: string[];
+  /** Garden key → region; shown read-only, the garden decides it. */
+  gardenRegions: Record<string, string>;
   availableTags: string[];
   toggleTag: (tagName: string) => void;
   canCreateTags: boolean;
@@ -1293,18 +1361,17 @@ function DeviceDraftFields({
       </label>
       <div className="form-row">
         <label>
-          <span>რაიონი</span>
-          <select
-            value={draft.region}
-            onChange={(event) => onChange({ region: event.target.value })}
-          >
-            <option value="">რაიონის გარეშე</option>
-            {regionNames.map((region) => (
-              <option key={region} value={region}>
-                {region}
-              </option>
-            ))}
-          </select>
+          <span>რაიონი (ბაღიდან)</span>
+          <input
+            value={
+              getGardenKey(draft.name)
+                ? (gardenRegions[getGardenKey(draft.name)] ?? "რაიონის გარეშე")
+                : "—"
+            }
+            readOnly
+            disabled
+            title="რაიონი ბაღზე იცვლება: მოწყობილობა თავისი ბაღის რაიონშია"
+          />
         </label>
         <label>
           <span>სტატუსი</span>
