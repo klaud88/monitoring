@@ -3642,24 +3642,24 @@ progress::-webkit-progress-value {
 }
 
 /* Devices page: one card per garden — number | its devices | garden tags */
+/* Devices page garden card: one centred column —
+   number, region, garden tags, devices, tag button. */
 .garden-group {
-  display: grid;
-  grid-template-columns: minmax(90px, 140px) minmax(0, 1fr) minmax(0, max-content);
-  gap: 12px;
-  align-items: start;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 12px;
+  padding: 14px 12px;
   background: var(--surface);
+  text-align: center;
 }
 
 .garden-group-head {
   display: grid;
-  align-self: stretch;
-  align-content: center;
   justify-items: center;
-  gap: 4px;
-  text-align: center;
+  gap: 6px;
 }
 
 .garden-totals {
@@ -3694,49 +3694,57 @@ progress::-webkit-progress-value {
   line-height: 1.1;
 }
 
-.garden-group-head span {
-  color: var(--muted);
-  font-size: 12px;
-}
 
 .garden-group-devices {
   display: grid;
-  grid-column: 2;
-  grid-row: 1;
   gap: 8px;
+  width: 100%;
+  max-width: 760px;
   min-width: 0;
+  text-align: left;
 }
 
-.garden-group-head {
-  grid-column: 1;
-  grid-row: 1;
-}
 
 .garden-group-title {
   display: grid;
   justify-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 
-.garden-region-select {
+/* The garden's region, tinted with that region's own colour. */
+.garden-region-pill {
   width: auto;
   max-width: 100%;
-  min-height: 28px;
+  min-height: 30px;
+  border: 1.5px solid var(--region-color, var(--brand));
   border-radius: 999px;
-  padding: 2px 24px 2px 10px;
-  color: var(--ink-muted);
-  font-size: 12px;
+  background: color-mix(in srgb, var(--region-color, var(--brand)) 16%, var(--surface));
+  color: color-mix(in srgb, var(--region-color, var(--brand)) 72%, var(--text));
+  padding: 4px 14px;
+  font-size: 13px;
+  font-weight: 800;
   text-align: center;
+}
+
+select.garden-region-pill {
+  padding-right: 28px;
+  cursor: pointer;
+}
+
+.garden-region-pill.empty {
+  border-style: dashed;
+  border-color: var(--line-strong);
+  background: var(--surface);
+  color: var(--muted);
+  font-weight: 600;
 }
 
 .garden-group-tags {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 5px;
-  grid-column: 3;
-  grid-row: 1;
-  max-width: 220px;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  max-width: 760px;
 }
 
 .garden-tag-chip {
@@ -3774,11 +3782,16 @@ progress::-webkit-progress-value {
 
 .garden-tag-panel {
   display: grid;
-  grid-column: 1 / -1;
-  grid-row: 2;
+  justify-items: center;
   gap: 10px;
+  width: 100%;
+  max-width: 760px;
   border-top: 1px dashed var(--line);
   padding-top: 10px;
+}
+
+.garden-tag-panel .row-tags {
+  justify-content: center;
 }
 
 .garden-tag-panel-label {
@@ -3874,8 +3887,8 @@ progress::-webkit-progress-value {
 
 .region-device-row {
   display: grid;
-  grid-template-columns:
-    minmax(90px, 0.3fr) minmax(180px, 1fr) minmax(130px, 0.4fr) auto;
+  /* name | map exclusion | actions (tags now live on the garden) */
+  grid-template-columns: minmax(90px, 1fr) minmax(130px, auto) auto;
   gap: 12px;
   align-items: center;
   border: 1px solid var(--line);
@@ -4227,6 +4240,19 @@ progress::-webkit-progress-value {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
+}
+
+.permission-admin-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  border-radius: 8px;
+  background: var(--brand-soft);
+  color: var(--brand-dark);
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .permission-toggle {
@@ -9581,33 +9607,9 @@ html.wheel-locked body {
   }
 
   .garden-group {
-    grid-template-columns: minmax(0, 1fr);
     gap: 8px;
   }
 
-  /* Stacked: number, its tags, the tag editor, then the devices. */
-  .garden-group-head,
-  .garden-group-tags,
-  .garden-tag-panel,
-  .garden-group-devices {
-    grid-column: 1;
-  }
-
-  .garden-group-tags {
-    grid-row: 2;
-    flex-direction: row;
-    flex-wrap: wrap;
-    justify-content: center;
-    max-width: none;
-  }
-
-  .garden-tag-panel {
-    grid-row: 3;
-  }
-
-  .garden-group-devices {
-    grid-row: 4;
-  }
 
   .region-device-row .row-actions {
     justify-content: flex-start;

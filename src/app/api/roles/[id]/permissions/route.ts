@@ -2,50 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, isAdmin, verifySessionToken, clearSessionPermissionCache } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { updateRolePermissions } from "@/lib/repositories";
-import type { PageKey, PermissionAction, PermissionKey } from "@/lib/types";
-
-const pageKeys = new Set<PageKey>([
-  "dashboard",
-  "devices",
-  "tasks",
-  "problem_reports",
-  "form_one",
-  "regions",
-  "offline_records",
-  "users",
-  "permissions",
-  "analytics",
-]);
-const permissionActions = new Set<PermissionAction>([
-  "view",
-  "create",
-  "edit",
-  "delete",
-  "assign",
-  "approve",
-  "view_all",
-  "view_assigned",
-  "info",
-  "assignable",
-  "comment_edit",
-  "completion_request",
-  "completion_response",
-  "due_date_edit",
-  "flag",
-  "garden_edit",
-  "model_add",
-  "model_edit",
-  "phone_edit",
-  "quantity_edit",
-  "service_add",
-  "service_delete",
-  "service_edit",
-  "tag",
-  "tag_create",
-  "tag_edit",
-  "tag_delete",
-  "status",
-]);
+import { isKnownPermissionKey } from "@/lib/permission-catalog";
 
 export async function PUT(
   request: NextRequest,
@@ -67,13 +24,12 @@ export async function PUT(
     );
   }
 
-  const permissions = body.permissions.map(String);
-  if (!permissions.every(isPermissionKey)) {
-    return NextResponse.json(
-      { message: "Invalid permission key." },
-      { status: 400 },
-    );
-  }
+  // Only keys the Permissions page offers are stored. Unknown or retired
+  // keys a role still carries are dropped instead of failing the whole
+  // save — that used to make every switch on such a role snap back.
+  const permissions = [
+    ...new Set((body.permissions as unknown[]).map(String)),
+  ].filter(isKnownPermissionKey);
 
   const role = await updateRolePermissions(id, permissions);
   // Sessions read permissions live; make this change apply right away.
@@ -93,13 +49,4 @@ export async function PUT(
   });
 
   return NextResponse.json({ role });
-}
-
-function isPermissionKey(value: string): value is PermissionKey {
-  const [pageKey, actionKey, extra] = value.split(".");
-  return (
-    !extra &&
-    pageKeys.has(pageKey as PageKey) &&
-    permissionActions.has(actionKey as PermissionAction)
-  );
 }

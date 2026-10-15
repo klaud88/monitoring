@@ -14,9 +14,7 @@ import {
   WifiOff,
 } from "lucide-react";
 import { DeviceAssociations } from "@/components/devices/device-associations";
-import { DeviceTagsEditor } from "@/components/devices/device-tags-editor";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
-import { tagCatalog } from "@/lib/catalog";
 import {
   findSiblingDevices,
   getExtraAssociations,
@@ -25,7 +23,6 @@ import { withoutDeviceCodes } from "@/lib/display";
 import { getFirstAllowedPath } from "@/lib/navigation";
 import { getDevices, getTasks, getUsers } from "@/lib/repositories";
 import { resolveTaskVisibilityScope } from "@/lib/task-visibility";
-import { mergeTags } from "@/lib/tags";
 import type {
   AppUser,
   Device,
@@ -92,10 +89,6 @@ export default async function DeviceDetailsPage({
   const canViewTasks = hasPermission(user, "tasks.view");
   const backHref = canViewTasks ? "/tasks" : homePath;
   const backLabel = canViewTasks ? "დავალებებზე დაბრუნება" : "უკან დაბრუნება";
-  const availableDeviceTags = mergeTags(
-    [...tagCatalog],
-    devices.flatMap((item) => item.tags),
-  );
 
   const siblings = findSiblingDevices(device, devices);
   const manualNames = getExtraAssociations(device, siblings);
@@ -191,12 +184,24 @@ export default async function DeviceDetailsPage({
             />
           </div>
 
+          {/* Tags belong to the garden; this device shows its garden's. */}
           <div className="device-meta-row device-meta-tags">
-            <DeviceTagsEditor
-              device={device}
-              availableTags={availableDeviceTags}
-              canEdit={canEditDevice}
-            />
+            <div className="row-tags">
+              {device.tags.length ? (
+                device.tags.map((tagName) => (
+                  <span key={tagName} className="garden-tag-chip">
+                    {tagName}
+                  </span>
+                ))
+              ) : (
+                <span className="muted">ბაღს ტეგი არ აქვს</span>
+              )}
+              {canEditDevice ? (
+                <Link className="inline-link" href="/devices/regions">
+                  ბაღის ტეგების შეცვლა
+                </Link>
+              ) : null}
+            </div>
           </div>
         </div>
       </header>

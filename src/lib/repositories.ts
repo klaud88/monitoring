@@ -1493,6 +1493,31 @@ async function ensureGardenTagSchema(connection: PoolConnection) {
       index fk_garden_tags_tag (tag_id)
     ) ${tagIdCharset ? `default charset=${tagIdCharset.charset} collate=${tagIdCharset.collation}` : ""}
   `);
+
+  // One-time: tags now live on gardens only. Every device tag moves to its
+  // garden (no duplicates) and is then removed from the device.
+  const [movedRows] = await connection.query<RowDataPacket[]>(
+    "select 1 from app_migrations where id = 'device_tags_to_garden_v1' limit 1",
+  );
+  if (movedRows.length) {
+    return;
+  }
+  const [links] = await connection.query<RowDataPacket[]>(
+    "select d.name, dt.tag_id from device_tags dt join devices d on d.id = dt.device_id",
+  );
+  for (const link of links) {
+    const gardenKey = getGardenKey(String(link.name)).slice(0, 80);
+    if (gardenKey) {
+      await connection.query(
+        "insert ignore into garden_tags (garden_key, tag_id) values (?, ?)",
+        [gardenKey, link.tag_id],
+      );
+    }
+  }
+  await connection.query("delete from device_tags");
+  await connection.query(
+    "insert ignore into app_migrations (id) values ('device_tags_to_garden_v1')",
+  );
 }
 
 /* The region belongs to the garden ("5" for devices 5-1, 5-2); every device
@@ -2616,6 +2641,15 @@ export async function getDevices(): Promise<Device[]> {
     return mockDevices;
   }
 
+  // Tags live on gardens; each device shows its garden's tags.
+  const gardenTagRows = await queryRows<{ garden_key: string; name: string }>(
+    "select gt.garden_key, t.name from garden_tags gt join tags t on t.id = gt.tag_id",
+  ).catch(() => null);
+  const tagsByGarden = new Map<string, string[]>();
+  for (const row of gardenTagRows ?? []) {
+    tagsByGarden.set(row.garden_key, [...(tagsByGarden.get(row.garden_key) ?? []), row.name]);
+  }
+
   const eventRows = rows.length
     ? await queryRows<StatusEventRow>(
         `
@@ -2647,7 +2681,12 @@ export async function getDevices(): Promise<Device[]> {
     status: row.status,
     isExcluded: toBoolean(row.is_excluded),
     region: row.region,
-    tags: csv(row.tags),
+    tags: [
+      ...new Set([
+        ...(tagsByGarden.get(getGardenKey(row.name)) ?? []),
+        ...csv(row.tags),
+      ]),
+    ].sort((a, b) => a.localeCompare(b, "ka")),
     position: clampLatLng({
       lat: Number(row.latitude),
       lng: Number(row.longitude),
@@ -3207,41 +3246,6 @@ async function replaceAssociatedDevices(
   }
 }
 
-async function replaceDeviceTags(
-  connection: PoolConnection,
-  deviceId: string,
-  tags: string[],
-) {
-  const uniqueTags = [...new Set(tags.map((tag) => tag.trim()))].filter(
-    Boolean,
-  );
-
-  await connection.query("delete from device_tags where device_id = ?", [
-    deviceId,
-  ]);
-
-  for (const tagName of uniqueTags) {
-    await connection.query<ResultSetHeader>(
-      `
-        insert into tags (id, name, color)
-        values (?, ?, ?)
-        on duplicate key update name = values(name)
-      `,
-      [makeStableId("tag", tagName), tagName, "#64748b"],
-    );
-  }
-
-  if (uniqueTags.length) {
-    await connection.query(
-      `
-        insert ignore into device_tags (device_id, tag_id)
-        select ?, id from tags where name in (?)
-      `,
-      [deviceId, uniqueTags],
-    );
-  }
-}
-
 async function removeTaskTagReferences(
   connection: PoolConnection,
   tagName: string,
@@ -3308,7 +3312,7 @@ export async function createDevice(input: {
           toSqlDateTime(new Date()),
         ],
       );
-      await replaceDeviceTags(connection, id, input.tags);
+      // Tags belong to gardens now (garden_tags); devices carry none.
       await connection.commit();
       return getDeviceById(id);
     } catch (error) {
@@ -3391,7 +3395,7 @@ export async function updateDevice(
         return null;
       }
 
-      await replaceDeviceTags(connection, id, input.tags);
+      // Tags belong to gardens now (garden_tags); devices carry none.
       if (input.associatedDevices !== undefined) {
         await replaceAssociatedDevices(connection, id, input.associatedDevices);
       }

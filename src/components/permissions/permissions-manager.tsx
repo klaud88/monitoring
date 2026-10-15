@@ -11,91 +11,11 @@ import {
   ToggleLeft,
   ToggleRight,
 } from "lucide-react";
-import type {
-  AppRole,
-  PageKey,
-  PermissionAction,
-  PermissionKey,
-} from "@/lib/types";
-
-type ActionDef = { key: PermissionAction; label: string; dependsOn?: PermissionAction };
-
-const defaultActions: ActionDef[] = [
-  { key: "view", label: "ნახვა" },
-  { key: "create", label: "დამატება" },
-  { key: "edit", label: "შეცვლა" },
-  { key: "delete", label: "წაშლა" },
-];
-
-const tagRegistryActions: ActionDef[] = [
-  { key: "tag_create", label: "ახალი ტეგი" },
-  { key: "tag_edit", label: "ტეგის რედაქტირება" },
-  { key: "tag_delete", label: "ტეგის წაშლა" },
-];
-
-const deviceActions: ActionDef[] = [...defaultActions, ...tagRegistryActions];
-
-const taskActions: ActionDef[] = [
-  ...defaultActions,
-  { key: "view_all", label: "დავალებები სრული", dependsOn: "view" },
-  { key: "view_assigned", label: "დავალებები მონიშნული", dependsOn: "view" },
-  { key: "info", label: "INFO", dependsOn: "view" },
-  { key: "assignable", label: "შემსრულებლებში დამატება", dependsOn: "view" },
-  ...tagRegistryActions,
-];
-
-const problemReportActions: ActionDef[] = [
-  ...defaultActions,
-  { key: "assign", label: "მომხმარებლები" },
-  { key: "tag", label: "ტეგები" },
-  { key: "status", label: "სტატუსები" },
-  ...tagRegistryActions,
-];
-
-const formOneActions: ActionDef[] = [
-  { key: "view", label: "ნახვა" },
-  { key: "create", label: "ახალი ფორმის დამატება" },
-  { key: "edit", label: "არჩეული ფორმის რედაქტირება" },
-  { key: "garden_edit", label: "ბაღის ველი", dependsOn: "edit" },
-  { key: "phone_edit", label: "ტელეფონის ნომერი", dependsOn: "edit" },
-  { key: "due_date_edit", label: "შესრულების თარიღი", dependsOn: "edit" },
-  { key: "model_add", label: "მოდელის დამატება", dependsOn: "edit" },
-  { key: "model_edit", label: "მოდელის ცვლილება", dependsOn: "edit" },
-  { key: "service_add", label: "მომსახურების დამატება", dependsOn: "edit" },
-  { key: "service_edit", label: "მომსახურების ცვლილება", dependsOn: "edit" },
-  { key: "service_delete", label: "მომსახურების წაშლა", dependsOn: "edit" },
-  { key: "quantity_edit", label: "რაოდენობის ცვლილება", dependsOn: "edit" },
-  { key: "completion_request", label: "დადასტურებაზე გადაგზავნა" },
-  { key: "completion_response", label: "დადასტურება/გაუქმება" },
-  { key: "comment_edit", label: "კომენტარი" },
-  { key: "delete", label: "ფორმა ერთის წაშლა" },
-  { key: "flag", label: "დახარვეზება (ჩართვა/გამორთვა)" },
-];
-
-const pages: {
-  key: PageKey;
-  label: string;
-  actions?: ActionDef[];
-}[] = [
-  { key: "dashboard", label: "რუკა" },
-  { key: "devices", label: "მოწყობილობები", actions: deviceActions },
-  { key: "regions", label: "რაიონები" },
-  { key: "tasks", label: "დავალებები", actions: taskActions },
-  {
-    key: "problem_reports",
-    label: "პრობლემის დაფიქსირება",
-    actions: problemReportActions,
-  },
-  {
-    key: "form_one",
-    label: "ფორმა ერთი",
-    actions: formOneActions,
-  },
-  { key: "offline_records", label: "Offline აღრიცხვა" },
-  { key: "users", label: "მომხმარებლები" },
-  { key: "analytics", label: "ანალიტიკა" },
-  { key: "permissions", label: "უფლებები" },
-];
+import {
+  defaultActions,
+  permissionPages as pages,
+} from "@/lib/permission-catalog";
+import type { AppRole, PermissionKey } from "@/lib/types";
 
 export function PermissionsManager({
   roles,
@@ -116,6 +36,9 @@ export function PermissionsManager({
     () => roleList.find((role) => role.id === selectedRoleId) || roleList[0],
     [selectedRoleId, roleList],
   );
+  // Admin passes every permission check regardless of these rows
+  // (hasPermission), so its switches are shown on and locked.
+  const isAdminRole = selectedRole?.name === "admin";
   const selectedPermissions = selectedRole?.permissions ?? [];
 
   async function createRole(event: React.FormEvent<HTMLFormElement>) {
@@ -161,7 +84,7 @@ export function PermissionsManager({
   }
 
   async function togglePermission(permission: PermissionKey) {
-    if (!selectedRole || !canEdit || saving) {
+    if (!selectedRole || !canEdit || saving || isAdminRole) {
       return;
     }
 
@@ -200,7 +123,12 @@ export function PermissionsManager({
 
     setSaving(false);
     if (!response.ok) {
-      setError("უფლებების შენახვა ვერ მოხერხდა.");
+      const failure = (await response.json().catch(() => null)) as {
+        message?: string;
+      } | null;
+      setError(
+        `უფლებების შენახვა ვერ მოხერხდა.${failure?.message ? ` (${failure.message})` : ""}`,
+      );
       setRoleList((current) =>
         current.map((role) =>
           role.id === selectedRole.id
@@ -311,6 +239,14 @@ export function PermissionsManager({
             </button>
           </div>
 
+          {isAdminRole ? (
+            <p className="permission-admin-note">
+              <ShieldCheck size={16} />
+              ადმინისტრატორს ყველა უფლება ავტომატურად აქვს — აქ ცვლილება არ
+              მოქმედებს.
+            </p>
+          ) : null}
+
           <div className="permission-matrix">
             <div className="permission-row head">
               <span>სექცია</span>
@@ -319,9 +255,9 @@ export function PermissionsManager({
             </div>
             {pages.map((page) => {
               const actions = page.actions ?? defaultActions;
-              const canView = selectedPermissions.includes(
-                `${page.key}.view` as PermissionKey,
-              );
+              const canView =
+                isAdminRole ||
+                selectedPermissions.includes(`${page.key}.view` as PermissionKey);
               return (
                 <div key={page.key} className="permission-row">
                   <strong>{page.label}</strong>
@@ -329,7 +265,8 @@ export function PermissionsManager({
                     {actions.map((action) => {
                       const permission =
                         `${page.key}.${action.key}` as PermissionKey;
-                      const enabled = selectedPermissions.includes(permission);
+                      const enabled =
+                        isAdminRole || selectedPermissions.includes(permission);
                       const parentPermission = action.dependsOn
                         ? (`${page.key}.${action.dependsOn}` as PermissionKey)
                         : null;
@@ -343,7 +280,7 @@ export function PermissionsManager({
                           className={`permission-toggle ${enabled ? "enabled" : ""} ${action.dependsOn ? "sub-permission" : ""}`}
                           onClick={() => togglePermission(permission)}
                           aria-label={`${page.label} ${action.label}`}
-                          disabled={!canEdit || saving || !parentEnabled}
+                          disabled={!canEdit || saving || !parentEnabled || isAdminRole}
                           title={!parentEnabled ? `საჭიროა "${actions.find(a => a.key === action.dependsOn)?.label}" ჩართვა` : undefined}
                         >
                           {enabled ? (

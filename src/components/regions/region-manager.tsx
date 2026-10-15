@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import {
   Edit3,
   MapPinned,
@@ -124,6 +124,12 @@ export function RegionManager({
   const { confirm, confirmationDialog } = useConfirmDialog();
 
   const regionNames = regions.map((region) => region.name);
+  const regionColorByName = new Map(regions.map((region) => [region.name, region.color]));
+  /** Tints a garden's region pill with that region's own colour. */
+  function regionColorStyle(regionName?: string) {
+    const color = regionName ? regionColorByName.get(regionName) : undefined;
+    return color ? ({ "--region-color": color } as CSSProperties) : undefined;
+  }
 
   const filteredDevices = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -173,23 +179,6 @@ export function RegionManager({
     return [...groups.values()];
   }, [filteredDevices]);
 
-  function toggleDraftTag(tagName: string) {
-    setDraft((current) => ({
-      ...current,
-      tags: toggleListValue(current.tags, tagName),
-    }));
-  }
-
-  function toggleEditTag(tagName: string) {
-    setDeviceEdit((current) =>
-      current
-        ? {
-            ...current,
-            tags: toggleListValue(current.tags, tagName),
-          }
-        : current,
-    );
-  }
 
   function toggleFilterTag(tagName: string) {
     setSelectedFilterTags((current) => toggleListValue(current, tagName));
@@ -884,14 +873,6 @@ export function RegionManager({
                       setDraft((current) => ({ ...current, ...partial }))
                     }
                     gardenRegions={gardenRegions}
-                    availableTags={availableTags}
-                    toggleTag={toggleDraftTag}
-                    canCreateTags={permissions.createTags}
-                    canDeleteTags={permissions.deleteTags}
-                    canRenameTags={permissions.renameTags}
-                    onCreateTag={createAvailableTag}
-                    onDeleteTag={removeAvailableTag}
-                    onRenameTag={renameAvailableTag}
                   />
                   <button className="primary-button" type="submit" disabled={saving}>
                     <Plus size={18} />
@@ -1050,7 +1031,8 @@ export function RegionManager({
                     {/* The garden owns the region; its devices follow it. */}
                     {permissions.editDevice ? (
                       <select
-                        className="garden-region-select"
+                        className={`garden-region-pill${gardenRegions[group.key] ? "" : " empty"}`}
+                        style={regionColorStyle(gardenRegions[group.key])}
                         value={gardenRegions[group.key] ?? ""}
                         onChange={(event) =>
                           saveGardenRegion(group.key, event.target.value)
@@ -1066,32 +1048,119 @@ export function RegionManager({
                         ))}
                       </select>
                     ) : (
-                      <span>{gardenRegions[group.key] ?? "რაიონის გარეშე"}</span>
+                      <span
+                        className={`garden-region-pill${gardenRegions[group.key] ? "" : " empty"}`}
+                        style={regionColorStyle(gardenRegions[group.key])}
+                      >
+                        {gardenRegions[group.key] ?? "რაიონის გარეშე"}
+                      </span>
                     )}
                   </div>
                 </div>
-                {/* The garden's own tags: a column on the right of the card. */}
-                <div className="garden-group-tags">
-                  {(gardenTags[group.key] ?? []).map((tagName) => (
-                    <span key={tagName} className="garden-tag-chip">
-                      <Tags size={12} />
-                      {tagName}
-                    </span>
-                  ))}
-                  {permissions.editDevice && editingGardenKey !== group.key ? (
-                    <button
-                      type="button"
-                      className="garden-tag-edit"
-                      onClick={() => startGardenTags(group.key)}
-                      aria-label={`${group.label} — ბაღის ტეგები`}
-                      title="ბაღის ტეგები"
-                    >
-                      <Edit3 size={13} />
-                      {(gardenTags[group.key] ?? []).length ? null : (
-                        <span>ტეგი</span>
-                      )}
-                    </button>
-                  ) : null}
+                {/* Card order: number, region, garden tags, devices, tag button. */}
+                {(gardenTags[group.key] ?? []).length ? (
+                  <div className="garden-group-tags">
+                    {(gardenTags[group.key] ?? []).map((tagName) => (
+                      <span key={tagName} className="garden-tag-chip">
+                        <Tags size={12} />
+                        {tagName}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="garden-group-devices">
+                  {group.devices.map((device) =>
+                    editingDeviceId === device.id && deviceEdit ? (
+                      <div key={device.id} className="region-device-row editing">
+                        <DeviceDraftFields
+                          draft={deviceEdit}
+                          onChange={(partial) =>
+                            setDeviceEdit((current) =>
+                              current ? { ...current, ...partial } : current,
+                            )
+                          }
+                          gardenRegions={gardenRegions}
+                        />
+                        <div className="row-actions">
+                          <button
+                            className="ghost-button"
+                            type="button"
+                            onClick={() => saveDevice(device.id)}
+                            disabled={saving}
+                          >
+                            <Save size={16} />
+                            <span>შენახვა</span>
+                          </button>
+                          <button
+                            className="ghost-button"
+                            type="button"
+                            onClick={() => {
+                              setEditingDeviceId(null);
+                              setDeviceEdit(null);
+                            }}
+                          >
+                            <X size={16} />
+                            <span>გაუქმება</span>
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div key={device.id} className="region-device-row">
+                        <div>
+                          <span
+                            className={`garden-device-chip ${device.status}`}
+                            title={deviceStatusTitles[device.status]}
+                          >
+                            {device.name}
+                          </span>
+                        </div>
+                        <div className="device-exclusion-cell">
+                          <button
+                            className={`device-exclusion-toggle ${device.isExcluded ? "active" : ""}`}
+                            type="button"
+                            onClick={() => toggleDeviceExclusion(device)}
+                            disabled={!permissions.editDevice || saving}
+                            aria-pressed={device.isExcluded}
+                            title="ჩართვისას მოწყობილობა რუკაზე, ანალიტიკაში და Offline აღრიცხვაში აღარ გამოჩნდება"
+                          >
+                            {device.isExcluded ? (
+                              <ToggleRight size={24} />
+                            ) : (
+                              <ToggleLeft size={24} />
+                            )}
+                            <span>
+                              {device.isExcluded ? "გამორიცხულია" : "აქტიურია"}
+                            </span>
+                          </button>
+                          <small>რუკა/აღრიცხვა</small>
+                        </div>
+                        <div className="row-actions">
+                          {permissions.editDevice ? (
+                            <button
+                              className="icon-button"
+                              type="button"
+                              onClick={() => startEditDevice(device)}
+                              aria-label="მოწყობილობის რედაქტირება"
+                              title="მოწყობილობის რედაქტირება"
+                            >
+                              <Edit3 size={17} />
+                            </button>
+                          ) : null}
+                          {permissions.deleteDevice ? (
+                            <button
+                              className="icon-button danger"
+                              type="button"
+                              onClick={() => removeDevice(device.id)}
+                              aria-label="მოწყობილობის წაშლა"
+                              title="მოწყობილობის წაშლა"
+                            >
+                              <Trash2 size={17} />
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ),
+                  )}
                 </div>
                 {editingGardenKey === group.key ? (
                   <div className="garden-tag-panel">
@@ -1151,119 +1220,16 @@ export function RegionManager({
                     </div>
                   </div>
                 ) : null}
-                <div className="garden-group-devices">
-                  {group.devices.map((device) =>
-                    editingDeviceId === device.id && deviceEdit ? (
-                      <div key={device.id} className="region-device-row editing">
-                        <DeviceDraftFields
-                          draft={deviceEdit}
-                          onChange={(partial) =>
-                            setDeviceEdit((current) =>
-                              current ? { ...current, ...partial } : current,
-                            )
-                          }
-                          gardenRegions={gardenRegions}
-                          availableTags={availableTags}
-                          toggleTag={toggleEditTag}
-                          canCreateTags={permissions.createTags}
-                          canDeleteTags={permissions.deleteTags}
-                          canRenameTags={permissions.renameTags}
-                          onCreateTag={createAvailableTag}
-                          onDeleteTag={removeAvailableTag}
-                          onRenameTag={renameAvailableTag}
-                        />
-                        <div className="row-actions">
-                          <button
-                            className="ghost-button"
-                            type="button"
-                            onClick={() => saveDevice(device.id)}
-                            disabled={saving}
-                          >
-                            <Save size={16} />
-                            <span>შენახვა</span>
-                          </button>
-                          <button
-                            className="ghost-button"
-                            type="button"
-                            onClick={() => {
-                              setEditingDeviceId(null);
-                              setDeviceEdit(null);
-                            }}
-                          >
-                            <X size={16} />
-                            <span>გაუქმება</span>
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div key={device.id} className="region-device-row">
-                        <div>
-                          <span
-                            className={`garden-device-chip ${device.status}`}
-                            title={deviceStatusTitles[device.status]}
-                          >
-                            {device.name}
-                          </span>
-                        </div>
-                        <div className="row-tags">
-                          {device.tags.length ? (
-                            device.tags.map((tagName) => (
-                              <span key={tagName} className="tag-toggle compact active">
-                                {tagName}
-                              </span>
-                            ))
-                          ) : (
-                            <span className="muted">ტეგი არ აქვს</span>
-                          )}
-                        </div>
-                        <div className="device-exclusion-cell">
-                          <button
-                            className={`device-exclusion-toggle ${device.isExcluded ? "active" : ""}`}
-                            type="button"
-                            onClick={() => toggleDeviceExclusion(device)}
-                            disabled={!permissions.editDevice || saving}
-                            aria-pressed={device.isExcluded}
-                            title="ჩართვისას მოწყობილობა რუკაზე, ანალიტიკაში და Offline აღრიცხვაში აღარ გამოჩნდება"
-                          >
-                            {device.isExcluded ? (
-                              <ToggleRight size={24} />
-                            ) : (
-                              <ToggleLeft size={24} />
-                            )}
-                            <span>
-                              {device.isExcluded ? "გამორიცხულია" : "აქტიურია"}
-                            </span>
-                          </button>
-                          <small>რუკა/აღრიცხვა</small>
-                        </div>
-                        <div className="row-actions">
-                          {permissions.editDevice ? (
-                            <button
-                              className="icon-button"
-                              type="button"
-                              onClick={() => startEditDevice(device)}
-                              aria-label="მოწყობილობის რედაქტირება"
-                              title="მოწყობილობის რედაქტირება"
-                            >
-                              <Edit3 size={17} />
-                            </button>
-                          ) : null}
-                          {permissions.deleteDevice ? (
-                            <button
-                              className="icon-button danger"
-                              type="button"
-                              onClick={() => removeDevice(device.id)}
-                              aria-label="მოწყობილობის წაშლა"
-                              title="მოწყობილობის წაშლა"
-                            >
-                              <Trash2 size={17} />
-                            </button>
-                          ) : null}
-                        </div>
-                      </div>
-                    ),
-                  )}
-                </div>
+                {permissions.editDevice && editingGardenKey !== group.key ? (
+                  <button
+                    type="button"
+                    className="garden-tag-edit"
+                    onClick={() => startGardenTags(group.key)}
+                  >
+                    <Edit3 size={13} />
+                    <span>ბაღის ტეგები</span>
+                  </button>
+                ) : null}
               </article>
             ))}
           </div>
@@ -1277,77 +1243,13 @@ function DeviceDraftFields({
   draft,
   onChange,
   gardenRegions,
-  availableTags,
-  toggleTag,
-  canCreateTags,
-  canDeleteTags,
-  canRenameTags,
-  onCreateTag,
-  onDeleteTag,
-  onRenameTag,
 }: {
   draft: DeviceDraft;
   onChange: (partial: Partial<DeviceDraft>) => void;
   /** Garden key → region; shown read-only, the garden decides it. */
   gardenRegions: Record<string, string>;
-  availableTags: string[];
-  toggleTag: (tagName: string) => void;
-  canCreateTags: boolean;
-  canDeleteTags: boolean;
-  canRenameTags: boolean;
-  onCreateTag: (tagName: string) => Promise<string | null> | string | null;
-  onDeleteTag: (tagName: string) => Promise<boolean> | boolean;
-  onRenameTag: (tagName: string, newName: string) => Promise<boolean> | boolean;
 }) {
-  const [newTagName, setNewTagName] = useState("");
-  const [savingTag, setSavingTag] = useState(false);
-  const [deletingTag, setDeletingTag] = useState("");
-
-  async function createAndAttachTag() {
-    if (!canCreateTags || savingTag) {
-      return;
-    }
-
-    const tagName = newTagName.trim().replace(/\s+/g, " ");
-    if (!tagName) {
-      return;
-    }
-
-    const existingTag = availableTags.find((tag) => tag === tagName);
-    if (existingTag) {
-      onChange({ tags: mergeTags(draft.tags, [existingTag]) });
-      setNewTagName("");
-      return;
-    }
-
-    setSavingTag(true);
-    const createdTag = await onCreateTag(tagName);
-    setSavingTag(false);
-    if (createdTag) {
-      onChange({ tags: mergeTags(draft.tags, [createdTag]) });
-      setNewTagName("");
-    }
-  }
-
-  function submitNewTagOnEnter(event: React.KeyboardEvent<HTMLInputElement>) {
-    if (event.key !== "Enter") {
-      return;
-    }
-
-    event.preventDefault();
-    void createAndAttachTag();
-  }
-
-  async function deleteTag(tagName: string) {
-    if (!canDeleteTags || deletingTag) {
-      return;
-    }
-
-    setDeletingTag(tagName);
-    await onDeleteTag(tagName);
-    setDeletingTag("");
-  }
-
+  // Region and tags both come from the garden; neither is set per device.
   return (
     <>
       <label>
@@ -1411,53 +1313,9 @@ function DeviceDraftFields({
           />
         </label>
       </div>
-      <div className="row-tags">
-        {availableTags.map((tagName) => (
-          <TagChipControl
-            key={tagName}
-            name={tagName}
-            selected={draft.tags.includes(tagName)}
-            onToggle={() => toggleTag(tagName)}
-            onRename={
-              canRenameTags ? (newName) => onRenameTag(tagName, newName) : undefined
-            }
-            onDelete={canDeleteTags ? () => void deleteTag(tagName) : undefined}
-            busy={Boolean(deletingTag)}
-          />
-        ))}
-      </div>
-      <div className="device-tag-edit-actions">
-        {draft.tags.length ? (
-          <button
-            className="ghost-button"
-            type="button"
-            onClick={() => onChange({ tags: [] })}
-          >
-            <X size={15} />
-            <span>ყველა ტეგის მოხსნა</span>
-          </button>
-        ) : null}
-        {canCreateTags ? (
-          <div className="device-tag-create">
-            <input
-              value={newTagName}
-              onChange={(event) => setNewTagName(event.target.value)}
-              onKeyDown={submitNewTagOnEnter}
-              placeholder="ახალი ტეგი"
-              maxLength={120}
-            />
-            <button
-              className="ghost-button"
-              type="button"
-              onClick={() => void createAndAttachTag()}
-              disabled={savingTag}
-            >
-              <Plus size={15} />
-              <span>{savingTag ? "ემატება..." : "დამატება"}</span>
-            </button>
-          </div>
-        ) : null}
-      </div>
+      <p className="muted device-garden-note">
+        ტეგები ბაღს ენიჭება — ბაღის ბარათზე „ბაღის ტეგები“.
+      </p>
     </>
   );
 }
