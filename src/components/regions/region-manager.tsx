@@ -13,6 +13,7 @@ import {
   ToggleLeft,
   ToggleRight,
   X,
+  Pencil,
 } from "lucide-react";
 import { useConfirmDialog } from "@/components/common/confirm-dialog";
 import { FiltersToggle } from "@/components/common/filters-toggle";
@@ -84,6 +85,7 @@ export function RegionManager({
   const [deviceSort, setDeviceSort] = useState<DeviceSortMode>("az");
   const [regionFilter, setRegionFilter] = useState("all");
   const [selectedFilterTags, setSelectedFilterTags] = useState<string[]>([]);
+  const [managingTags, setManagingTags] = useState(false);
   const [availableTags, setAvailableTags] = useState<string[]>(() =>
     mergeTags(
       initialTags,
@@ -901,17 +903,49 @@ export function RegionManager({
               className="tag-filter region-device-tag-filter"
               aria-label="ტეგების ფილტრი"
             >
-              {availableTags.map((tagName) => (
+              {availableTags.map((tagName) =>
+                managingTags ? (
+                  <TagChipControl
+                    key={tagName}
+                    name={tagName}
+                    showIcon
+                    selected={selectedFilterTags.includes(tagName)}
+                    onToggle={() => toggleFilterTag(tagName)}
+                    onRename={
+                      permissions.renameTags
+                        ? (newName) => renameAvailableTag(tagName, newName)
+                        : undefined
+                    }
+                    onDelete={
+                      permissions.deleteTags
+                        ? () => void removeAvailableTag(tagName)
+                        : undefined
+                    }
+                    busy={saving}
+                  />
+                ) : (
+                  <button
+                    key={tagName}
+                    className={`tag-toggle ${selectedFilterTags.includes(tagName) ? "active" : ""}`}
+                    type="button"
+                    onClick={() => toggleFilterTag(tagName)}
+                  >
+                    <Tags size={14} />
+                    <span>{tagName}</span>
+                  </button>
+                ),
+              )}
+              {permissions.renameTags || permissions.deleteTags ? (
                 <button
-                  key={tagName}
-                  className={`tag-toggle ${selectedFilterTags.includes(tagName) ? "active" : ""}`}
                   type="button"
-                  onClick={() => toggleFilterTag(tagName)}
+                  className={`tag-manage-toggle${managingTags ? " active" : ""}`}
+                  aria-pressed={managingTags}
+                  onClick={() => setManagingTags((current) => !current)}
                 >
-                  <Tags size={14} />
-                  <span>{tagName}</span>
+                  <Pencil size={13} />
+                  <span>{managingTags ? "მზადაა" : "ტეგების მართვა"}</span>
                 </button>
-              ))}
+              ) : null}
               {selectedFilterTags.length ? (
                 <button
                   className="ghost-button"

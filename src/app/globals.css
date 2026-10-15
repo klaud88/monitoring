@@ -3776,6 +3776,29 @@ progress::-webkit-progress-value {
   font-weight: 600;
 }
 
+.tag-manage-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-muted);
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.tag-manage-toggle:hover,
+.tag-manage-toggle.active {
+  border-style: solid;
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
 .tag-rename-button {
   border-color: var(--line);
   background: var(--surface-soft);

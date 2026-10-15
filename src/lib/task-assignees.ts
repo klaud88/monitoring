@@ -1,4 +1,4 @@
-import { hasPermission } from "./auth";
+import { hasPermission } from "./permissions";
 import type { AppUser } from "./types";
 
 // Who can be a task/problem-report assignee is governed by the

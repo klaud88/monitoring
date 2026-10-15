@@ -1,4 +1,4 @@
-import { hasPermission } from "./auth";
+import { hasPermission } from "./permissions";
 import type { SessionUser } from "./types";
 
 export type TaskVisibilityScope = {

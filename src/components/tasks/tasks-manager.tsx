@@ -20,8 +20,10 @@ import {
   Trash2,
   UserRound,
   X,
+  Pencil,
 } from "lucide-react";
 import { AssigneeToggle } from "@/components/common/assignee-toggle";
+import { TagChipControl } from "@/components/common/tag-chip-control";
 import { useConfirmDialog } from "@/components/common/confirm-dialog";
 import { FiltersToggle } from "@/components/common/filters-toggle";
 import { TaskTagPicker } from "@/components/tasks/task-tag-picker";
@@ -131,6 +133,7 @@ export function TasksManager({
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all");
   const [userFilter, setUserFilter] = useState("all");
+  const [managingTags, setManagingTags] = useState(false);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [query, setQuery] = useState("");
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
@@ -532,6 +535,31 @@ export function TasksManager({
     return true;
   }
 
+  /* Tag bar "მართვა" mode: the pickers confirm inside themselves, the bar
+     confirms here. */
+  async function confirmRemoveTag(tagName: string) {
+    const confirmed = await confirm({
+      message: `ნამდვილად გსურთ "${tagName}" ტეგის წაშლა? ტეგი ყველა დავალებიდან და პრობლემიდან მოიხსნება.`,
+    });
+    if (confirmed) {
+      await removeAvailableTag(tagName);
+    }
+  }
+
+  async function confirmRenameTag(tagName: string, newName: string) {
+    if (availableTags.includes(newName)) {
+      const merge = await confirm({
+        title: "ტეგების გაერთიანება",
+        message: `ტეგი "${newName}" უკვე არსებობს. გაერთიანდეს "${tagName}" მასთან? "${tagName}" ყველგან "${newName}"-ით შეიცვლება.`,
+        confirmLabel: "გაერთიანება",
+      });
+      if (!merge) {
+        return false;
+      }
+    }
+    return renameAvailableTag(tagName, newName);
+  }
+
   async function removeAvailableTag(tagName: string) {
     if (!permissions.deleteTags) {
       return false;
@@ -797,17 +825,48 @@ export function TasksManager({
         {availableTags.length ? (
           <>
             <span className="tasks-toolbar-divider" />
-            {availableTags.map((tagName) => (
+            {availableTags.map((tagName) =>
+              managingTags ? (
+                <TagChipControl
+                  key={tagName}
+                  name={tagName}
+                  showIcon
+                  selected={selectedTags.includes(tagName)}
+                  onToggle={() => toggleFilterTag(tagName)}
+                  onRename={
+                    permissions.renameTags
+                      ? (newName) => confirmRenameTag(tagName, newName)
+                      : undefined
+                  }
+                  onDelete={
+                    permissions.deleteTags
+                      ? () => void confirmRemoveTag(tagName)
+                      : undefined
+                  }
+                />
+              ) : (
+                <button
+                  key={tagName}
+                  className={`tag-toggle compact ${selectedTags.includes(tagName) ? "active" : ""}`}
+                  type="button"
+                  onClick={() => toggleFilterTag(tagName)}
+                >
+                  <Tag size={13} />
+                  <span>{tagName}</span>
+                </button>
+              ),
+            )}
+            {permissions.renameTags || permissions.deleteTags ? (
               <button
-                key={tagName}
-                className={`tag-toggle compact ${selectedTags.includes(tagName) ? "active" : ""}`}
                 type="button"
-                onClick={() => toggleFilterTag(tagName)}
+                className={`tag-manage-toggle${managingTags ? " active" : ""}`}
+                aria-pressed={managingTags}
+                onClick={() => setManagingTags((current) => !current)}
               >
-                <Tag size={13} />
-                <span>{tagName}</span>
+                <Pencil size={13} />
+                <span>{managingTags ? "მზადაა" : "ტეგების მართვა"}</span>
               </button>
-            ))}
+            ) : null}
           </>
         ) : null}
       </section>

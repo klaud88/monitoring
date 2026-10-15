@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE, isAdmin, verifySessionToken } from "@/lib/auth";
+import { SESSION_COOKIE, isAdmin, verifySessionToken, clearSessionPermissionCache } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { updateRolePermissions } from "@/lib/repositories";
 import type { PageKey, PermissionAction, PermissionKey } from "@/lib/types";
@@ -76,6 +76,8 @@ export async function PUT(
   }
 
   const role = await updateRolePermissions(id, permissions);
+  // Sessions read permissions live; make this change apply right away.
+  clearSessionPermissionCache();
   if (!role) {
     return NextResponse.json({ message: "Role not found" }, { status: 404 });
   }

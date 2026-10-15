@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE, hasPermission, isAdmin, verifySessionToken } from "@/lib/auth";
+import { SESSION_COOKIE, hasPermission, isAdmin, verifySessionToken, clearSessionPermissionCache } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { deleteUser, getRoles, getUserById, updateUser } from "@/lib/repositories";
 
@@ -62,6 +62,7 @@ export async function PATCH(
     color,
     passwordHash: password ? await bcrypt.hash(password, 10) : undefined,
   });
+  clearSessionPermissionCache();
 
   if (!updatedUser) {
     return NextResponse.json({ message: "User not found" }, { status: 404 });
@@ -114,6 +115,8 @@ export async function DELETE(
   }
 
   const deleted = await deleteUser(id);
+  // Sessions read permissions live; make this change apply right away.
+  clearSessionPermissionCache();
   if (!deleted) {
     return NextResponse.json({ message: "User not found" }, { status: 404 });
   }
