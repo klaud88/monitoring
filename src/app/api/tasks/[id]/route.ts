@@ -7,6 +7,7 @@ import {
   getTaskTagNames,
   getTasks,
   getUsers,
+  normalizeInfoAutoDoneDays,
   updateTask,
 } from "@/lib/repositories";
 import { filterAssignableTaskUserIds } from "@/lib/task-assignees";
@@ -90,6 +91,12 @@ export async function PATCH(
       ? existingTask.tags
       : filterRegisteredTaskTags(body.tags, await getTaskTagNames());
   const info = body?.info === undefined ? Boolean(existingTask.info) : Boolean(body.info);
+  const infoAutoDoneDays = normalizeInfoAutoDoneDays(
+    body?.infoAutoDoneDays === undefined
+      ? existingTask.infoAutoDoneDays
+      : body.infoAutoDoneDays,
+    info,
+  );
 
   if (!title || !issue || !deviceId || !dueDate) {
     return NextResponse.json({ message: "Missing required task fields" }, { status: 400 });
@@ -106,6 +113,7 @@ export async function PATCH(
     priority,
     tags,
     info,
+    infoAutoDoneDays,
     startsAt: body?.startsAt ? String(body.startsAt) : existingTask.startsAt,
     dueDate,
   });

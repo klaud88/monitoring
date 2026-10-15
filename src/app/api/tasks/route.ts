@@ -2,7 +2,13 @@ import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { filterRegisteredTaskTags } from "@/lib/catalog";
-import { createTask, getTaskTagNames, getTasks, getUsers } from "@/lib/repositories";
+import {
+  createTask,
+  getTaskTagNames,
+  getTasks,
+  getUsers,
+  normalizeInfoAutoDoneDays,
+} from "@/lib/repositories";
 import { filterAssignableTaskUserIds } from "@/lib/task-assignees";
 import { resolveTaskVisibilityScope } from "@/lib/task-visibility";
 import { taskDueDateForPriority } from "@/lib/working-days";
@@ -50,6 +56,7 @@ export async function POST(request: NextRequest) {
   );
   const tags = filterRegisteredTaskTags(body?.tags, await getTaskTagNames());
   const info = Boolean(body?.info);
+  const infoAutoDoneDays = normalizeInfoAutoDoneDays(body?.infoAutoDoneDays, info);
 
   if (!title || !issue || !deviceId || !dueDate) {
     return NextResponse.json({ message: "Missing required task fields" }, { status: 400 });
@@ -66,6 +73,7 @@ export async function POST(request: NextRequest) {
     priority,
     tags,
     info,
+    infoAutoDoneDays,
     startsAt: body?.startsAt ? String(body.startsAt) : undefined,
     dueDate
   });

@@ -73,6 +73,8 @@ type TaskDraft = {
   tags: string[];
   dueDate: string;
   info: boolean;
+  /** "" = no automatic completion. */
+  infoAutoDoneDays: string;
 };
 
 type ViewMode = "lanes" | "columns" | "list";
@@ -168,6 +170,7 @@ export function TasksManager({
     tags: [] as string[],
     dueDate: taskDueDateForPriority("normal"),
     info: false,
+    infoAutoDoneDays: "",
   }));
 
   const deviceMap = useMemo(
@@ -361,6 +364,7 @@ export function TasksManager({
       tags: draft.tags,
       dueDate: draft.dueDate,
       info: draft.info,
+      infoAutoDoneDays: parseAutoDoneDays(draft.info, draft.infoAutoDoneDays),
       createdAt: new Date().toISOString(),
     };
 
@@ -390,6 +394,7 @@ export function TasksManager({
         tags: [],
         dueDate: taskDueDateForPriority(current.priority),
         info: false,
+        infoAutoDoneDays: "",
       }));
       setCreateOpen(false);
     } else {
@@ -543,12 +548,15 @@ export function TasksManager({
       return;
     }
 
+    const { infoAutoDoneDays: daysInput, ...draftFields } = editDraft;
+    const infoAutoDoneDays = parseAutoDoneDays(editDraft.info, daysInput);
     const payload = {
-      ...editDraft,
+      ...draftFields,
       title: editDraft.title.trim(),
       issue: editDraft.issue.trim(),
       comment: editDraft.comment.trim(),
       phone: editDraft.phone.trim(),
+      infoAutoDoneDays,
     };
 
     if (!payload.title || !payload.issue || !payload.deviceId || !payload.dueDate) {
@@ -573,7 +581,8 @@ export function TasksManager({
     const response = await fetch(`/api/tasks/${taskId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      // null (not undefined) so clearing the day count reaches the server.
+      body: JSON.stringify({ ...payload, infoAutoDoneDays: infoAutoDoneDays ?? null }),
     }).catch(() => null);
     setSavingTaskId(null);
 
@@ -946,6 +955,10 @@ export function TasksManager({
                 onToggle={() =>
                   setDraft((current) => ({ ...current, info: !current.info }))
                 }
+                days={draft.infoAutoDoneDays}
+                onDaysChange={(infoAutoDoneDays) =>
+                  setDraft((current) => ({ ...current, infoAutoDoneDays }))
+                }
               />
               <TaskTagPicker
                 className="task-field span-full"
@@ -1112,6 +1125,15 @@ export function TasksManager({
                   setEditDraft((current) =>
                     current ? { ...current, info: !current.info } : current,
                   )
+                }
+                days={editDraft.infoAutoDoneDays}
+                onDaysChange={(infoAutoDoneDays) =>
+                  setEditDraft((current) =>
+                    current ? { ...current, infoAutoDoneDays } : current,
+                  )
+                }
+                autoDoneAt={
+                  tasks.find((task) => task.id === editingTaskId)?.infoAutoDoneAt
                 }
               />
               <TaskTagPicker
@@ -1327,7 +1349,7 @@ function TaskRow({
           ) : null;
         })}
         {task.info ? (
-          <span className="avatar small info-badge" title="საინფორმაციო">
+          <span className="avatar small info-badge" title={infoBadgeTitle(task)}>
             INFO
           </span>
         ) : null}
@@ -1422,7 +1444,7 @@ function TaskCard({
             ) : null;
           })}
           {task.info ? (
-            <span className="avatar small info-badge" title="საინფორმაციო">
+            <span className="avatar small info-badge" title={infoBadgeTitle(task)}>
               INFO
             </span>
           ) : null}
@@ -1504,27 +1526,77 @@ function StatusPill({
 function InfoSwitch({
   checked,
   onToggle,
+  days,
+  onDaysChange,
+  autoDoneAt,
 }: {
   checked: boolean;
   onToggle: () => void;
+  /** Optional day count after which an INFO task closes itself. */
+  days: string;
+  onDaysChange: (value: string) => void;
+  /** Saved completion time, shown while editing. */
+  autoDoneAt?: string;
 }) {
   return (
     <div className="task-field span-full">
       <span>საინფორმაციოს აქტივაცია</span>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        className={`info-switch${checked ? " on" : ""}`}
-        onClick={onToggle}
-      >
-        <span className="info-switch-track" aria-hidden="true">
-          <span className="info-switch-thumb" />
-        </span>
-        <span className="info-switch-label">INFO</span>
-      </button>
+      <div className="info-switch-row">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={checked}
+          className={`info-switch${checked ? " on" : ""}`}
+          onClick={onToggle}
+        >
+          <span className="info-switch-track" aria-hidden="true">
+            <span className="info-switch-thumb" />
+          </span>
+          <span className="info-switch-label">INFO</span>
+        </button>
+        <label className={`info-switch-days${checked ? "" : " disabled"}`}>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={365}
+            step={1}
+            value={checked ? days : ""}
+            onChange={(event) => onDaysChange(event.target.value.replace(/\D/g, ""))}
+            placeholder="—"
+            disabled={!checked}
+            aria-label="დღეების რაოდენობა ავტომატურ დასრულებამდე"
+          />
+          <span>დღეში დასრულდება</span>
+        </label>
+      </div>
+      {checked && autoDoneAt && days ? (
+        <small className="task-field-hint">
+          ავტომატურად დასრულდება: {formatAutoDoneAt(autoDoneAt)}
+        </small>
+      ) : checked && !days ? (
+        <small className="task-field-hint">
+          დღეები თუ არ მიუთითე, სტატუსს ხელით შეცვლი.
+        </small>
+      ) : null}
     </div>
   );
+}
+
+function infoBadgeTitle(task: Task) {
+  return task.infoAutoDoneAt && task.status !== "done"
+    ? `საინფორმაციო · ავტომატურად დასრულდება: ${formatAutoDoneAt(task.infoAutoDoneAt)}`
+    : "საინფორმაციო";
+}
+
+function formatAutoDoneAt(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? value
+    : new Intl.DateTimeFormat("ka-GE", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(date);
 }
 
 function TagCell({ tags }: { tags: string[] }) {
@@ -1575,7 +1647,16 @@ function createEditDraft(task: Task, deviceCode?: string): TaskDraft {
     tags: task.tags,
     dueDate: task.dueDate,
     info: Boolean(task.info),
+    infoAutoDoneDays: task.infoAutoDoneDays ? String(task.infoAutoDoneDays) : "",
   };
+}
+
+/** The form's day count as the API takes it: 1–365, only for INFO tasks. */
+function parseAutoDoneDays(info: boolean, value: string) {
+  const days = Number(value);
+  return info && Number.isInteger(days) && days >= 1 && days <= 365
+    ? days
+    : undefined;
 }
 
 function toggleListValue(values: string[], value: string) {

@@ -9794,6 +9794,34 @@ html.wheel-locked body {
   outline: none;
 }
 
+.info-switch-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+}
+
+.info-switch-days {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-muted);
+  font-size: 12.5px;
+  transition: opacity 0.15s ease;
+}
+
+.info-switch-days input {
+  width: 64px;
+  min-height: 34px;
+  padding: 5px 8px;
+  text-align: center;
+  font-weight: 700;
+}
+
+.info-switch-days.disabled {
+  opacity: 0.45;
+}
+
 .info-switch:focus-visible .info-switch-track {
   box-shadow: 0 0 0 3px var(--tint-green);
 }

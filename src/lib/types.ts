@@ -115,6 +115,10 @@ export type Task = {
   /** Marked "informational" — tasks.info permission holders see these
    *  regardless of their own full/assigned-only scope (green INFO badge). */
   info?: boolean;
+  /** INFO tasks only: close automatically this many days after it was set. */
+  infoAutoDoneDays?: number;
+  /** When that automatic completion happens (server-computed). */
+  infoAutoDoneAt?: string;
 };
 
 export type ProblemReport = {

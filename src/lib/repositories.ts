@@ -353,6 +353,8 @@ type TaskRow = {
   priority: Task["priority"];
   tags: unknown;
   is_info: boolean | number;
+  info_auto_done_days: number | null;
+  info_auto_done_at: DatabaseDate | null;
   starts_at: DatabaseDate | null;
   due_date: DatabaseDate;
   created_at: DatabaseDate;
@@ -804,6 +806,20 @@ async function ensureOperationalSchema() {
         "tasks",
         "is_info",
         "is_info boolean not null default false after tags",
+      );
+      await addColumnIfMissing(
+        connection,
+        taskColumns,
+        "tasks",
+        "info_auto_done_days",
+        "info_auto_done_days int null after is_info",
+      );
+      await addColumnIfMissing(
+        connection,
+        taskColumns,
+        "tasks",
+        "info_auto_done_at",
+        "info_auto_done_at datetime null after info_auto_done_days",
       );
       const userColumns = await getTableColumns(connection, "users");
       await addColumnIfMissing(
@@ -3775,6 +3791,51 @@ function isBuildTime() {
   );
 }
 
+/** 1–365 whole days for an INFO task to close itself; anything else, or a
+    task that isn't INFO, means "no automatic completion". */
+export function normalizeInfoAutoDoneDays(value: unknown, info: boolean) {
+  if (!info || value === null || value === undefined || value === "") {
+    return undefined;
+  }
+  const days = Number(value);
+  return Number.isInteger(days) && days >= 1 && days <= 365 ? days : undefined;
+}
+
+let lastInfoAutoDoneSweepAt = 0;
+
+/* INFO tasks with a day count move to "done" once their time is up. Run
+   lazily from the task and report readers (at most once a minute), so no
+   cron job is needed; a linked problem report follows its task. */
+async function completeExpiredInfoTasks() {
+  if (isBuildTime() || Date.now() - lastInfoAutoDoneSweepAt < 60_000) {
+    return;
+  }
+  lastInfoAutoDoneSweepAt = Date.now();
+
+  await withConnection(async (connection) => {
+    await connection.query(`
+      update problem_reports pr
+      join tasks t on t.id = pr.task_id
+      set pr.status = 'done'
+      where t.is_info = true
+        and t.info_auto_done_at is not null
+        and t.info_auto_done_at <= now()
+        and t.status <> 'done'
+        and pr.status <> 'done'
+    `);
+    await connection.query(`
+      update tasks
+      set status = 'done'
+      where is_info = true
+        and info_auto_done_at is not null
+        and info_auto_done_at <= now()
+        and status <> 'done'
+    `);
+  }).catch((error) => {
+    console.error("[tasks] INFO auto-completion failed", error);
+  });
+}
+
 export async function getTasks(
   {
     assigneeUserId,
@@ -3782,6 +3843,7 @@ export async function getTasks(
   }: { assigneeUserId?: string; includeInfoTasks?: boolean } = {},
 ): Promise<Task[]> {
   await ensureOperationalSchema();
+  await completeExpiredInfoTasks();
 
   // A straight "and ta.user_id = ?" on the display join below would turn the
   // left join into an effective inner join and make group_concat drop every
@@ -3813,6 +3875,8 @@ export async function getTasks(
         t.priority,
         t.tags,
         t.is_info,
+        t.info_auto_done_days,
+        t.info_auto_done_at,
         t.starts_at,
         t.due_date,
         t.created_at,
@@ -3858,6 +3922,10 @@ export async function getTasks(
     priority: row.priority,
     tags: normalizeTaskTags(row.tags),
     info: Boolean(row.is_info),
+    infoAutoDoneDays: row.info_auto_done_days ?? undefined,
+    infoAutoDoneAt: row.info_auto_done_at
+      ? toDateTimeString(row.info_auto_done_at)
+      : undefined,
     startsAt: row.starts_at ? toDateTimeString(row.starts_at) : undefined,
     dueDate: toDateString(row.due_date),
     createdAt: toDateTimeString(row.created_at),
@@ -3884,8 +3952,8 @@ export async function createTask(
     try {
       await connection.query<ResultSetHeader>(
         `
-          insert into tasks (id, title, issue, comment_text, phone, device_id, status, priority, tags, is_info, starts_at, due_date)
-          values (?, ?, ?, ?, ?, ?, ?, ?, cast(? as json), ?, ?, ?)
+          insert into tasks (id, title, issue, comment_text, phone, device_id, status, priority, tags, is_info, info_auto_done_days, info_auto_done_at, starts_at, due_date)
+          values (?, ?, ?, ?, ?, ?, ?, ?, cast(? as json), ?, ?, if(? is null, null, date_add(now(), interval ? day)), ?, ?)
         `,
         [
           task.id,
@@ -3898,6 +3966,9 @@ export async function createTask(
           task.priority,
           JSON.stringify(task.tags),
           Boolean(task.info),
+          task.infoAutoDoneDays ?? null,
+          task.infoAutoDoneDays ?? null,
+          task.infoAutoDoneDays ?? 0,
           task.startsAt ?? null,
           task.dueDate,
         ],
@@ -3947,6 +4018,16 @@ export async function updateTask(
             priority = ?,
             tags = cast(? as json),
             is_info = ?,
+            -- Restart the countdown only when the number of days changes.
+            -- Must stay before info_auto_done_days: MySQL applies SET left
+            -- to right, so this still compares against the old value.
+            info_auto_done_at = case
+              when ? is null then null
+              when info_auto_done_days <=> ? and info_auto_done_at is not null
+                then info_auto_done_at
+              else date_add(now(), interval ? day)
+            end,
+            info_auto_done_days = ?,
             starts_at = ?,
             due_date = ?
           where id = ?
@@ -3961,6 +4042,10 @@ export async function updateTask(
           input.priority,
           JSON.stringify(tags),
           Boolean(input.info),
+          input.infoAutoDoneDays ?? null,
+          input.infoAutoDoneDays ?? null,
+          input.infoAutoDoneDays ?? 0,
+          input.infoAutoDoneDays ?? null,
           input.startsAt ?? null,
           input.dueDate,
           id,
@@ -4031,6 +4116,7 @@ export async function getProblemReports({
   deviceGroupCode?: string;
 } = {}): Promise<ProblemReport[]> {
   await ensureOperationalSchema();
+  await completeExpiredInfoTasks();
 
   const filters: string[] = [];
   const params: string[] = [];
