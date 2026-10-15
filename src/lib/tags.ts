@@ -10,3 +10,10 @@ export function mergeTags(...groups: string[][]) {
     )
   );
 }
+
+/** A tag list with `from` replaced by `to` (no duplicate if `to` is there). */
+export function renameTagInList(tags: string[], from: string, to: string) {
+  return tags.includes(from)
+    ? [...new Set(tags.map((tag) => (tag === from ? to : tag)))]
+    : tags;
+}

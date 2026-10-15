@@ -29,8 +29,11 @@ const defaultActions: ActionDef[] = [
 
 const tagRegistryActions: ActionDef[] = [
   { key: "tag_create", label: "ახალი ტეგი" },
+  { key: "tag_edit", label: "ტეგის რედაქტირება" },
   { key: "tag_delete", label: "ტეგის წაშლა" },
 ];
+
+const deviceActions: ActionDef[] = [...defaultActions, ...tagRegistryActions];
 
 const taskActions: ActionDef[] = [
   ...defaultActions,
@@ -75,7 +78,7 @@ const pages: {
   actions?: ActionDef[];
 }[] = [
   { key: "dashboard", label: "რუკა" },
-  { key: "devices", label: "X-Stations" },
+  { key: "devices", label: "მოწყობილობები", actions: deviceActions },
   { key: "regions", label: "რაიონები" },
   { key: "tasks", label: "დავალებები", actions: taskActions },
   {

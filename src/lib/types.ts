@@ -43,6 +43,7 @@ export type PermissionAction =
   | "service_edit"
   | "tag"
   | "tag_create"
+  | "tag_edit"
   | "tag_delete"
   | "status";
 export type PermissionKey = `${PageKey}.${PermissionAction}`;

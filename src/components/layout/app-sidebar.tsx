@@ -59,7 +59,7 @@ const navGroups: NavGroup[] = [
     id: "devices",
     label: "მოწყობილობები",
     items: [
-      { href: "/devices/regions", label: "X-Stations", icon: MonitorCog },
+      { href: "/devices/regions", label: "მოწყობილობები", icon: MonitorCog },
       {
         href: "/offline-records",
         label: "Offline აღრიცხვა",

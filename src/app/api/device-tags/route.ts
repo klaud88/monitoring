@@ -5,6 +5,7 @@ import { normalizeTaskTagName } from "@/lib/catalog";
 import {
   createDeviceTag,
   deleteDeviceTag,
+  renameDeviceTag,
   getDeviceTagNames,
 } from "@/lib/repositories";
 
@@ -19,7 +20,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const user = await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
-  if (!hasPermission(user, "devices.edit")) {
+  if (!hasPermission(user, "devices.tag_create")) {
     return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   }
 
@@ -52,7 +53,7 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   const user = await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
-  if (!hasPermission(user, "devices.edit")) {
+  if (!hasPermission(user, "devices.tag_delete")) {
     return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   }
 
@@ -80,4 +81,37 @@ export async function DELETE(request: NextRequest) {
   });
 
   return NextResponse.json({ ok: true, tags: await getDeviceTagNames() });
+}
+
+
+/** Renames a tag everywhere it is used; onto an existing name, merges them. */
+export async function PATCH(request: NextRequest) {
+  const user = await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
+  if (!hasPermission(user, "devices.tag_edit")) {
+    return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+  }
+
+  const body = await request.json().catch(() => null);
+  const tagName = normalizeTaskTagName(body?.name);
+  const newName = normalizeTaskTagName(body?.newName);
+  if (!tagName || !newName) {
+    return NextResponse.json({ message: "Tag name is required" }, { status: 400 });
+  }
+
+  const renamed = await renameDeviceTag(tagName, newName);
+  if (!renamed) {
+    return NextResponse.json({ message: "Tag not found" }, { status: 404 });
+  }
+
+  await logAudit({
+    userId: user!.id,
+    action: "device_tag.rename",
+    entityType: "device_tag",
+    entityId: renamed,
+    metadata: { from: tagName, to: renamed },
+    ipAddress: request.headers.get("x-forwarded-for") ?? undefined,
+    userAgent: request.headers.get("user-agent") ?? undefined,
+  });
+
+  return NextResponse.json({ tag: renamed, tags: await getDeviceTagNames() });
 }

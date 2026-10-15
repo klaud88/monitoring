@@ -16,10 +16,11 @@ import {
 } from "lucide-react";
 import { useConfirmDialog } from "@/components/common/confirm-dialog";
 import { FiltersToggle } from "@/components/common/filters-toggle";
+import { TagChipControl } from "@/components/common/tag-chip-control";
 import { getGardenKey } from "@/lib/device-associations";
 import { getGardenDisplayName } from "@/lib/device-options";
 import { TBILISI_CENTER, clampLatLng } from "@/lib/geo";
-import { mergeTags } from "@/lib/tags";
+import { mergeTags, renameTagInList } from "@/lib/tags";
 import type { Device, DeviceStatus, Region } from "@/lib/types";
 
 type DeviceDraft = {
@@ -37,6 +38,7 @@ type RegionPermissions = {
   editDevice: boolean;
   deleteDevice: boolean;
   createTags: boolean;
+  renameTags: boolean;
   deleteTags: boolean;
   createRegion: boolean;
   editRegion: boolean;
@@ -62,14 +64,20 @@ export function RegionManager({
   initialDevices,
   initialRegions,
   initialTags,
+  initialGardenTags,
   permissions,
 }: {
   initialDevices: Device[];
   initialRegions: Region[];
   initialTags: string[];
+  /** Garden key → tags given to the whole garden. */
+  initialGardenTags: Record<string, string[]>;
   permissions: RegionPermissions;
 }) {
   const [devices, setDevices] = useState(initialDevices);
+  const [gardenTags, setGardenTags] = useState(initialGardenTags);
+  const [editingGardenKey, setEditingGardenKey] = useState<string | null>(null);
+  const [gardenTagDraft, setGardenTagDraft] = useState<string[]>([]);
   const [regions, setRegions] = useState(initialRegions);
   const [query, setQuery] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -122,17 +130,20 @@ export function RegionManager({
             !normalized ||
             device.name.toLowerCase().includes(normalized) ||
             device.region.toLowerCase().includes(normalized);
+          // A garden's own tags count for every device in it.
+          const gardenTagNames = gardenTags[getGardenKey(device.name)] ?? [];
           const matchesTags =
             selectedFilterTags.length === 0 ||
-            selectedFilterTags.every((tagName) =>
-              device.tags.includes(tagName),
+            selectedFilterTags.every(
+              (tagName) =>
+                device.tags.includes(tagName) || gardenTagNames.includes(tagName),
             );
 
           return matchesRegion && matchesQuery && matchesTags;
         },
       )
       .sort((a, b) => compareDevices(a, b, deviceSort));
-  }, [devices, deviceSort, query, regionFilter, selectedFilterTags]);
+  }, [devices, deviceSort, gardenTags, query, regionFilter, selectedFilterTags]);
 
   // Devices are named "<garden>-<n>"; the list shows one card per garden in
   // the order its first device sorts, with that garden's devices inside.
@@ -231,7 +242,7 @@ export function RegionManager({
     }
 
     const confirmed = await confirm({
-      message: `ნამდვილად გსურთ "${tagName}" ტეგის წაშლა? ტეგი ყველა X-Station-იდან მოიხსნება.`,
+      message: `ნამდვილად გსურთ "${tagName}" ტეგის წაშლა? ტეგი ყველა მოწყობილობიდან და ბაღიდან მოიხსნება.`,
     });
     if (!confirmed) {
       return false;
@@ -273,7 +284,96 @@ export function RegionManager({
         ? { ...current, tags: current.tags.filter((tag) => tag !== tagName) }
         : current,
     );
+    setGardenTags((current) =>
+      Object.fromEntries(
+        Object.entries(current).map(([key, tags]) => [
+          key,
+          tags.filter((tag) => tag !== tagName),
+        ]),
+      ),
+    );
+    setGardenTagDraft((current) => current.filter((tag) => tag !== tagName));
     return true;
+  }
+
+  async function renameAvailableTag(tagName: string, newName: string) {
+    if (!permissions.renameTags) {
+      return false;
+    }
+
+    if (availableTags.includes(newName)) {
+      const merge = await confirm({
+        title: "ტეგების გაერთიანება",
+        message: `ტეგი "${newName}" უკვე არსებობს. გაერთიანდეს "${tagName}" მასთან? "${tagName}" ყველა მოწყობილობასა და ბაღზე "${newName}"-ით შეიცვლება.`,
+        confirmLabel: "გაერთიანება",
+      });
+      if (!merge) {
+        return false;
+      }
+    }
+
+    setSaving(true);
+    setError("");
+    const response = await fetch("/api/device-tags", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: tagName, newName }),
+    }).catch(() => null);
+    setSaving(false);
+
+    if (!response?.ok) {
+      setError("ტეგის სახელის შეცვლა ვერ მოხერხდა.");
+      return false;
+    }
+
+    const data = (await response.json()) as { tag?: string; tags?: string[] };
+    const renamed = data.tag ?? newName;
+    const swap = (tags: string[]) => renameTagInList(tags, tagName, renamed);
+    setAvailableTags((current) => data.tags ?? swap(current));
+    setSelectedFilterTags(swap);
+    setDevices((current) =>
+      current.map((device) => ({ ...device, tags: swap(device.tags) })),
+    );
+    setDraft((current) => ({ ...current, tags: swap(current.tags) }));
+    setDeviceEdit((current) =>
+      current ? { ...current, tags: swap(current.tags) } : current,
+    );
+    setGardenTags((current) =>
+      Object.fromEntries(
+        Object.entries(current).map(([key, tags]) => [key, swap(tags)]),
+      ),
+    );
+    setGardenTagDraft(swap);
+    return true;
+  }
+
+  function startGardenTags(gardenKey: string) {
+    setError("");
+    setEditingGardenKey(gardenKey);
+    setGardenTagDraft(gardenTags[gardenKey] ?? []);
+  }
+
+  async function saveGardenTags(gardenKey: string) {
+    setSaving(true);
+    setError("");
+    const response = await fetch("/api/garden-tags", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ gardenKey, tags: gardenTagDraft }),
+    }).catch(() => null);
+    setSaving(false);
+
+    if (!response?.ok) {
+      setError("ბაღის ტეგების შენახვა ვერ მოხერხდა.");
+      return;
+    }
+
+    const data = (await response.json()) as { tags?: string[] };
+    setGardenTags((current) => ({
+      ...current,
+      [gardenKey]: data.tags ?? gardenTagDraft,
+    }));
+    setEditingGardenKey(null);
   }
 
   async function createRegion(event: React.FormEvent<HTMLFormElement>) {
@@ -373,7 +473,7 @@ export function RegionManager({
 
     const confirmed = await confirm({
       message:
-        "ნამდვილად გსურთ აღნიშნულის წაშლა? ამ რაიონზე მიბმული X-Station-ები დარჩებიან რაიონის გარეშე.",
+        "ნამდვილად გსურთ აღნიშნულის წაშლა? ამ რაიონზე მიბმული მოწყობილობები დარჩებიან რაიონის გარეშე.",
     });
     if (!confirmed) {
       return;
@@ -412,7 +512,7 @@ export function RegionManager({
 
     const payload = devicePayload(draft);
     if (!payload.name) {
-      setError("X-Station-ის სახელი აუცილებელია.");
+      setError("მოწყობილობის სახელი აუცილებელია.");
       return;
     }
 
@@ -426,7 +526,7 @@ export function RegionManager({
     setSaving(false);
 
     if (!response.ok) {
-      setError("X-Station-ის დამატება ვერ მოხერხდა.");
+      setError("მოწყობილობის დამატება ვერ მოხერხდა.");
       return;
     }
 
@@ -464,7 +564,7 @@ export function RegionManager({
 
     const payload = devicePayload(deviceEdit);
     if (!payload.name) {
-      setError("X-Station-ის სახელი აუცილებელია.");
+      setError("მოწყობილობის სახელი აუცილებელია.");
       return;
     }
 
@@ -478,7 +578,7 @@ export function RegionManager({
     setSaving(false);
 
     if (!response.ok) {
-      setError("X-Station-ის რედაქტირება ვერ მოხერხდა.");
+      setError("მოწყობილობის რედაქტირება ვერ მოხერხდა.");
       return;
     }
 
@@ -519,7 +619,7 @@ export function RegionManager({
             : item,
         ),
       );
-      setError("X-Station-ის ჩართვა/გამორთვა ვერ მოხერხდა.");
+      setError("მოწყობილობის ჩართვა/გამორთვა ვერ მოხერხდა.");
       return;
     }
 
@@ -547,7 +647,7 @@ export function RegionManager({
     setSaving(false);
 
     if (!response.ok) {
-      setError("X-Station-ის წაშლა ვერ მოხერხდა.");
+      setError("მოწყობილობის წაშლა ვერ მოხერხდა.");
       return;
     }
 
@@ -564,15 +664,15 @@ export function RegionManager({
       {confirmationDialog}
       <section className="page-header">
         <div>
-          <p className="eyebrow">X-Stations</p>
-          <h1>რაიონებისა და X-Station-ების მართვა</h1>
-          <p>რაიონების, ტეგების და X-Station ჩანაწერების CRUD მართვა.</p>
+          <p className="eyebrow">მოწყობილობები</p>
+          <h1>რაიონებისა და მოწყობილობების მართვა</h1>
+          <p>რაიონების, ბაღების, მოწყობილობების და მათი ტეგების მართვა.</p>
         </div>
         <div className="metric-strip">
           <div className="metric">
             <MapPinned size={18} />
             <span>{devices.length}</span>
-            <small>X-Station</small>
+            <small>მოწყობილობა</small>
           </div>
           <div className="metric">
             <Tags size={18} />
@@ -677,7 +777,7 @@ export function RegionManager({
                     />
                     <div>
                       <strong>{item.region.name}</strong>
-                      <small>{item.count} X-Station</small>
+                      <small>{item.count} მოწყობილობა</small>
                     </div>
                     <div className="row-actions">
                       {permissions.editRegion ? (
@@ -716,7 +816,7 @@ export function RegionManager({
               onSubmit={createDevice}
             >
               <button type="button" className="section-title" onClick={() => setDeviceOpen((o) => !o)}>
-                <h2>ახალი X-Station</h2>
+                <h2>ახალი მოწყობილობა</h2>
                 {deviceOpen ? <Minus size={20} /> : <Plus size={20} />}
               </button>
               {deviceOpen && (
@@ -731,12 +831,14 @@ export function RegionManager({
                     toggleTag={toggleDraftTag}
                     canCreateTags={permissions.createTags}
                     canDeleteTags={permissions.deleteTags}
+                    canRenameTags={permissions.renameTags}
                     onCreateTag={createAvailableTag}
                     onDeleteTag={removeAvailableTag}
+                    onRenameTag={renameAvailableTag}
                   />
                   <button className="primary-button" type="submit" disabled={saving}>
                     <Plus size={18} />
-                    <span>X-Station-ის დამატება</span>
+                    <span>მოწყობილობის დამატება</span>
                   </button>
                 </>
               )}
@@ -797,7 +899,7 @@ export function RegionManager({
           {availableTags.length ? (
             <section
               className="tag-filter region-device-tag-filter"
-              aria-label="X-Station ტეგების ფილტრი"
+              aria-label="ტეგების ფილტრი"
             >
               {availableTags.map((tagName) => (
                 <button
@@ -854,17 +956,100 @@ export function RegionManager({
             {gardenGroups.map((group) => (
               <article key={group.key} className="garden-group">
                 <div className="garden-group-head">
-                  <strong>{group.label}</strong>
-                  {group.regions.length ? (
-                    <span>
-                      {group.regions
-                        .map((region) =>
-                          region === unassignedRegion ? "რაიონის გარეშე" : region,
-                        )
-                        .join(", ")}
+                  <div className="garden-group-title">
+                    <strong>{group.label}</strong>
+                    {group.regions.length ? (
+                      <span>
+                        {group.regions
+                          .map((region) =>
+                            region === unassignedRegion ? "რაიონის გარეშე" : region,
+                          )
+                          .join(", ")}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+                {/* The garden's own tags: a column on the right of the card. */}
+                <div className="garden-group-tags">
+                  {(gardenTags[group.key] ?? []).map((tagName) => (
+                    <span key={tagName} className="garden-tag-chip">
+                      <Tags size={12} />
+                      {tagName}
                     </span>
+                  ))}
+                  {permissions.editDevice && editingGardenKey !== group.key ? (
+                    <button
+                      type="button"
+                      className="garden-tag-edit"
+                      onClick={() => startGardenTags(group.key)}
+                      aria-label={`${group.label} — ბაღის ტეგები`}
+                      title="ბაღის ტეგები"
+                    >
+                      <Edit3 size={13} />
+                      {(gardenTags[group.key] ?? []).length ? null : (
+                        <span>ტეგი</span>
+                      )}
+                    </button>
                   ) : null}
                 </div>
+                {editingGardenKey === group.key ? (
+                  <div className="garden-tag-panel">
+                    <span className="garden-tag-panel-label">
+                      ბაღის ტეგები — {group.label}
+                    </span>
+                    <div className="row-tags">
+                      {availableTags.length ? (
+                        availableTags.map((tagName) => (
+                          <TagChipControl
+                            key={tagName}
+                            name={tagName}
+                            selected={gardenTagDraft.includes(tagName)}
+                            onToggle={() =>
+                              setGardenTagDraft((current) =>
+                                toggleListValue(current, tagName),
+                              )
+                            }
+                            onRename={
+                              permissions.renameTags
+                                ? (newName) => renameAvailableTag(tagName, newName)
+                                : undefined
+                            }
+                            onDelete={
+                              permissions.deleteTags
+                                ? () => void removeAvailableTag(tagName)
+                                : undefined
+                            }
+                            busy={saving}
+                          />
+                        ))
+                      ) : (
+                        <span className="muted">
+                          ტეგები ჯერ არ არის. დაამატე ზემოთ „ტეგის დამატებით“.
+                        </span>
+                      )}
+                    </div>
+                    <div className="row-actions">
+                      <button
+                        className="primary-button"
+                        type="button"
+                        onClick={() => saveGardenTags(group.key)}
+                        disabled={saving}
+                      >
+                        <Save size={15} />
+                        <span>შენახვა</span>
+                      </button>
+                      <button
+                        className="ghost-button"
+                        type="button"
+                        onClick={() => setEditingGardenKey(null)}
+                        disabled={saving}
+                      >
+                        <X size={15} />
+                        <span>გაუქმება</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
                 <div className="garden-group-devices">
                   {group.devices.map((device) =>
                     editingDeviceId === device.id && deviceEdit ? (
@@ -881,8 +1066,10 @@ export function RegionManager({
                           toggleTag={toggleEditTag}
                           canCreateTags={permissions.createTags}
                           canDeleteTags={permissions.deleteTags}
+                          canRenameTags={permissions.renameTags}
                           onCreateTag={createAvailableTag}
                           onDeleteTag={removeAvailableTag}
+                          onRenameTag={renameAvailableTag}
                         />
                         <div className="row-actions">
                           <button
@@ -935,7 +1122,7 @@ export function RegionManager({
                             onClick={() => toggleDeviceExclusion(device)}
                             disabled={!permissions.editDevice || saving}
                             aria-pressed={device.isExcluded}
-                            title="ჩართვისას X-Station რუკაზე, ანალიტიკაში და Offline აღრიცხვაში აღარ გამოჩნდება"
+                            title="ჩართვისას მოწყობილობა რუკაზე, ანალიტიკაში და Offline აღრიცხვაში აღარ გამოჩნდება"
                           >
                             {device.isExcluded ? (
                               <ToggleRight size={24} />
@@ -954,8 +1141,8 @@ export function RegionManager({
                               className="icon-button"
                               type="button"
                               onClick={() => startEditDevice(device)}
-                              aria-label="X-Station-ის რედაქტირება"
-                              title="X-Station-ის რედაქტირება"
+                              aria-label="მოწყობილობის რედაქტირება"
+                              title="მოწყობილობის რედაქტირება"
                             >
                               <Edit3 size={17} />
                             </button>
@@ -965,8 +1152,8 @@ export function RegionManager({
                               className="icon-button danger"
                               type="button"
                               onClick={() => removeDevice(device.id)}
-                              aria-label="X-Station-ის წაშლა"
-                              title="X-Station-ის წაშლა"
+                              aria-label="მოწყობილობის წაშლა"
+                              title="მოწყობილობის წაშლა"
                             >
                               <Trash2 size={17} />
                             </button>
@@ -993,8 +1180,10 @@ function DeviceDraftFields({
   toggleTag,
   canCreateTags,
   canDeleteTags,
+  canRenameTags,
   onCreateTag,
   onDeleteTag,
+  onRenameTag,
 }: {
   draft: DeviceDraft;
   onChange: (partial: Partial<DeviceDraft>) => void;
@@ -1003,8 +1192,10 @@ function DeviceDraftFields({
   toggleTag: (tagName: string) => void;
   canCreateTags: boolean;
   canDeleteTags: boolean;
+  canRenameTags: boolean;
   onCreateTag: (tagName: string) => Promise<string | null> | string | null;
   onDeleteTag: (tagName: string) => Promise<boolean> | boolean;
+  onRenameTag: (tagName: string, newName: string) => Promise<boolean> | boolean;
 }) {
   const [newTagName, setNewTagName] = useState("");
   const [savingTag, setSavingTag] = useState(false);
@@ -1121,27 +1312,17 @@ function DeviceDraftFields({
       </div>
       <div className="row-tags">
         {availableTags.map((tagName) => (
-          <span key={tagName} className="tag-chip-control">
-            <button
-              type="button"
-              className={`tag-toggle compact ${draft.tags.includes(tagName) ? "active" : ""}`}
-              onClick={() => toggleTag(tagName)}
-            >
-              {tagName}
-            </button>
-            {canDeleteTags ? (
-              <button
-                type="button"
-                className="tag-delete-button"
-                onClick={() => deleteTag(tagName)}
-                disabled={Boolean(deletingTag)}
-                aria-label={`${tagName} ტეგის წაშლა`}
-                title="ტეგის წაშლა"
-              >
-                <Trash2 size={12} />
-              </button>
-            ) : null}
-          </span>
+          <TagChipControl
+            key={tagName}
+            name={tagName}
+            selected={draft.tags.includes(tagName)}
+            onToggle={() => toggleTag(tagName)}
+            onRename={
+              canRenameTags ? (newName) => onRenameTag(tagName, newName) : undefined
+            }
+            onDelete={canDeleteTags ? () => void deleteTag(tagName) : undefined}
+            busy={Boolean(deletingTag)}
+          />
         ))}
       </div>
       <div className="device-tag-edit-actions">

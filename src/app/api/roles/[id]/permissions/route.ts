@@ -42,6 +42,7 @@ const permissionActions = new Set<PermissionAction>([
   "service_edit",
   "tag",
   "tag_create",
+  "tag_edit",
   "tag_delete",
   "status",
 ]);

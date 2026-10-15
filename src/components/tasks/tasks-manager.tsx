@@ -33,7 +33,7 @@ import {
   sortDevicesByName,
 } from "@/lib/device-options";
 import { formatShortDate, withoutDeviceCodes } from "@/lib/display";
-import { mergeTags } from "@/lib/tags";
+import { mergeTags, renameTagInList } from "@/lib/tags";
 import { getAssignableTaskUsers } from "@/lib/task-assignees";
 import { taskDueDateForPriority } from "@/lib/working-days";
 import type {
@@ -58,6 +58,7 @@ type TaskPermissions = {
   edit: boolean;
   delete: boolean;
   createTags: boolean;
+  renameTags: boolean;
   deleteTags: boolean;
 };
 
@@ -486,6 +487,47 @@ export function TasksManager({
     };
     setAvailableTags((current) =>
       mergeTags(data.tags ?? current, data.tag ? [data.tag] : [tagName]),
+    );
+    return true;
+  }
+
+  async function renameAvailableTag(tagName: string, newName: string) {
+    if (!permissions.renameTags) {
+      return false;
+    }
+
+    setError("");
+    const response = await fetch("/api/tags", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: tagName, newName }),
+    }).catch(() => null);
+
+    if (!response?.ok) {
+      setError("ტეგის სახელის შეცვლა ვერ მოხერხდა.");
+      return false;
+    }
+
+    const data = (await response.json()) as { tag?: string; tags?: string[] };
+    const renamed = data.tag ?? newName;
+    setAvailableTags(
+      (current) => data.tags ?? renameTagInList(current, tagName, renamed),
+    );
+    setSelectedTags((current) => renameTagInList(current, tagName, renamed));
+    setDraft((current) => ({
+      ...current,
+      tags: renameTagInList(current.tags, tagName, renamed),
+    }));
+    setEditDraft((current) =>
+      current
+        ? { ...current, tags: renameTagInList(current.tags, tagName, renamed) }
+        : current,
+    );
+    setTasks((current) =>
+      current.map((task) => ({
+        ...task,
+        tags: renameTagInList(task.tags, tagName, renamed),
+      })),
     );
     return true;
   }
@@ -966,9 +1008,11 @@ export function TasksManager({
                 selectedTags={draft.tags}
                 canCreateTags={permissions.createTags}
                 canDeleteTags={permissions.deleteTags}
+                canRenameTags={permissions.renameTags}
                 onToggle={toggleDraftTag}
                 onCreateTag={createAvailableTag}
                 onDeleteTag={removeAvailableTag}
+                onRenameTag={renameAvailableTag}
               />
             </form>
           ) : editDraft ? (
@@ -1142,9 +1186,11 @@ export function TasksManager({
                 selectedTags={editDraft.tags}
                 canCreateTags={permissions.createTags}
                 canDeleteTags={permissions.deleteTags}
+                canRenameTags={permissions.renameTags}
                 onToggle={toggleEditTag}
                 onCreateTag={createAvailableTag}
                 onDeleteTag={removeAvailableTag}
+                onRenameTag={renameAvailableTag}
               />
             </div>
           ) : null}

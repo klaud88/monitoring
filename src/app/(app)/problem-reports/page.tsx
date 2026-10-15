@@ -65,6 +65,7 @@ export default async function ProblemReportsPage({
         assignUsers: canAssignUsers,
         manageTags: hasPermission(user, "problem_reports.tag"),
         createTags: hasPermission(user, "problem_reports.tag_create"),
+        renameTags: hasPermission(user, "problem_reports.tag_edit"),
         deleteTags: hasPermission(user, "problem_reports.tag_delete"),
         manageStatus: hasPermission(user, "problem_reports.status"),
       }}

@@ -294,6 +294,9 @@ const TASK_TAG_PERMISSIONS: {
   code: PermissionKey;
   label: string;
   roles: string[];
+  /** When the permission first appears, also grant it to every role that
+      already holds this one, so nobody loses what they could do before. */
+  inheritFrom?: PermissionKey;
 }[] = [
   {
     code: "tasks.tag_create",
@@ -314,6 +317,38 @@ const TASK_TAG_PERMISSIONS: {
     code: "problem_reports.tag_delete",
     label: "პრობლემის დაფიქსირება: ტეგის წაშლა",
     roles: ["admin"],
+  },
+  // Renaming used to ride on the delete permission.
+  {
+    code: "tasks.tag_edit",
+    label: "დავალებები: ტეგის რედაქტირება",
+    roles: ["admin"],
+    inheritFrom: "tasks.tag_delete",
+  },
+  {
+    code: "problem_reports.tag_edit",
+    label: "პრობლემის დაფიქსირება: ტეგის რედაქტირება",
+    roles: ["admin"],
+    inheritFrom: "problem_reports.tag_delete",
+  },
+  // Device and garden tags used to need only devices.edit.
+  {
+    code: "devices.tag_create",
+    label: "მოწყობილობები: ახალი ტეგის დამატება",
+    roles: ["admin"],
+    inheritFrom: "devices.edit",
+  },
+  {
+    code: "devices.tag_edit",
+    label: "მოწყობილობები: ტეგის რედაქტირება",
+    roles: ["admin"],
+    inheritFrom: "devices.edit",
+  },
+  {
+    code: "devices.tag_delete",
+    label: "მოწყობილობები: ტეგის წაშლა",
+    roles: ["admin"],
+    inheritFrom: "devices.edit",
   },
 ];
 const OFFLINE_MONITOR_PERMISSIONS: {
@@ -1202,6 +1237,11 @@ async function ensureOperationalSchema() {
       } catch (error) {
         console.error("[schema] problem categories unavailable", error);
       }
+      try {
+        await ensureGardenTagSchema(connection);
+      } catch (error) {
+        console.error("[schema] garden tags unavailable", error);
+      }
       await ensureTaskTagCatalog(connection);
       await ensureProblemReportAccess(connection);
       await ensureGardenUsersForDevices(connection);
@@ -1430,6 +1470,21 @@ async function ensureProblemCategorySchema(connection: PoolConnection) {
   }
 }
 
+/* A garden (the "1" in devices "1-1", "1-2") carries its own tags from the
+   device tag catalog (`tags`), shown next to the garden on the devices page. */
+async function ensureGardenTagSchema(connection: PoolConnection) {
+  const tagIdCharset = await getColumnCharset(connection, "tags", "id");
+  await connection.query(`
+    create table if not exists garden_tags (
+      garden_key varchar(80) not null,
+      tag_id varchar(64) ${charsetClause(tagIdCharset)} not null,
+      primary key (garden_key, tag_id),
+      constraint fk_garden_tags_tag foreign key (tag_id) references tags(id) on delete cascade,
+      index fk_garden_tags_tag (tag_id)
+    ) ${tagIdCharset ? `default charset=${tagIdCharset.charset} collate=${tagIdCharset.collation}` : ""}
+  `);
+}
+
 async function ensureProblemReportAccess(connection: PoolConnection) {
   await connection.query<ResultSetHeader>(
     `
@@ -1478,6 +1533,21 @@ async function ensureProblemReportAccess(connection: PoolConnection) {
       `,
       [permission.label, pageKey, actionKey, permission.code],
     );
+
+    const inheritFrom =
+      "inheritFrom" in permission ? permission.inheritFrom : undefined;
+    if (inserted.affectedRows === 1 && inheritFrom) {
+      await connection.query<ResultSetHeader>(
+        `
+          insert ignore into role_permissions (role_id, permission_id)
+          select rp.role_id, newp.id
+          from role_permissions rp
+          join permissions oldp on oldp.id = rp.permission_id and oldp.code = ?
+          join permissions newp on newp.code = ?
+        `,
+        [inheritFrom, permission.code],
+      );
+    }
 
     if (inserted.affectedRows === 1 && permission.roles.length) {
       await connection.query<ResultSetHeader>(
@@ -2625,6 +2695,186 @@ export async function deleteDeviceTag(name: string) {
     device.tags = device.tags.filter((tag) => tag !== tagName);
   });
   return true;
+}
+
+/** Garden key → its tag names. Empty when the table isn't available. */
+export async function getGardenTags(): Promise<Record<string, string[]>> {
+  await ensureOperationalSchema();
+  const rows = await queryRows<{ garden_key: string; name: string }>(
+    `
+      select gt.garden_key, t.name
+      from garden_tags gt
+      join tags t on t.id = gt.tag_id
+      order by t.name
+    `,
+  ).catch((error) => {
+    console.error("[garden-tags] unavailable", error);
+    return null;
+  });
+
+  const result: Record<string, string[]> = {};
+  for (const row of rows ?? []) {
+    (result[row.garden_key] ??= []).push(row.name);
+  }
+  return result;
+}
+
+/** Replaces a garden's tags; names not in the device tag catalog are ignored. */
+export async function setGardenTags(gardenKey: string, tagNames: string[]) {
+  const key = gardenKey.trim().slice(0, 80);
+  if (!key) {
+    return null;
+  }
+  const names = [...new Set(tagNames.map(normalizeTaskTagName).filter(Boolean))];
+
+  await ensureOperationalSchema();
+  return withConnection(async (connection) => {
+    await connection.beginTransaction();
+    try {
+      await connection.query("delete from garden_tags where garden_key = ?", [key]);
+      if (names.length) {
+        await connection.query(
+          `
+            insert ignore into garden_tags (garden_key, tag_id)
+            select ?, id from tags where name in (?)
+          `,
+          [key, names],
+        );
+      }
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `
+          select t.name from garden_tags gt join tags t on t.id = gt.tag_id
+          where gt.garden_key = ? order by t.name
+        `,
+        [key],
+      );
+      await connection.commit();
+      return rows.map((row) => String(row.name));
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    }
+  });
+}
+
+/**
+ * Renames a device tag everywhere (devices and gardens). The row is moved
+ * to the new name's stable id rather than renamed in place, so creating the
+ * old name later makes a fresh tag instead of reviving this one. If the new
+ * name already exists the two tags are merged.
+ */
+export async function renameDeviceTag(oldName: string, newName: string) {
+  const from = normalizeTaskTagName(oldName);
+  const to = normalizeTaskTagName(newName);
+  if (!from || !to) {
+    return null;
+  }
+  if (from === to) {
+    return to;
+  }
+
+  await ensureOperationalSchema();
+  return withConnection(async (connection) => {
+    await connection.beginTransaction();
+    try {
+      const [oldRows] = await connection.query<RowDataPacket[]>(
+        "select id, color from tags where name = ? limit 1 for update",
+        [from],
+      );
+      const oldTag = oldRows[0];
+      if (!oldTag) {
+        await connection.rollback();
+        return null;
+      }
+
+      const [newRows] = await connection.query<RowDataPacket[]>(
+        "select id from tags where name = ? limit 1 for update",
+        [to],
+      );
+      let newId = newRows[0]?.id ? String(newRows[0].id) : "";
+      if (!newId) {
+        newId = makeStableId("tag", to);
+        await connection.query(
+          "insert into tags (id, name, color) values (?, ?, ?)",
+          [newId, to, oldTag.color ?? "#64748b"],
+        );
+      }
+
+      await connection.query(
+        "insert ignore into device_tags (device_id, tag_id) select device_id, ? from device_tags where tag_id = ?",
+        [newId, oldTag.id],
+      );
+      await connection.query(
+        "insert ignore into garden_tags (garden_key, tag_id) select garden_key, ? from garden_tags where tag_id = ?",
+        [newId, oldTag.id],
+      ).catch(() => undefined);
+      await connection.query("delete from tags where id = ?", [oldTag.id]);
+
+      await connection.commit();
+      return to;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    }
+  });
+}
+
+/**
+ * Renames a task/problem-report tag in the catalog and in every task and
+ * report that carries it (tags are stored by name in a JSON array).
+ * Renaming onto an existing tag merges the two.
+ */
+export async function renameTaskTag(oldName: string, newName: string) {
+  const from = normalizeTaskTagName(oldName);
+  const to = normalizeTaskTagName(newName);
+  if (!from || !to) {
+    return null;
+  }
+  if (from === to) {
+    return to;
+  }
+
+  await ensureOperationalSchema();
+  return withConnection(async (connection) => {
+    await connection.beginTransaction();
+    try {
+      const [result] = await connection.query<ResultSetHeader>(
+        "delete from task_tags where name = ?",
+        [from],
+      );
+      if (!result.affectedRows) {
+        await connection.rollback();
+        return null;
+      }
+      await connection.query(
+        "insert ignore into task_tags (id, name) values (?, ?)",
+        [makeStableId("tasktag", to), to],
+      );
+
+      for (const tableName of ["tasks", "problem_reports"] as const) {
+        const [rows] = await connection.query<TaggedJsonRow[]>(
+          `select id, tags from ${tableName} where tags is not null`,
+        );
+        for (const row of rows) {
+          const tags = normalizeTaskTags(row.tags);
+          if (!tags.includes(from)) {
+            continue;
+          }
+          const nextTags = [...new Set(tags.map((tag) => (tag === from ? to : tag)))];
+          await connection.query<ResultSetHeader>(
+            `update ${tableName} set tags = cast(? as json) where id = ?`,
+            [JSON.stringify(nextTags), row.id],
+          );
+        }
+      }
+
+      await connection.commit();
+      return to;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    }
+  });
 }
 
 export async function createTaskTag(name: string) {

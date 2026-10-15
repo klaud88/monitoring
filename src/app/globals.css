@@ -3641,10 +3641,10 @@ progress::-webkit-progress-value {
   background: var(--brand);
 }
 
-/* X-Stations: one card per garden, its devices as rows inside */
+/* Devices page: one card per garden — number | its devices | garden tags */
 .garden-group {
   display: grid;
-  grid-template-columns: minmax(90px, 140px) minmax(0, 1fr);
+  grid-template-columns: minmax(90px, 140px) minmax(0, 1fr) minmax(0, max-content);
   gap: 12px;
   align-items: start;
   border: 1px solid var(--line);
@@ -3701,9 +3701,108 @@ progress::-webkit-progress-value {
 
 .garden-group-devices {
   display: grid;
+  grid-column: 2;
+  grid-row: 1;
   gap: 8px;
   min-width: 0;
 }
+
+.garden-group-head {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.garden-group-title {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+}
+
+.garden-group-tags {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+  grid-column: 3;
+  grid-row: 1;
+  max-width: 220px;
+}
+
+.garden-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  border: 1px solid color-mix(in srgb, var(--brand) 35%, transparent);
+  border-radius: 999px;
+  background: var(--brand-soft);
+  color: var(--brand-dark);
+  padding: 3px 9px;
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.garden-tag-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  padding: 3px 9px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.garden-tag-edit:hover {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+
+.garden-tag-panel {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-row: 2;
+  gap: 10px;
+  border-top: 1px dashed var(--line);
+  padding-top: 10px;
+}
+
+.garden-tag-panel-label {
+  color: var(--ink-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.tag-rename-button {
+  border-color: var(--line);
+  background: var(--surface-soft);
+  color: var(--ink-muted);
+}
+
+.tag-rename-button:hover:not(:disabled),
+.tag-rename-save:hover:not(:disabled) {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.tag-rename-save {
+  border-color: color-mix(in srgb, var(--green) 40%, transparent);
+  background: var(--tint-green);
+  color: var(--green);
+}
+
+.tag-chip-control.editing .tag-rename-input {
+  width: 150px;
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+
 
 .garden-device-chip {
   display: inline-flex;
@@ -9450,6 +9549,30 @@ html.wheel-locked body {
   .garden-group {
     grid-template-columns: minmax(0, 1fr);
     gap: 8px;
+  }
+
+  /* Stacked: number, its tags, the tag editor, then the devices. */
+  .garden-group-head,
+  .garden-group-tags,
+  .garden-tag-panel,
+  .garden-group-devices {
+    grid-column: 1;
+  }
+
+  .garden-group-tags {
+    grid-row: 2;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: none;
+  }
+
+  .garden-tag-panel {
+    grid-row: 3;
+  }
+
+  .garden-group-devices {
+    grid-row: 4;
   }
 
   .region-device-row .row-actions {

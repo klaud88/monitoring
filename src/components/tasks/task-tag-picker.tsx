@@ -1,18 +1,22 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Tag, Trash2 } from "lucide-react";
+import { Plus } from "lucide-react";
 import { useConfirmDialog } from "@/components/common/confirm-dialog";
+import { TagChipControl } from "@/components/common/tag-chip-control";
 
 type Props = {
   availableTags: string[];
   selectedTags: string[];
   canCreateTags: boolean;
   canDeleteTags: boolean;
+  canRenameTags?: boolean;
   className?: string;
   onToggle: (tagName: string) => void;
   onCreateTag: (tagName: string) => Promise<boolean> | boolean;
   onDeleteTag: (tagName: string) => Promise<boolean> | boolean;
+  /** Renames the tag everywhere; offered to those who may delete tags. */
+  onRenameTag?: (tagName: string, newName: string) => Promise<boolean> | boolean;
 };
 
 export function TaskTagPicker({
@@ -20,10 +24,12 @@ export function TaskTagPicker({
   selectedTags,
   canCreateTags,
   canDeleteTags,
+  canRenameTags = false,
   className,
   onToggle,
   onCreateTag,
   onDeleteTag,
+  onRenameTag,
 }: Props) {
   const [newTagName, setNewTagName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -74,7 +80,7 @@ export function TaskTagPicker({
     }
 
     const confirmed = await confirm({
-      message: `ნამდვილად გსურთ "${tagName}" ტეგის წაშლა?`,
+      message: `ნამდვილად გსურთ "${tagName}" ტეგის წაშლა? ტეგი ყველა დავალებიდან და პრობლემიდან მოიხსნება.`,
     });
     if (!confirmed) {
       return;
@@ -85,34 +91,43 @@ export function TaskTagPicker({
     setDeletingTag("");
   }
 
+  async function renameTag(tagName: string, newName: string) {
+    if (!onRenameTag) {
+      return false;
+    }
+    if (availableTags.includes(newName)) {
+      const merge = await confirm({
+        title: "ტეგების გაერთიანება",
+        message: `ტეგი "${newName}" უკვე არსებობს. გაერთიანდეს "${tagName}" მასთან? "${tagName}" ყველგან "${newName}"-ით შეიცვლება.`,
+        confirmLabel: "გაერთიანება",
+      });
+      if (!merge) {
+        return false;
+      }
+    }
+    return onRenameTag(tagName, newName);
+  }
+
   return (
     <div className={`task-tag-picker ${className ?? ""}`.trim()}>
       {confirmationDialog}
       <span>ტეგები</span>
       <div className="row-tags">
         {availableTags.map((tagName) => (
-          <span key={tagName} className="tag-chip-control">
-            <button
-              type="button"
-              className={`tag-toggle compact ${selectedTags.includes(tagName) ? "active" : ""}`}
-              onClick={() => onToggle(tagName)}
-            >
-              <Tag size={13} />
-              {tagName}
-            </button>
-            {canDeleteTags ? (
-              <button
-                type="button"
-                className="tag-delete-button"
-                onClick={() => deleteTag(tagName)}
-                disabled={Boolean(deletingTag)}
-                aria-label={`${tagName} ტეგის წაშლა`}
-                title="ტეგის წაშლა"
-              >
-                <Trash2 size={12} />
-              </button>
-            ) : null}
-          </span>
+          <TagChipControl
+            key={tagName}
+            name={tagName}
+            showIcon
+            selected={selectedTags.includes(tagName)}
+            onToggle={() => onToggle(tagName)}
+            onRename={
+              canRenameTags && onRenameTag
+                ? (newName) => renameTag(tagName, newName)
+                : undefined
+            }
+            onDelete={canDeleteTags ? () => void deleteTag(tagName) : undefined}
+            busy={Boolean(deletingTag)}
+          />
         ))}
       </div>
       {canCreateTags ? (

@@ -46,6 +46,7 @@ export default async function TasksPage({
         edit: hasPermission(user, "tasks.edit"),
         delete: hasPermission(user, "tasks.delete"),
         createTags: hasPermission(user, "tasks.tag_create"),
+        renameTags: hasPermission(user, "tasks.tag_edit"),
         deleteTags: hasPermission(user, "tasks.tag_delete"),
       }}
     />

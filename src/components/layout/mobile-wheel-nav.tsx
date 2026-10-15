@@ -39,7 +39,7 @@ const wheelItems: WheelItem[] = [
   { href: "/tasks", label: "დავალებები", icon: ClipboardList },
   { href: "/problem-reports", label: "პრობლემები", icon: AlertCircle },
   { href: "/formaerti", label: "ფორმაერთი", icon: FileText, badge: "formOne" },
-  { href: "/devices/regions", label: "X-Stations", icon: MonitorCog },
+  { href: "/devices/regions", label: "მოწყობილობები", icon: MonitorCog },
   {
     href: "/offline-records",
     label: "Offline აღრიცხვა",

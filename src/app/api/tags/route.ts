@@ -5,6 +5,7 @@ import { normalizeTaskTagName } from "@/lib/catalog";
 import {
   createTaskTag,
   deleteTaskTag,
+  renameTaskTag,
   getTaskTagNames,
 } from "@/lib/repositories";
 
@@ -86,4 +87,40 @@ export async function DELETE(request: NextRequest) {
   });
 
   return NextResponse.json({ ok: true, tags: await getTaskTagNames() });
+}
+
+
+/** Renames a tag everywhere it is used; onto an existing name, merges them. */
+export async function PATCH(request: NextRequest) {
+  const user = await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
+  if (
+    !hasPermission(user, "tasks.tag_edit") &&
+    !hasPermission(user, "problem_reports.tag_edit")
+  ) {
+    return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+  }
+
+  const body = await request.json().catch(() => null);
+  const tagName = normalizeTaskTagName(body?.name);
+  const newName = normalizeTaskTagName(body?.newName);
+  if (!tagName || !newName) {
+    return NextResponse.json({ message: "Tag name is required" }, { status: 400 });
+  }
+
+  const renamed = await renameTaskTag(tagName, newName);
+  if (!renamed) {
+    return NextResponse.json({ message: "Tag not found" }, { status: 404 });
+  }
+
+  await logAudit({
+    userId: user!.id,
+    action: "task_tag.rename",
+    entityType: "task_tag",
+    entityId: renamed,
+    metadata: { from: tagName, to: renamed },
+    ipAddress: request.headers.get("x-forwarded-for") ?? undefined,
+    userAgent: request.headers.get("user-agent") ?? undefined,
+  });
+
+  return NextResponse.json({ tag: renamed, tags: await getTaskTagNames() });
 }

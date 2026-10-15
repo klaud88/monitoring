@@ -19,7 +19,7 @@ import { useConfirmDialog } from "@/components/common/confirm-dialog";
 import { FiltersToggle } from "@/components/common/filters-toggle";
 import { TaskTagPicker } from "@/components/tasks/task-tag-picker";
 import { formatShortDate } from "@/lib/display";
-import { mergeTags } from "@/lib/tags";
+import { mergeTags, renameTagInList } from "@/lib/tags";
 import { workingDayDueDate } from "@/lib/working-days";
 import { getAssignableTaskUsers } from "@/lib/task-assignees";
 import type {
@@ -37,6 +37,7 @@ type ProblemReportPermissions = {
   assignUsers: boolean;
   manageTags: boolean;
   createTags: boolean;
+  renameTags: boolean;
   deleteTags: boolean;
   manageStatus: boolean;
 };
@@ -439,6 +440,46 @@ export function ProblemReportsManager({
     return true;
   }
 
+  async function renameAvailableTag(tagName: string, newName: string) {
+    if (!permissions.renameTags) {
+      return false;
+    }
+
+    setError("");
+    const response = await fetch("/api/tags", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: tagName, newName }),
+    }).catch(() => null);
+
+    if (!response?.ok) {
+      setError("ტეგის სახელის შეცვლა ვერ მოხერხდა.");
+      return false;
+    }
+
+    const data = (await response.json()) as { tag?: string; tags?: string[] };
+    const renamed = data.tag ?? newName;
+    setAvailableTags(
+      (current) => data.tags ?? renameTagInList(current, tagName, renamed),
+    );
+    setDraft((current) => ({
+      ...current,
+      tags: renameTagInList(current.tags, tagName, renamed),
+    }));
+    setEditDraft((current) =>
+      current
+        ? { ...current, tags: renameTagInList(current.tags, tagName, renamed) }
+        : current,
+    );
+    setReports((current) =>
+      current.map((report) => ({
+        ...report,
+        tags: renameTagInList(report.tags, tagName, renamed),
+      })),
+    );
+    return true;
+  }
+
   async function removeAvailableTag(tagName: string) {
     if (!permissions.deleteTags) {
       return false;
@@ -659,6 +700,7 @@ export function ProblemReportsManager({
                 onToggleTag={toggleDraftTag}
                 onCreateTag={createAvailableTag}
                 onDeleteTag={removeAvailableTag}
+                onRenameTag={renameAvailableTag}
                 onToggleAssignee={toggleDraftAssignee}
                 categories={categories}
                 mode="create"
@@ -678,6 +720,7 @@ export function ProblemReportsManager({
                 onToggleTag={toggleEditTag}
                 onCreateTag={createAvailableTag}
                 onDeleteTag={removeAvailableTag}
+                onRenameTag={renameAvailableTag}
                 onToggleAssignee={toggleEditAssignee}
                 mode="edit"
               />
@@ -874,6 +917,7 @@ function ReportFields({
   onToggleTag,
   onCreateTag,
   onDeleteTag,
+  onRenameTag,
   onToggleAssignee,
   categories = [],
   mode,
@@ -891,6 +935,7 @@ function ReportFields({
   onToggleTag: (tagName: string) => void;
   onCreateTag: (tagName: string) => Promise<boolean> | boolean;
   onDeleteTag: (tagName: string) => Promise<boolean> | boolean;
+  onRenameTag: (tagName: string, newName: string) => Promise<boolean> | boolean;
   onToggleAssignee: (userId: string) => void;
   categories?: ReportCategoryOption[];
   mode: "create" | "edit";
@@ -1062,9 +1107,11 @@ function ReportFields({
           selectedTags={draft.tags}
           canCreateTags={permissions.createTags}
           canDeleteTags={permissions.deleteTags}
+          canRenameTags={permissions.renameTags}
           onToggle={onToggleTag}
           onCreateTag={onCreateTag}
           onDeleteTag={onDeleteTag}
+          onRenameTag={onRenameTag}
         />
       ) : null}
       {permissions.assignUsers ? (
