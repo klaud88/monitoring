@@ -3642,24 +3642,28 @@ progress::-webkit-progress-value {
 }
 
 /* Devices page: one card per garden — number | its devices | garden tags */
-/* Devices page garden card: one centred column —
-   number, region, garden tags, devices, tag button. */
+/* Devices page garden card: one row, everything vertically centred —
+   number (region below it), garden tags, devices, tag button. */
 .garden-group {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 14px 12px;
+  padding: 12px 14px;
   background: var(--surface);
-  text-align: center;
+  text-align: left;
 }
 
 .garden-group-head {
   display: grid;
+  flex: 0 0 auto;
   justify-items: center;
   gap: 6px;
+  min-width: 96px;
+  text-align: center;
 }
 
 .garden-totals {
@@ -3697,11 +3701,9 @@ progress::-webkit-progress-value {
 
 .garden-group-devices {
   display: grid;
+  flex: 1 1 320px;
   gap: 8px;
-  width: 100%;
-  max-width: 760px;
   min-width: 0;
-  text-align: left;
 }
 
 
@@ -3741,10 +3743,11 @@ select.garden-region-pill {
 
 .garden-group-tags {
   display: flex;
+  flex: 0 1 auto;
   flex-wrap: wrap;
   justify-content: center;
   gap: 6px;
-  max-width: 760px;
+  max-width: 220px;
 }
 
 .garden-tag-chip {
@@ -3764,6 +3767,7 @@ select.garden-region-pill {
 
 .garden-tag-edit {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 4px;
   border: 1px dashed var(--line-strong);
@@ -3782,16 +3786,11 @@ select.garden-region-pill {
 
 .garden-tag-panel {
   display: grid;
-  justify-items: center;
+  flex-basis: 100%;
+  order: 10;
   gap: 10px;
-  width: 100%;
-  max-width: 760px;
   border-top: 1px dashed var(--line);
   padding-top: 10px;
-}
-
-.garden-tag-panel .row-tags {
-  justify-content: center;
 }
 
 .garden-tag-panel-label {
@@ -9607,7 +9606,17 @@ html.wheel-locked body {
   }
 
   .garden-group {
+    flex-direction: column;
+    align-items: stretch;
     gap: 8px;
+  }
+
+  .garden-group-tags {
+    max-width: none;
+  }
+
+  .garden-tag-edit {
+    align-self: center;
   }
 
 
