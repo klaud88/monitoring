@@ -341,6 +341,7 @@ model users {
   role_id        String           @db.VarChar(64)
   name           String           @db.VarChar(160)
   email          String           @unique(map: "email") @db.VarChar(180)
+  phone          String?          @db.VarChar(80)
   password_hash  String           @db.VarChar(255)
   initials       String           @db.VarChar(12)
   color          String           @db.VarChar(24)

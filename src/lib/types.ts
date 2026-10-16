@@ -57,6 +57,7 @@ export type AppUser = {
   color: string;
   permissions: PermissionKey[];
   deviceGroupCode?: string;
+  phone?: string;
   passwordHash?: string;
   mustChangePassword?: boolean;
   twoFactorEnabled?: boolean;

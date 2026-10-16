@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import {
   Edit3,
   Mail,
+  Phone,
   Plus,
   Save,
   Search,
@@ -41,6 +42,7 @@ type UserPermissions = {
 type UserDraft = {
   name: string;
   email: string;
+  phone: string;
   role: string;
   initials: string;
   color: string;
@@ -51,6 +53,7 @@ function buildEmptyDraft(role: string): UserDraft {
   return {
     name: "",
     email: "",
+    phone: "",
     role,
     initials: "",
     color: "#2563eb",
@@ -99,6 +102,7 @@ export function UsersManager({
         !normalized ||
         user.name.toLowerCase().includes(normalized) ||
         user.email.toLowerCase().includes(normalized) ||
+        (user.phone ?? "").includes(normalized) ||
         user.role.toLowerCase().includes(normalized),
     );
   }, [query, users]);
@@ -125,7 +129,8 @@ export function UsersManager({
     setSaving(false);
 
     if (!response.ok) {
-      setError("მომხმარებლის დამატება ვერ მოხერხდა.");
+      const data = (await response.json().catch(() => null)) as { message?: string } | null;
+      setError(data?.message || "მომხმარებლის დამატება ვერ მოხერხდა.");
       return;
     }
 
@@ -139,6 +144,7 @@ export function UsersManager({
     setEditDraft({
       name: user.name,
       email: user.email,
+      phone: user.phone ?? "",
       role: user.role,
       initials: user.initials,
       color: user.color,
@@ -168,7 +174,8 @@ export function UsersManager({
     setSaving(false);
 
     if (!response.ok) {
-      setError("მომხმარებლის რედაქტირება ვერ მოხერხდა.");
+      const data = (await response.json().catch(() => null)) as { message?: string } | null;
+      setError(data?.message || "მომხმარებლის რედაქტირება ვერ მოხერხდა.");
       return;
     }
 
@@ -255,6 +262,17 @@ export function UsersManager({
                   setDraft((current) => ({ ...current, email: event.target.value }))
                 }
                 required
+              />
+            </label>
+            <label>
+              <span>ტელეფონი</span>
+              <input
+                type="tel"
+                value={draft.phone}
+                placeholder="5XX XXX XXX"
+                onChange={(event) =>
+                  setDraft((current) => ({ ...current, phone: event.target.value }))
+                }
               />
             </label>
             <div className="form-row">
@@ -354,6 +372,17 @@ export function UsersManager({
                         }))
                       }
                     />
+                    <input
+                      type="tel"
+                      value={editDraft.phone}
+                      placeholder="ტელეფონი"
+                      onChange={(event) =>
+                        setEditDraft((current) => ({
+                          ...current,
+                          phone: event.target.value,
+                        }))
+                      }
+                    />
                     <RoleSelect
                       value={editDraft.role}
                       onChange={(role) =>
@@ -424,6 +453,12 @@ export function UsersManager({
                       <Mail size={14} />
                       {user.email}
                     </span>
+                    {user.phone ? (
+                      <span>
+                        <Phone size={14} />
+                        {user.phone}
+                      </span>
+                    ) : null}
                   </div>
                   <span className="role-pill">
                     <UserRound size={14} />
@@ -493,6 +528,7 @@ function normalizeDraft(draft: UserDraft) {
   return {
     name: draft.name.trim(),
     email: draft.email.trim().toLowerCase(),
+    phone: draft.phone.trim(),
     role: draft.role,
     initials: (draft.initials.trim() || buildInitials(draft.name)).toUpperCase(),
     color: draft.color,

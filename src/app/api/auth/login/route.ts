@@ -2,7 +2,7 @@ import bcrypt from "bcryptjs";
 import { NextResponse, type NextRequest } from "next/server";
 import { createPendingTwoFactorToken, createSessionToken, sanitizeUser, SESSION_COOKIE, verifyPassword } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
-import { findTenantForIdentifier, getPortalTenants, isPortalMode, TENANT_COOKIE } from "@/lib/portal";
+import { findTenantForIdentifier, isPortalMode, TENANT_COOKIE } from "@/lib/portal";
 import { getUserByLogin } from "@/lib/repositories";
 import { PENDING_2FA_COOKIE, shouldUseSecureCookie } from "@/lib/session";
 import { clearLoginAttempts, getClientIp, isLoginRateLimited, recordFailedLogin } from "@/lib/rate-limit";
@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
   const password = String(body?.password || "");
 
   if (!identifier || !password) {
-    return NextResponse.json({ message: "ელფოსტა/X-Station და პაროლი აუცილებელია." }, { status: 400 });
+    return NextResponse.json({ message: "ელფოსტა და პაროლი აუცილებელია." }, { status: 400 });
   }
 
   if (isPortalMode()) {
@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
       userAgent: request.headers.get("user-agent") ?? undefined,
       metadata: { identifier },
     });
-    return NextResponse.json({ message: "არასწორი ელფოსტა/X-Station ან პაროლი." }, { status: 401 });
+    return NextResponse.json({ message: INVALID_LOGIN_MESSAGE }, { status: 401 });
   }
 
   clearLoginAttempts(ip);
@@ -103,7 +103,7 @@ export async function POST(request: NextRequest) {
   return response;
 }
 
-const INVALID_LOGIN_MESSAGE = "არასწორი ელფოსტა/X-Station ან პაროლი.";
+const INVALID_LOGIN_MESSAGE = "არასწორი ელფოსტა ან პაროლი.";
 
 /*
  * Portal mode: find the identifier's organisation and replay the login
@@ -119,20 +119,11 @@ async function forwardLoginToTenant(
 ) {
   const lookup = await findTenantForIdentifier(identifier);
 
-  if (!lookup || "ambiguous" in lookup) {
+  if (!lookup) {
     // Same cost as a wrong password, so unknown accounts can't be told
     // apart from known ones by timing.
     await bcrypt.compare(password, DUMMY_HASH);
     recordFailedLogin(ip);
-    if (lookup) {
-      const example = getPortalTenants().find((item) => item.prefix)?.prefix || "TB";
-      return NextResponse.json(
-        {
-          message: `ეს X-Station რამდენიმე ორგანიზაციაშია. მიუთითეთ ორგანიზაციის ინიციალები, მაგ. ${example}-${identifier.trim()}.`,
-        },
-        { status: 409 },
-      );
-    }
     return NextResponse.json({ message: INVALID_LOGIN_MESSAGE }, { status: 401 });
   }
 

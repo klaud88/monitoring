@@ -4013,6 +4013,10 @@ select.garden-region-pill {
   font-size: 13px;
 }
 
+.user-row div span + span {
+  margin-left: 12px;
+}
+
 .role-pill {
   display: inline-flex;
   align-items: center;

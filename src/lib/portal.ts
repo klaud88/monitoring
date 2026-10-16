@@ -1,4 +1,3 @@
-import { normalizeDeviceGroupCode } from "@/lib/repositories";
 import { TENANT_COOKIE } from "@/lib/session";
 
 /*
@@ -15,23 +14,16 @@ export { TENANT_COOKIE };
 export type PortalTenant = {
   slug: string;
   origin: string;
-  /** Initials a garden types before its X-Station code, e.g. "TB-101". */
+  /** Organisation initials, e.g. "TB". Not used for login: accounts sign in by email only. */
   prefix: string;
 };
 
-export type TenantLookup =
-  | { tenant: PortalTenant }
-  /* The X-Station code exists in several organisations and was typed
-     without a prefix, so the garden has to say which one it means. */
-  | { ambiguous: true }
-  | null;
-
-const AMBIGUOUS = Symbol("ambiguous");
+export type TenantLookup = { tenant: PortalTenant } | null;
 
 const REFRESH_INTERVAL_MS = 30_000;
 const FETCH_TIMEOUT_MS = 5_000;
 
-let directory = new Map<string, string | typeof AMBIGUOUS>();
+let directory = new Map<string, string>();
 let lastRefreshAt = 0;
 let refreshPromise: Promise<void> | null = null;
 
@@ -41,7 +33,7 @@ export function isPortalMode() {
 
 /**
  * PORTAL_TENANTS="org1:3001:TB,org2:3002:VK" — slug, localhost port and
- * optional X-Station prefix (2–6 Latin letters, default: slug in capitals).
+ * optional organisation prefix (2–6 Latin letters, default: slug in capitals).
  */
 export function getPortalTenants(): PortalTenant[] {
   const seenPrefixes = new Set<string>();
@@ -59,7 +51,7 @@ export function getPortalTenants(): PortalTenant[] {
       let prefix = (rawPrefix || slug).toUpperCase();
       if (!/^[A-Z]{2,6}$/.test(prefix) || seenPrefixes.has(prefix)) {
         console.error(
-          `[portal] "${slug}": X-Station prefix "${prefix}" is invalid or already used; prefixed login disabled for it`,
+          `[portal] "${slug}": prefix "${prefix}" is invalid or already used; ignored`,
         );
         prefix = "";
       } else {
@@ -70,34 +62,16 @@ export function getPortalTenants(): PortalTenant[] {
     });
 }
 
-const PREFIXED_XSTATION = /^([a-z]{2,6})[\s-]*(\d+)$/i;
-
-/** Same normalisation the organisation app applies in getUserByLogin. */
+/** Same normalisation the organisation app applies in getUserByLogin: email only. */
 export function normalizeLoginIdentifier(identifier: string) {
   const normalized = identifier.trim().toLowerCase();
-  if (!normalized) {
-    return "";
-  }
-  return normalized.includes("@")
-    ? normalized
-    : `xstation:${normalizeDeviceGroupCode(normalized)}`;
+  return normalized.includes("@") ? normalized : "";
 }
 
 export async function findTenantForIdentifier(
   identifier: string,
 ): Promise<TenantLookup> {
   const tenants = getPortalTenants();
-
-  /* "TB-101" names its organisation outright. The organisation app strips
-     the letters itself (normalizeDeviceGroupCode), so the identifier is
-     forwarded as typed and the code's existence is checked by its login. */
-  const prefixed = identifier.trim().match(PREFIXED_XSTATION);
-  if (prefixed) {
-    const prefix = prefixed[1].toUpperCase();
-    const tenant = tenants.find((item) => item.prefix === prefix);
-    return tenant ? { tenant } : null;
-  }
-
   const key = normalizeLoginIdentifier(identifier);
   if (!key) {
     return null;
@@ -108,9 +82,6 @@ export async function findTenantForIdentifier(
   }
 
   const owner = directory.get(key);
-  if (owner === AMBIGUOUS) {
-    return { ambiguous: true };
-  }
   const tenant = tenants.find((item) => item.slug === owner);
   return tenant ? { tenant } : null;
 }
@@ -179,16 +150,13 @@ async function loadDirectory() {
     }),
   );
 
-  /* An identifier in several organisations can't be routed on its own.
-     X-Station codes (garden numbers) clash naturally, so the garden is
-     asked to add its organisation's prefix; a shared email is an error. */
-  const next = new Map<string, string | typeof AMBIGUOUS>();
+  /* An email in several organisations can't be routed, so it can't log
+     in. Generated garden emails repeat by design and aren't worth a log line. */
+  const next = new Map<string, string>();
   for (const [key, slugs] of owners) {
     if (slugs.size === 1) {
       next.set(key, [...slugs][0]);
-    } else if (isGardenIdentifier(key)) {
-      next.set(key, AMBIGUOUS);
-    } else {
+    } else if (!isGardenIdentifier(key)) {
       console.error(
         `[portal] login identifier "${key}" exists in several organisations (${[...slugs].join(", ")}); login refused`,
       );
@@ -198,9 +166,8 @@ async function loadDirectory() {
   return next;
 }
 
-/* X-Station codes, and the email generated for every garden account
-   (repositories.ts: `xstation-<code>@local.ge`), repeat across
-   organisations by design. */
+/* The email generated for every garden account (repositories.ts:
+   `xstation-<code>@local.ge`) repeats across organisations by design. */
 function isGardenIdentifier(key: string) {
-  return key.startsWith("xstation:") || /^xstation-.+@local\.ge$/.test(key);
+  return /^xstation-.+@local\.ge$/.test(key);
 }

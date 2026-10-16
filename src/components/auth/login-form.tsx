@@ -170,14 +170,14 @@ export function LoginForm({ nextPath, passwordChanged }: LoginFormProps) {
           ) : null}
 
           <label>
-            <span>ელფოსტა ან X-Station</span>
+            <span>ელფოსტა</span>
             <div className="field-with-icon">
               <Mail size={18} />
               <input
-                type="text"
+                type="email"
                 value={identifier}
                 onChange={(event) => setIdentifier(event.target.value)}
-                placeholder="name@example.ge ან 101 / TB-101"
+                placeholder="name@example.ge"
                 autoComplete="username"
                 required
               />

@@ -28,6 +28,7 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
   const name = String(body?.name || "").trim();
   const email = String(body?.email || "").trim().toLowerCase();
+  const phone = String(body?.phone || "").trim();
   const role = String(body?.role || "").trim();
   const password = String(body?.password || "");
   const initials = String(body?.initials || buildInitials(name))
@@ -58,6 +59,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ message: "პაროლი მინიმუმ 8 სიმბოლო უნდა იყოს." }, { status: 400 });
   }
 
+  if (phone && !/^\+?[\d\s-]{6,20}$/.test(phone)) {
+    return NextResponse.json({ message: "ტელეფონის ფორმატი არასწორია." }, { status: 400 });
+  }
+
   if (!/^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(color)) {
     return NextResponse.json({ message: "ფერის ფორმატი არასწორია." }, { status: 400 });
   }
@@ -68,6 +73,7 @@ export async function POST(request: NextRequest) {
     role,
     initials,
     color,
+    phone,
     passwordHash: await hashPassword(password),
   });
 

@@ -54,6 +54,7 @@ type UserRow = {
   initials: string;
   color: string;
   device_group_code: string | null;
+  phone?: string | null;
   password_hash: string;
   must_change_password: boolean | number;
   twofa_enabled?: boolean | number;
@@ -868,6 +869,13 @@ async function ensureOperationalSchema() {
         "users",
         "device_group_code",
         "device_group_code varchar(80) null after color",
+      );
+      await addColumnIfMissing(
+        connection,
+        userColumns,
+        "users",
+        "phone",
+        "phone varchar(80) null after email",
       );
       await addColumnIfMissing(
         connection,
@@ -1884,12 +1892,12 @@ export async function getUserByEmail(email: string): Promise<AppUser | null> {
 
 /**
  * Every identifier getUserByLogin accepts for an active user, in the
- * portal's key format: a lower-cased email, or "xstation:<group code>".
+ * portal's key format: a lower-cased email.
  */
 export async function getLoginIdentifiers(): Promise<string[] | null> {
   await ensureOperationalSchema();
-  const rows = await queryRows<{ email: string | null; device_group_code: string | null }>(
-    "select email, device_group_code from users where is_active = true",
+  const rows = await queryRows<{ email: string | null }>(
+    "select email from users where is_active = true",
   );
   if (!rows) {
     return null;
@@ -1901,85 +1909,17 @@ export async function getLoginIdentifiers(): Promise<string[] | null> {
     if (email) {
       identifiers.add(email);
     }
-    const groupCode = normalizeDeviceGroupCode(row.device_group_code);
-    if (groupCode) {
-      identifiers.add(`xstation:${groupCode}`);
-    }
   }
   return [...identifiers];
 }
 
+/** Accounts sign in by email only; X-Station codes are no longer accepted. */
 export async function getUserByLogin(identifier: string): Promise<AppUser | null> {
   const normalized = identifier.trim().toLowerCase();
-  if (!normalized) {
+  if (!normalized.includes("@")) {
     return null;
   }
-
-  if (normalized.includes("@")) {
-    return getUserByEmail(normalized);
-  }
-
-  await ensureOperationalSchema();
-  const deviceGroupCode = normalizeDeviceGroupCode(normalized);
-  const rows = await queryRows<UserRow>(
-    `
-      select
-        u.id,
-        u.name,
-        u.email,
-        r.name as role_name,
-        u.initials,
-        u.color,
-        u.device_group_code,
-        u.password_hash,
-        u.must_change_password,
-        u.twofa_enabled,
-        u.twofa_secret,
-        group_concat(distinct p.code order by p.code separator ',') as permissions
-      from users u
-      join roles r on r.id = u.role_id
-      left join role_permissions rp on rp.role_id = r.id
-      left join permissions p on p.id = rp.permission_id
-      where u.device_group_code = ? and u.is_active = true
-      group by u.id, r.name
-      limit 1
-    `,
-    [deviceGroupCode],
-  );
-
-  if (!rows) {
-    // Same reasoning as getUserByEmail above: mock fallback is a build-time
-    // convenience only, never a live authentication path.
-    if (!isBuildTime()) {
-      console.warn("[auth] DB unavailable during login lookup by device group; refusing to fall back to mock data.");
-      return null;
-    }
-    return (
-      mockUsers.find(
-        (user) => normalizeDeviceGroupCode(user.deviceGroupCode) === deviceGroupCode,
-      ) ?? null
-    );
-  }
-
-  const row = rows[0];
-  if (!row) {
-    return null;
-  }
-
-  return {
-    id: row.id,
-    name: row.name,
-    email: row.email,
-    role: row.role_name,
-    initials: row.initials,
-    color: row.color,
-    deviceGroupCode: row.device_group_code ?? undefined,
-    passwordHash: row.password_hash,
-    mustChangePassword: Boolean(row.must_change_password),
-    twoFactorEnabled: Boolean(row.twofa_enabled),
-    twoFactorSecret: row.twofa_secret ?? undefined,
-    permissions: csv(row.permissions) as PermissionKey[],
-  };
+  return getUserByEmail(normalized);
 }
 
 function toPublicUser(user: AppUser): SessionUser {
@@ -2009,6 +1949,7 @@ export async function getUsers(): Promise<SessionUser[]> {
         u.initials,
         u.color,
         u.device_group_code,
+        u.phone,
         u.must_change_password,
         group_concat(distinct p.code order by p.code separator ',') as permissions
       from users u
@@ -2033,6 +1974,7 @@ export async function getUsers(): Promise<SessionUser[]> {
     initials: row.initials,
     color: row.color,
     deviceGroupCode: row.device_group_code ?? undefined,
+    phone: row.phone ?? undefined,
     mustChangePassword: Boolean(row.must_change_password),
     permissions: csv(row.permissions) as PermissionKey[],
   }));
@@ -2049,6 +1991,7 @@ export async function createUser(input: {
   role: string;
   initials: string;
   color: string;
+  phone?: string;
   passwordHash: string;
 }): Promise<SessionUser> {
   const id = makeId("u");
@@ -2064,14 +2007,15 @@ export async function createUser(input: {
 
     await connection.query<ResultSetHeader>(
       `
-        insert into users (id, role_id, name, email, password_hash, initials, color, must_change_password)
-        values (?, ?, ?, ?, ?, ?, ?, true)
+        insert into users (id, role_id, name, email, phone, password_hash, initials, color, must_change_password)
+        values (?, ?, ?, ?, ?, ?, ?, ?, true)
       `,
       [
         id,
         roleId,
         input.name,
         input.email,
+        input.phone || null,
         input.passwordHash,
         input.initials,
         input.color,
@@ -2089,6 +2033,7 @@ export async function createUser(input: {
       role: input.role,
       initials: input.initials,
       color: input.color,
+      phone: input.phone,
       permissions: [],
     }
   );
@@ -2102,6 +2047,7 @@ export async function updateUser(
     role: string;
     initials: string;
     color: string;
+    phone?: string;
     passwordHash?: string;
   },
 ): Promise<SessionUser | null> {
@@ -2119,13 +2065,14 @@ export async function updateUser(
       await connection.query<ResultSetHeader>(
         `
           update users
-          set role_id = ?, name = ?, email = ?, password_hash = ?, initials = ?, color = ?, must_change_password = true
+          set role_id = ?, name = ?, email = ?, phone = ?, password_hash = ?, initials = ?, color = ?, must_change_password = true
           where id = ? and is_active = true
         `,
         [
           roleId,
           input.name,
           input.email,
+          input.phone || null,
           input.passwordHash,
           input.initials,
           input.color,
@@ -2136,10 +2083,10 @@ export async function updateUser(
       await connection.query<ResultSetHeader>(
         `
           update users
-          set role_id = ?, name = ?, email = ?, initials = ?, color = ?
+          set role_id = ?, name = ?, email = ?, phone = ?, initials = ?, color = ?
           where id = ? and is_active = true
         `,
-        [roleId, input.name, input.email, input.initials, input.color, id],
+        [roleId, input.name, input.email, input.phone || null, input.initials, input.color, id],
       );
     }
 
