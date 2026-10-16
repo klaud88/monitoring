@@ -6,6 +6,7 @@ import { OneBitLogo } from "@/components/layout/onebit-logo";
 type LoginPageProps = {
   searchParams?: Promise<{
     next?: string;
+    passwordChanged?: string;
   }>;
 };
 
@@ -37,7 +38,10 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             </span>
           </div>
         </div>
-        <LoginForm nextPath={resolvedSearchParams?.next} />
+        <LoginForm
+          nextPath={resolvedSearchParams?.next}
+          passwordChanged={resolvedSearchParams?.passwordChanged === "1"}
+        />
       </section>
       <AppCredit />
     </main>

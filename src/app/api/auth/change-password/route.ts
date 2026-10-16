@@ -1,9 +1,9 @@
 import bcrypt from "bcryptjs";
 import { NextResponse, type NextRequest } from "next/server";
-import { createSessionToken, SESSION_COOKIE, verifyPassword, verifySessionToken } from "@/lib/auth";
+import { clearSessionPermissionCache, SESSION_COOKIE, verifyPassword, verifySessionToken } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { changeUserPassword, getUserByEmail } from "@/lib/repositories";
-import { shouldUseSecureCookie } from "@/lib/session";
+import { shouldUseSecureCookie, TENANT_COOKIE } from "@/lib/session";
 
 export async function POST(request: NextRequest) {
   const user = await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
@@ -48,6 +48,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ message: "პაროლის შეცვლა ვერ მოხერხდა." }, { status: 500 });
   }
 
+  // Drop the cached must-change flag so the next login doesn't see it.
+  clearSessionPermissionCache();
+
   await logAudit({
     userId: user.id,
     action: "auth.change_password",
@@ -58,18 +61,26 @@ export async function POST(request: NextRequest) {
     userAgent: request.headers.get("user-agent") ?? undefined,
   });
 
-  // Issue a fresh token with mustChangePassword cleared
-  const updatedUser = { ...user, mustChangePassword: false };
-  const token = await createSessionToken(updatedUser);
-  const response = NextResponse.json({ ok: true });
+  await logAudit({
+    userId: user.id,
+    action: "auth.logout",
+    entityType: "user",
+    entityId: user.id,
+    metadata: { reason: "password_changed" },
+    ipAddress: request.headers.get("x-forwarded-for") ?? undefined,
+    userAgent: request.headers.get("user-agent") ?? undefined,
+  });
 
-  response.cookies.set(SESSION_COOKIE, token, {
+  // A changed password ends the session: the user signs in again with it.
+  const response = NextResponse.json({ ok: true });
+  response.cookies.set(SESSION_COOKIE, "", {
     httpOnly: true,
     sameSite: "strict",
     secure: shouldUseSecureCookie(),
     path: "/",
-    maxAge: 60 * 60 * 10,
+    maxAge: 0,
   });
+  response.cookies.delete(TENANT_COOKIE);
 
   return response;
 }

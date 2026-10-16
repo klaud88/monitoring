@@ -1,10 +1,15 @@
 import { cookies } from "next/headers";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
+import { getRoles } from "@/lib/repositories";
+import { ChangePasswordForm } from "@/components/auth/change-password-form";
 import { TwoFactorSettings } from "@/components/profile/two-factor-settings";
 
 export default async function ProfilePage() {
   const cookieStore = await cookies();
   const user = await verifySessionToken(cookieStore.get(SESSION_COOKIE)?.value);
+  const roles = await getRoles();
+  const roleLabel =
+    roles.find((role) => role.name === user?.role)?.label ?? user?.role;
 
   return (
     <>
@@ -12,7 +17,7 @@ export default async function ProfilePage() {
         <div>
           <p className="eyebrow">პროფილი</p>
           <h1>{user?.name}</h1>
-          <p>მიმდინარე სესია და მინიჭებული უფლებები.</p>
+          <p>ანგარიშის მონაცემები და უსაფრთხოება.</p>
         </div>
       </section>
 
@@ -26,7 +31,7 @@ export default async function ProfilePage() {
             </div>
             <div>
               <dt>როლი</dt>
-              <dd>{user?.role}</dd>
+              <dd>{roleLabel}</dd>
             </div>
             <div>
               <dt>ინიციალები</dt>
@@ -35,14 +40,15 @@ export default async function ProfilePage() {
           </dl>
         </div>
         <div className="surface">
-          <h2>უფლებები</h2>
-          <div className="chip-cloud">
-            {user?.permissions.map((permission) => (
-              <span key={permission} className="chip">
-                {permission}
-              </span>
-            ))}
-          </div>
+          <h2>პაროლის შეცვლა</h2>
+          <p className="muted">
+            შეცვლის შემდეგ სესია დასრულდება და ხელახლა შეხვალთ ახალი პაროლით.
+          </p>
+          <ChangePasswordForm
+            requireCurrent
+            submitLabel="ცვლილების შენახვა"
+            className="must-change-password-form"
+          />
         </div>
       </section>
 

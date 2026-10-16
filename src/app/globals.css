@@ -813,6 +813,12 @@ textarea:focus {
   font-weight: 700;
 }
 
+.form-notice {
+  margin: 0;
+  color: var(--green);
+  font-weight: 700;
+}
+
 .primary-button {
   border: 1px solid transparent;
   background: linear-gradient(135deg, var(--brand), var(--teal));

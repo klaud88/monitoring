@@ -79,7 +79,12 @@ export async function verifyPendingTwoFactorToken(token?: string): Promise<strin
 }
 
 // Reads user data directly from the signed JWT payload — no DB query needed.
-type LiveAccess = { active: boolean; role: string; permissions: PermissionKey[] };
+type LiveAccess = {
+  active: boolean;
+  role: string;
+  permissions: PermissionKey[];
+  mustChangePassword: boolean;
+};
 
 const LIVE_ACCESS_TTL_MS = 10_000;
 const liveAccessCache = new Map<string, { at: number; value: LiveAccess | null }>();
@@ -102,12 +107,14 @@ async function getLiveAccess(userId: string): Promise<LiveAccess | null | undefi
 
   const rows = await queryRows<{
     is_active: number | boolean;
+    must_change_password: number | boolean;
     role_name: string;
     permissions: string | null;
   }>(
     `
       select
         u.is_active,
+        u.must_change_password,
         r.name as role_name,
         group_concat(distinct p.code order by p.code separator ',') as permissions
       from users u
@@ -115,7 +122,7 @@ async function getLiveAccess(userId: string): Promise<LiveAccess | null | undefi
       left join role_permissions rp on rp.role_id = r.id
       left join permissions p on p.id = rp.permission_id
       where u.id = ?
-      group by u.id, u.is_active, r.name
+      group by u.id, u.is_active, u.must_change_password, r.name
       limit 1
     `,
     [userId],
@@ -133,6 +140,7 @@ async function getLiveAccess(userId: string): Promise<LiveAccess | null | undefi
         permissions: (row.permissions ?? "")
           .split(",")
           .filter(Boolean) as PermissionKey[],
+        mustChangePassword: Boolean(Number(row.must_change_password)),
       }
     : null;
   liveAccessCache.set(userId, { at: Date.now(), value });
@@ -172,7 +180,9 @@ export async function verifySessionToken(token?: string): Promise<SessionUser | 
       deviceGroupCode: payload.deviceGroupCode
         ? String(payload.deviceGroupCode)
         : undefined,
-      mustChangePassword: Boolean(payload.mustChangePassword),
+      // Live too, so an admin password reset forces a change in open sessions.
+      mustChangePassword:
+        live?.mustChangePassword ?? Boolean(payload.mustChangePassword),
       twoFactorEnabled: Boolean(payload.twoFactorEnabled),
     };
   } catch {

@@ -8,6 +8,7 @@ import { SystemLoader } from "@/components/common/system-loader";
 
 type LoginFormProps = {
   nextPath?: string;
+  passwordChanged?: boolean;
 };
 
 function getSafeNextPath(nextPath?: string) {
@@ -36,7 +37,7 @@ function getLoginMessage(p: number) {
   );
 }
 
-export function LoginForm({ nextPath }: LoginFormProps) {
+export function LoginForm({ nextPath, passwordChanged }: LoginFormProps) {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   // "credentials" is email/password; a 2FA account moves to "code" once the
@@ -164,6 +165,10 @@ export function LoginForm({ nextPath }: LoginFormProps) {
 
       {stage === "credentials" ? (
         <form className="login-form" onSubmit={submitCredentials}>
+          {passwordChanged && !error ? (
+            <p className="form-notice">პაროლი შეიცვალა. შედით ახალი პაროლით.</p>
+          ) : null}
+
           <label>
             <span>ელფოსტა ან X-Station</span>
             <div className="field-with-icon">
