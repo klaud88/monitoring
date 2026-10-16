@@ -1,15 +1,13 @@
 import { cookies } from "next/headers";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
-import { getRoles } from "@/lib/repositories";
+import { getRoleLabel } from "@/lib/repositories";
 import { ChangePasswordForm } from "@/components/auth/change-password-form";
 import { TwoFactorSettings } from "@/components/profile/two-factor-settings";
 
 export default async function ProfilePage() {
   const cookieStore = await cookies();
   const user = await verifySessionToken(cookieStore.get(SESSION_COOKIE)?.value);
-  const roles = await getRoles();
-  const roleLabel =
-    roles.find((role) => role.name === user?.role)?.label ?? user?.role;
+  const roleLabel = user ? await getRoleLabel(user.role) : "";
 
   return (
     <>

@@ -2499,6 +2499,15 @@ export async function getRoles(): Promise<AppRole[]> {
   }));
 }
 
+/** Human label for a role code (roles.name); falls back to the code. */
+export async function getRoleLabel(name: string): Promise<string> {
+  const rows = await queryRows<{ label: string }>(
+    "select label from roles where name = ? limit 1",
+    [name],
+  ).catch(() => null);
+  return rows?.[0]?.label || name;
+}
+
 export async function createRole(input: {
   name: string;
   label: string;

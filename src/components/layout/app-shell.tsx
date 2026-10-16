@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { LogOut } from "lucide-react";
 import { SESSION_COOKIE, hasPermission, isAdmin, verifySessionToken } from "@/lib/auth";
 import { getFirstAllowedPath } from "@/lib/navigation";
+import { getRoleLabel } from "@/lib/repositories";
 import type { PermissionKey } from "@/lib/types";
 import { MustChangePasswordModal } from "@/components/auth/must-change-password-modal";
 import { AppCredit } from "./app-credit";
@@ -37,6 +38,7 @@ export async function AppShell({
   const cookieStore = await cookies();
   const user = await verifySessionToken(cookieStore.get(SESSION_COOKIE)?.value);
   const homeHref = getFirstAllowedPath(user);
+  const roleLabel = user ? await getRoleLabel(user.role) : "role";
   const adminOnly = isAdmin(user);
 
   const allowedHrefs = navPermissions
@@ -73,7 +75,7 @@ export async function AppShell({
           user={{
             name: user?.name || "მომხმარებელი",
             initials: user?.initials || "?",
-            role: user?.role || "role",
+            role: roleLabel,
             color: user?.color,
           }}
         />
