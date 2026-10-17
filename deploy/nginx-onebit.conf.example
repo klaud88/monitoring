@@ -1,14 +1,14 @@
 # kgm.online.ge — one domain, one app process per organisation.
-# Copy to /etc/nginx/sites-available/kgm, link into sites-enabled,
+# Copy to /etc/nginx/sites-available/onebit, link into sites-enabled,
 # then: nginx -t && systemctl reload nginx
 #
-# The kgm_tenant cookie (set by the portal at login) picks the process.
+# The onebit_tenant cookie (set by the portal at login) picks the process.
 # No cookie, or an unknown value, goes to the portal's login page.
-# Add one line per organisation, matching PORT in /etc/kgm/<slug>.env.
+# Add one line per organisation, matching PORT in /etc/onebit/<slug>.env.
 
-map $cookie_kgm_tenant $kgm_upstream {
+map $cookie_onebit_tenant $onebit_upstream {
     default 127.0.0.1:3000;   # portal
-    org1    127.0.0.1:3001;
+    kgm     127.0.0.1:3001;
     # org2  127.0.0.1:3002;
 }
 
@@ -28,7 +28,7 @@ server {
     client_max_body_size 20m;
 
     location / {
-        proxy_pass http://$kgm_upstream;
+        proxy_pass http://$onebit_upstream;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

@@ -4,7 +4,7 @@ export const SESSION_COOKIE = "biostar_session";
 export const PENDING_2FA_COOKIE = "biostar_2fa_pending";
 // Names the organisation whose process nginx routes this browser to when
 // several organisations share one domain (see src/lib/portal.ts).
-export const TENANT_COOKIE = "kgm_tenant";
+export const TENANT_COOKIE = "onebit_tenant";
 
 export function shouldUseSecureCookie() {
   return process.env.NODE_ENV === "production";

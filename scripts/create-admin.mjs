@@ -2,7 +2,7 @@
 /*
  * Creates the first admin user in an organisation's database.
  *
- *   node scripts/create-admin.mjs /etc/kgm/org2.env admin@org2.ge "სახელი გვარი"
+ *   node scripts/create-admin.mjs /etc/onebit/org2.env admin@org2.ge "სახელი გვარი"
  *
  * Prints a one-time password; the user must change it at first login.
  */

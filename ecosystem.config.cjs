@@ -1,7 +1,7 @@
 /*
  * pm2 processes for several organisations on one domain.
  *
- * Every file in KGM_ENV_DIR (default /etc/kgm) becomes one process running
+ * Every file in ONEBIT_ENV_DIR (default /etc/onebit) becomes one process running
  * this same build:
  *   portal.env   PORTAL_MODE=1, PORT, PORTAL_SYNC_SECRET (no DATABASE_URL)
  *   <slug>.env   TENANT_SLUG=<slug>, TENANT_PREFIX=<X-Station initials>,
@@ -17,7 +17,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const dotenv = require("dotenv");
 
-const envDir = process.env.KGM_ENV_DIR || "/etc/kgm";
+const envDir = process.env.ONEBIT_ENV_DIR || "/etc/onebit";
 const files = fs.existsSync(envDir)
   ? fs.readdirSync(envDir).filter((file) => file.endsWith(".env")).sort()
   : [];
@@ -47,7 +47,7 @@ module.exports = {
     }
 
     return {
-      name: `kgm-${entry.name}`,
+      name: `onebit-${entry.name}`,
       cwd: __dirname,
       script: "node_modules/next/dist/bin/next",
       args: ["start", "-H", "127.0.0.1", "-p", env.PORT],

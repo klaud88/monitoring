@@ -5,8 +5,8 @@
  * updated account the same one-time password; the user must change it at
  * first login. Names stay as they are ("ბაღი <N>").
  *
- *   IMPORT_PASSWORD='...' node scripts/import-garden-contacts.mjs /etc/kgm/org1.env contacts.json
- *   IMPORT_PASSWORD='...' node scripts/import-garden-contacts.mjs /etc/kgm/org1.env contacts.json --apply
+ *   IMPORT_PASSWORD='...' node scripts/import-garden-contacts.mjs /etc/onebit/kgm.env contacts.json
+ *   IMPORT_PASSWORD='...' node scripts/import-garden-contacts.mjs /etc/onebit/kgm.env contacts.json --apply
  *
  * contacts.json: [{ "code": "101", "email": "x@example.ge", "phone": "599123456" }, ...]
  * Without --apply nothing is written; the same report is printed.
