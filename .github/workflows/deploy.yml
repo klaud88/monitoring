@@ -40,7 +40,7 @@ jobs:
             if [ -f /etc/onebit/portal.env ]; then
               git checkout -- package-lock.json
               git pull origin main
-              npm ci
+              npm install
               # prisma generate needs a URL but never connects; runtime
               # config comes from /etc/onebit/*.env, not from a .env here.
               DATABASE_URL="mysql://build:build@127.0.0.1:3306/build" npm run build

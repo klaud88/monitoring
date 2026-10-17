@@ -69,7 +69,7 @@ grep '^NEXT_PUBLIC_' .env > .env.production
 # .env-ს Next.js ყველა პროცესში ჩატვირთავს და kgm-ის ბაზა/BioStar სხვა
 # ორგანიზაციებს გადაედება. მისი ასლი უკვე /etc/onebit/kgm.env-შია.
 mv .env /root/monitoring.env.bak
-npm ci
+npm install   # npm ci აქ არ მუშაობს: lock ფაილი Mac-ზეა შექმნილი
 DATABASE_URL="mysql://build:build@127.0.0.1:3306/build" npm run build
 ```
 ⚠️ `/var/www/monitoring`-ში `.env` ფაილი **აღარ** უნდა იყოს. ყველა პარამეტრი `/etc/onebit/*.env`-იდან მოდის.
