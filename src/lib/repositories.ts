@@ -642,6 +642,7 @@ async function runBiostarDeviceSync() {
 
   if (!biostarDevices.length) {
     lastBiostarSyncAt = syncedAt.getTime();
+    await recordSyncRun(syncedAt);
     return { synced: 0, syncedAt: syncedAt.toISOString() };
   }
 
@@ -688,6 +689,9 @@ async function runBiostarDeviceSync() {
   });
 
   lastBiostarSyncAt = syncedAt.getTime();
+  if (synced !== null) {
+    await recordSyncRun(syncedAt);
+  }
   return { synced: synced ?? 0, syncedAt: syncedAt.toISOString() };
 }
 
@@ -1324,6 +1328,11 @@ async function ensureOperationalSchema() {
       await ensureTaskTagCatalog(connection);
       await ensureProblemReportAccess(connection);
       await ensureUserGardens(connection);
+      // One row per successful BioStar sync: which days the 5-minute check
+      // actually ran (Offline calendar, deploy/logic.md).
+      await connection.query(
+        "create table if not exists biostar_sync_runs (synced_at datetime not null primary key)",
+      );
       await ensureProblemReportTaskView(connection);
       await ensureGardenUsersForDevices(connection);
     })
@@ -3630,29 +3639,54 @@ export async function ensureTodayOfflineSnapshot() {
 }
 
 /* ── Daily offline grading ────────────────────────────────────────────────
-   A kindergarten only cares about downtime while it is open, so both rules
-   are measured inside the working window. Two failure modes are graded apart:
-   a real outage (long) and flapping (short but repeated).                  */
-export const OFFLINE_WINDOW_START_HOUR = 8;
-export const OFFLINE_WINDOW_END_HOUR = 18;
-/** One unbroken drop this long inside the window is an outage. */
-export const OUTAGE_CONTINUOUS_MINUTES = 30;
-/** Several shorter drops adding up to this are an outage too. */
-export const OUTAGE_CUMULATIVE_MINUTES = 60;
-/** This many separate drops in the window means the link is unstable. */
-export const FLAPPING_MIN_EVENTS = 3;
+   What matters is whether a garden's card swipes reached the server. A
+   reader that is offline keeps the swipes and sends them once it is back
+   online, so a day is judged by "did it get a long enough online stretch",
+   inside the hours the garden works. Rules and colours: deploy/logic.md.   */
+export const OFFLINE_WINDOW_START_HOUR = 9;
+export const OFFLINE_WINDOW_END_HOUR = 17;
+/** The morning rush (09:00–11:00), when most cards are swiped. */
+export const OFFLINE_MORNING_END_HOUR = 11;
+/** Online this long without a break = the stored swipes went through. */
+export const DELIVERY_ONLINE_MINUTES = 20;
+/** Offline this long in the morning rush = the morning swipes came late. */
+export const MORNING_OUTAGE_MINUTES = 30;
+/** This many separate drops in the window = unstable link. */
+export const UNSTABLE_MIN_EVENTS = 3;
 /** Drops split by less than this much uptime are one drop, not two. */
 const FLAP_MERGE_MINUTES = 5;
 const DEFAULT_OFFLINE_LEVEL_WINDOW_DAYS = 90;
+/** Sync runs older than this are pruned (they only mark covered days). */
+const SYNC_RUN_RETENTION_DAYS = 120;
 
-export type DailyOfflineLevel = "outage" | "flapping" | "brief";
+/**
+ * missed: never online long enough in the window; evening: dropped in the
+ * afternoon and still down at the end; late: morning swipes arrived late;
+ * unstable: kept dropping; ok: only short drops.
+ */
+export type DailyOfflineLevel = "missed" | "evening" | "late" | "unstable" | "ok";
 
 export type DailyOfflineEntry = {
   deviceId: string;
   date: string;
   level: DailyOfflineLevel;
+  /** Offline minutes inside the window. */
   minutes: number;
+  /** Separate drops inside the window. */
   events: number;
+  /** Offline minutes in the morning rush. */
+  morningMinutes: number;
+  /** Longest unbroken online stretch inside the window, in minutes. */
+  longestOnline: number;
+  /** Today before the window closes: missed/evening are not final yet. */
+  pending?: boolean;
+};
+
+export type DailyOfflineReport = {
+  levels: DailyOfflineEntry[];
+  /** Days on which the 5-minute sync ran inside the window. */
+  coveredDays: string[];
+  lastSyncAt?: string;
 };
 
 type OfflinePeriodRow = {
@@ -3684,16 +3718,103 @@ function dayKeyFromMs(value: number) {
   return new Date(value).toISOString().slice(0, 10);
 }
 
-function windowBoundsForDay(dayMs: number) {
+/** Writes one row per successful BioStar sync; marks a day as covered. */
+async function recordSyncRun(syncedAt: Date) {
+  await withConnection(async (connection) => {
+    await connection.query(
+      "insert ignore into biostar_sync_runs (synced_at) values (?)",
+      [toSqlDateTime(syncedAt)],
+    );
+    await connection.query(
+      "delete from biostar_sync_runs where synced_at < date_sub(now(), interval ? day)",
+      [SYNC_RUN_RETENTION_DAYS],
+    );
+  }).catch(() => null);
+}
+
+type Span = { start: number; end: number };
+
+function gradeDay(
+  dayMs: number,
+  offline: Span[],
+  nowMs: number,
+): Omit<DailyOfflineEntry, "deviceId" | "date"> {
+  const windowStart = dayMs + OFFLINE_WINDOW_START_HOUR * 3600_000;
+  const windowEnd = dayMs + OFFLINE_WINDOW_END_HOUR * 3600_000;
+  const morningEnd = dayMs + OFFLINE_MORNING_END_HOUR * 3600_000;
+  // Today is judged on what has happened so far.
+  const evalEnd = Math.min(windowEnd, nowMs);
+  const open = nowMs < windowEnd;
+
+  const drops = offline
+    .map((span) => ({
+      start: Math.max(span.start, windowStart),
+      end: Math.min(span.end, evalEnd),
+    }))
+    .filter((span) => span.end > span.start)
+    .sort((a, b) => a.start - b.start);
+
+  const online: Span[] = [];
+  let cursor = windowStart;
+  for (const drop of drops) {
+    if (drop.start > cursor) {
+      online.push({ start: cursor, end: drop.start });
+    }
+    cursor = Math.max(cursor, drop.end);
+  }
+  if (evalEnd > cursor) {
+    online.push({ start: cursor, end: evalEnd });
+  }
+
+  const minutesOf = (span: Span) => (span.end - span.start) / 60_000;
+  const delivery = DELIVERY_ONLINE_MINUTES;
+  const longestOnline = Math.max(0, ...online.map(minutesOf));
+  const minutes = drops.reduce((sum, drop) => sum + minutesOf(drop), 0);
+  const morningMinutes = drops.reduce(
+    (sum, drop) =>
+      sum + Math.max(0, Math.min(drop.end, morningEnd) - drop.start) / 60_000,
+    0,
+  );
+  const last = drops[drops.length - 1];
+  const stillDown = Boolean(last && last.end >= evalEnd);
+
+  let level: DailyOfflineLevel;
+  if (longestOnline < delivery) {
+    level = "missed";
+  } else if (
+    stillDown &&
+    last.start >= morningEnd &&
+    online.some((span) => span.end <= last.start && minutesOf(span) >= delivery)
+  ) {
+    level = "evening";
+  } else if (
+    morningMinutes >= MORNING_OUTAGE_MINUTES &&
+    online.some(
+      (span) =>
+        span.start >= Math.max(...drops.filter((d) => d.start < morningEnd).map((d) => d.end)) &&
+        minutesOf(span) >= delivery,
+    )
+  ) {
+    level = "late";
+  } else if (drops.length >= UNSTABLE_MIN_EVENTS) {
+    level = "unstable";
+  } else {
+    level = "ok";
+  }
+
   return {
-    start: dayMs + OFFLINE_WINDOW_START_HOUR * 3600_000,
-    end: dayMs + OFFLINE_WINDOW_END_HOUR * 3600_000,
+    level,
+    minutes: Math.round(minutes),
+    events: drops.length,
+    morningMinutes: Math.round(morningMinutes),
+    longestOnline: Math.round(longestOnline),
+    ...(open && (level === "missed" || level === "evening") ? { pending: true } : {}),
   };
 }
 
 /**
- * Grades every device-day in the range. Only device-days with something to
- * report come back, so the payload stays small.
+ * Grades every device-day in the range that had a drop inside the working
+ * window. A covered day with no entry for a device was clean (green).
  */
 export async function getDailyOfflineLevels({
   from,
@@ -3701,9 +3822,9 @@ export async function getDailyOfflineLevels({
 }: {
   from?: string;
   to?: string;
-} = {}): Promise<DailyOfflineEntry[]> {
+} = {}): Promise<DailyOfflineReport> {
   if (isBuildTime()) {
-    return [];
+    return { levels: [], coveredDays: [] };
   }
 
   await ensureOperationalSchema();
@@ -3715,34 +3836,48 @@ export async function getDailyOfflineLevels({
   );
   const fromKey = from ?? fallbackFrom.toISOString().slice(0, 10);
 
-  const rows = await queryRows<OfflinePeriodRow>(
-    `
-      select
-        device_id,
-        date_format(offline_at, '%Y-%m-%d %H:%i:%s') as offline_at,
-        date_format(online_at, '%Y-%m-%d %H:%i:%s') as online_at
-      from monitored_device_offline_periods
-      where offline_at < date_add(?, interval 1 day)
-        and (online_at is null or online_at >= ?)
-      order by device_id, offline_at
-    `,
-    [toKey, fromKey],
-  );
+  const [rows, coverageRows, lastRows] = await Promise.all([
+    queryRows<OfflinePeriodRow>(
+      `
+        select
+          device_id,
+          date_format(offline_at, '%Y-%m-%d %H:%i:%s') as offline_at,
+          date_format(online_at, '%Y-%m-%d %H:%i:%s') as online_at
+        from monitored_device_offline_periods
+        where offline_at < date_add(?, interval 1 day)
+          and (online_at is null or online_at >= ?)
+        order by device_id, offline_at
+      `,
+      [toKey, fromKey],
+    ),
+    queryRows<{ day: string }>(
+      `
+        select distinct date_format(synced_at, '%Y-%m-%d') as day
+        from biostar_sync_runs
+        where synced_at >= ? and synced_at < date_add(?, interval 1 day)
+          and hour(synced_at) >= ? and hour(synced_at) < ?
+      `,
+      [fromKey, toKey, OFFLINE_WINDOW_START_HOUR, OFFLINE_WINDOW_END_HOUR],
+    ),
+    queryRows<{ last_sync: string | null }>(
+      "select date_format(max(synced_at), '%Y-%m-%d %H:%i:%s') as last_sync from biostar_sync_runs",
+    ),
+  ]);
 
-  if (!rows?.length) {
-    return [];
-  }
-
+  const coveredDays = (coverageRows ?? []).map((row) => row.day);
+  const lastSync = lastRows?.[0]?.last_sync ?? undefined;
   const nowMs = wallClockToMs(toSqlDateTime(new Date()));
-  const byDevice = new Map<string, { start: number; end: number }[]>();
+  // A period still open is cut at the last sync, not "now": if the cron
+  // stopped, a device must not turn red for hours nobody checked.
+  const openEndMs = lastSync ? Math.min(nowMs, wallClockToMs(lastSync)) : nowMs;
 
-  for (const row of rows) {
+  const byDevice = new Map<string, Span[]>();
+  for (const row of rows ?? []) {
     const start = wallClockToMs(row.offline_at);
-    const end = row.online_at ? wallClockToMs(row.online_at) : nowMs;
+    const end = row.online_at ? wallClockToMs(row.online_at) : openEndMs;
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
       continue;
     }
-
     const periods = byDevice.get(row.device_id) ?? [];
     const previous = periods[periods.length - 1];
     // Flap damping: a blink of uptime does not split one drop into two.
@@ -3754,67 +3889,43 @@ export async function getDailyOfflineLevels({
     byDevice.set(row.device_id, periods);
   }
 
-  type DayTally = { minutes: number; longest: number; events: number };
-  const entries: DailyOfflineEntry[] = [];
-
+  const levels: DailyOfflineEntry[] = [];
   byDevice.forEach((periods, deviceId) => {
-    const days = new Map<string, DayTally>();
-
+    const days = new Map<number, Span[]>();
     for (const period of periods) {
+      const first = new Date(period.start);
       let cursor = Date.UTC(
-        new Date(period.start).getUTCFullYear(),
-        new Date(period.start).getUTCMonth(),
-        new Date(period.start).getUTCDate(),
+        first.getUTCFullYear(),
+        first.getUTCMonth(),
+        first.getUTCDate(),
       );
-
       while (cursor <= period.end) {
-        const { start: windowStart, end: windowEnd } =
-          windowBoundsForDay(cursor);
-        const segmentStart = Math.max(period.start, windowStart);
-        const segmentEnd = Math.min(period.end, windowEnd);
-
-        if (segmentEnd > segmentStart) {
-          const dayKey = dayKeyFromMs(cursor);
-          const minutes = (segmentEnd - segmentStart) / 60_000;
-          const tally = days.get(dayKey) ?? {
-            minutes: 0,
-            longest: 0,
-            events: 0,
-          };
-          tally.minutes += minutes;
-          tally.longest = Math.max(tally.longest, minutes);
-          tally.events += 1;
-          days.set(dayKey, tally);
+        const windowStart = cursor + OFFLINE_WINDOW_START_HOUR * 3600_000;
+        const windowEnd = cursor + OFFLINE_WINDOW_END_HOUR * 3600_000;
+        if (period.end > windowStart && period.start < windowEnd) {
+          days.set(cursor, [...(days.get(cursor) ?? []), period]);
         }
-
         cursor += 24 * 3600_000;
       }
     }
 
-    days.forEach((tally, date) => {
+    days.forEach((spans, dayMs) => {
+      const date = dayKeyFromMs(dayMs);
       if (date < fromKey || date > toKey) {
         return;
       }
-
-      const level: DailyOfflineLevel =
-        tally.longest >= OUTAGE_CONTINUOUS_MINUTES ||
-        tally.minutes >= OUTAGE_CUMULATIVE_MINUTES
-          ? "outage"
-          : tally.events >= FLAPPING_MIN_EVENTS
-            ? "flapping"
-            : "brief";
-
-      entries.push({
-        deviceId,
-        date,
-        level,
-        minutes: Math.round(tally.minutes),
-        events: tally.events,
-      });
+      const graded = gradeDay(dayMs, spans, nowMs);
+      if (graded.events > 0) {
+        levels.push({ deviceId, date, ...graded });
+      }
     });
   });
 
-  return entries;
+  return {
+    levels,
+    coveredDays,
+    ...(lastSync ? { lastSyncAt: lastSync } : {}),
+  };
 }
 
 const DEFAULT_OFFLINE_PERIOD_RETENTION_DAYS = 365;

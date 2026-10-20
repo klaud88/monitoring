@@ -8414,25 +8414,28 @@ a.task-card2:hover .task-card2-title {
 
 .matrix-legend {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 4px 12px;
   color: var(--ink-muted);
   font-size: 12px;
+}
+
+.matrix-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   white-space: nowrap;
+  cursor: help;
 }
 
 .matrix-legend .matrix-cell {
   width: 12px;
   flex: 0 0 12px;
   height: 12px;
-  margin-left: 6px;
-  cursor: default;
+  cursor: help;
   outline: 0;
   font-size: 0;
-}
-
-.matrix-legend .matrix-cell:first-child {
-  margin-left: 0;
 }
 
 /* One scroll container for both axes: the day strip scrolls, while the device
@@ -8659,26 +8662,55 @@ button.matrix-cell:hover {
   color: var(--line-strong);
 }
 
-.matrix-cell.outage,
-.matrix-cell.flapping {
+/* Offline calendar colours (rules: deploy/logic.md). */
+.matrix-cell.missed,
+.matrix-cell.evening,
+.matrix-cell.unstable {
   color: #fff;
 }
 
-.matrix-cell.brief,
+.matrix-cell.ok,
+.matrix-cell.late,
 .matrix-cell.snapshot {
   color: var(--ink-muted);
 }
 
-.matrix-cell.outage {
-  background: var(--red);
+.matrix-cell.ok {
+  background: rgba(22, 163, 74, 0.32);
 }
 
-.matrix-cell.flapping {
+.matrix-cell.unstable {
   background: #7c3aed;
 }
 
-.matrix-cell.brief {
-  background: rgba(220, 38, 38, 0.34);
+.matrix-cell.late {
+  background: #f9a8d4;
+}
+
+.matrix-cell.evening {
+  background: #ea580c;
+}
+
+.matrix-cell.missed {
+  background: var(--red);
+}
+
+.matrix-cell.pending {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--red);
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(220, 38, 38, 0.18) 0 3px,
+    transparent 3px 6px
+  );
+  color: var(--ink-muted);
+}
+
+.matrix-cell.weekend {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--panel-row-line);
+  opacity: 0.55;
+  color: var(--ink-subtle);
 }
 
 .matrix-cell.snapshot {
@@ -8689,12 +8721,17 @@ button.matrix-cell:hover {
   );
 }
 
-:root[data-theme="dark"] .matrix-cell.flapping {
+:root[data-theme="dark"] .matrix-cell.unstable {
   background: #a78bfa;
 }
 
-:root[data-theme="dark"] .matrix-cell.brief {
-  background: rgba(248, 113, 113, 0.36);
+:root[data-theme="dark"] .matrix-cell.late {
+  background: #db2777;
+  color: #fff;
+}
+
+:root[data-theme="dark"] .matrix-cell.ok {
+  background: rgba(74, 222, 128, 0.3);
 }
 
 .matrix-bell {
