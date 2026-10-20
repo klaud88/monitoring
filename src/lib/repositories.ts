@@ -4638,11 +4638,41 @@ export async function updateTask(
         return null;
       }
 
-      /* A task created from a problem report carries its status back. */
+      /* A task made from a problem report is the same record: what the two
+         share flows back, so a later report edit can't put old values back
+         onto the task. Tags stay apart (the report's own vs the task's). */
       await connection.query(
-        "update problem_reports set status = ? where task_id = ?",
-        [input.status, id],
+        `update problem_reports
+         set title = ?, issue = ?, phone = ?, status = ?, priority = ?, due_date = ?
+         where task_id = ?`,
+        [
+          input.title,
+          input.issue,
+          input.phone ?? null,
+          input.status,
+          input.priority,
+          input.dueDate,
+          id,
+        ],
       );
+      // Not when emptied: a report without assignees drops its task.
+      if (input.assigneeIds.length) {
+        const [reportRows] = await connection.query<RowDataPacket[]>(
+          "select id from problem_reports where task_id = ? limit 1",
+          [id],
+        );
+        const reportId = reportRows[0]?.id as string | undefined;
+        if (reportId) {
+          await connection.query(
+            "delete from problem_report_assignees where problem_report_id = ?",
+            [reportId],
+          );
+          await connection.query(
+            "insert ignore into problem_report_assignees (problem_report_id, user_id) values ?",
+            [input.assigneeIds.map((userId) => [reportId, userId])],
+          );
+        }
+      }
 
       await connection.query("delete from task_assignees where task_id = ?", [
         id,

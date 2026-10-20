@@ -21,10 +21,10 @@ import { getGardenDisplayName } from "@/lib/device-options";
 import { OriginHistoryRows } from "@/components/history/origin-history";
 import { getGardenScope } from "@/lib/garden-scope";
 import { buildHistoryRows } from "@/lib/history-view";
+import { getLinkedHistory } from "@/lib/linked-history";
 import { getFirstAllowedPath } from "@/lib/navigation";
 import {
   getDevices,
-  getEntityAuditTrail,
   getProblemReports,
   getUsers,
 } from "@/lib/repositories";
@@ -57,11 +57,10 @@ export default async function ProblemReportDetailsPage({
   }
 
   /* Same scope as the list: linked gardens only, or every garden. */
-  const [reports, devices, users, auditTrail] = await Promise.all([
+  const [reports, devices, users] = await Promise.all([
     getProblemReports({ gardenCodes: getGardenScope(user, "problem_reports") }),
     getDevices(),
     getUsers(),
-    getEntityAuditTrail("problem_report", id),
   ]);
   const report = reports.find((item) => item.id === id);
 
@@ -75,30 +74,17 @@ export default async function ProblemReportDetailsPage({
     ? [...new Set([...report.tags, ...(report.taskTags ?? [])])]
     : report.tags;
 
-  const createdEntry = auditTrail.find(
-    (entry) => entry.action === "problem_report.create",
-  );
-  /* The linked task's comment and tag edits join the report's own, for
-     roles that may see them; edits that came from this report are already
-     in its own rows. Newest first. */
-  const taskTrail =
-    report.taskId && (showTaskComment || showTaskTags)
-      ? (await getEntityAuditTrail("task", report.taskId)).filter(
-          (entry) =>
-            entry.action === "task.update" &&
-            (entry.metadata as { source?: string } | null)?.source !== "problem_report",
-        )
-      : [];
+  /* One history with the linked task (linked-history.ts), newest first.
+     The task's comment and tag changes need their own permissions here. */
+  const history = await getLinkedHistory({
+    reportId: report.id,
+    taskId: report.taskId,
+  });
+  const createdEntry = history.created;
   const userNames = new Map(users.map((item) => [item.id, item.name]));
-  const editEntries = [
-    ...buildHistoryRows(
-      auditTrail.filter((entry) => entry.action === "problem_report.update").reverse(),
-      userNames,
-    ),
-    ...buildHistoryRows([...taskTrail].reverse(), userNames, (field) =>
-      field === "comment" ? showTaskComment : field === "tags" ? showTaskTags : false,
-    ).filter((row) => row.field !== undefined),
-  ].sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  const editEntries = buildHistoryRows(history.edits, userNames, (field) =>
+    field === "comment" ? showTaskComment : field === "tags" ? showTaskTags : true,
+  );
 
   const device = devices.find((item) => item.id === report.deviceId);
   const assignees = users.filter((item) => report.assigneeIds.includes(item.id));

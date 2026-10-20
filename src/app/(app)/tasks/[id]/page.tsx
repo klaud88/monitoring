@@ -21,20 +21,15 @@ import { withoutDeviceCodes } from "@/lib/display";
 import { getFirstAllowedPath } from "@/lib/navigation";
 import {
   getDevices,
-  getEntityAuditTrail,
   getTasks,
   getUsers,
 } from "@/lib/repositories";
 import { OriginHistoryRows } from "@/components/history/origin-history";
 import { buildHistoryRows } from "@/lib/history-view";
+import { getLinkedHistory } from "@/lib/linked-history";
 import { resolveTaskVisibilityScope } from "@/lib/task-visibility";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
 
-const editActions = new Set([
-  "task.update",
-  "task.status_local_change",
-  "task.assign",
-]);
 
 
 
@@ -65,11 +60,10 @@ export default async function TaskDetailsPage({
   }
 
   const scope = resolveTaskVisibilityScope(user);
-  const [tasks, devices, users, auditTrail] = await Promise.all([
+  const [tasks, devices, users] = await Promise.all([
     getTasks(scope),
     getDevices(),
     getUsers(),
-    getEntityAuditTrail("task", id),
   ]);
   const task = tasks.find((item) => item.id === id);
 
@@ -77,13 +71,15 @@ export default async function TaskDetailsPage({
     notFound();
   }
 
-  const createdEntry = auditTrail.find((entry) => entry.action === "task.create");
-  /* Every edit and status change is listed, newest first. */
+  /* One history with the problem report it came from (linked-history.ts),
+     newest first. */
+  const history = await getLinkedHistory({
+    taskId: task.id,
+    reportId: task.problemReportId,
+  });
+  const createdEntry = history.created;
   const userNames = new Map(users.map((item) => [item.id, item.name]));
-  const editEntries = buildHistoryRows(
-    auditTrail.filter((entry) => editActions.has(entry.action)).reverse(),
-    userNames,
-  );
+  const editEntries = buildHistoryRows(history.edits, userNames);
 
   const device = devices.find((item) => item.id === task.deviceId);
   const assignees = users.filter((item) => task.assigneeIds.includes(item.id));
