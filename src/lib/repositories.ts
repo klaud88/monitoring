@@ -417,6 +417,8 @@ type ProblemReportRow = {
   updated_at: DatabaseDate;
   assignee_ids: string | null;
   category_id: string | null;
+  task_comment?: string | null;
+  task_tags?: unknown;
 };
 
 type FormOneRecordRow = {
@@ -1322,6 +1324,7 @@ async function ensureOperationalSchema() {
       await ensureTaskTagCatalog(connection);
       await ensureProblemReportAccess(connection);
       await ensureUserGardens(connection);
+      await ensureProblemReportTaskView(connection);
       await ensureGardenUsersForDevices(connection);
     })
       .then(() => undefined)
@@ -1802,14 +1805,24 @@ async function ensureTaskTagCatalog(connection: PoolConnection) {
  * gardens; see garden-scope.ts.
  */
 async function ensureUserGardens(connection: PoolConnection) {
+  // user_id is compared with users.id, so it must share its collation or
+  // MySQL refuses the join (ER_CANT_AGGREGATE_2COLLATIONS).
+  const userIdCharset = await getColumnCharset(connection, "users", "id");
   await connection.query(`
     create table if not exists user_gardens (
       user_id varchar(64) not null,
       garden_code varchar(80) not null,
       primary key (user_id, garden_code),
       key idx_user_gardens_code (garden_code)
-    )
+    ) ${userIdCharset ? `default charset=${userIdCharset.charset} collate=${userIdCharset.collation}` : ""}
   `);
+  // A table created before this fix took the server default; convert it.
+  const gardenUserCharset = await getColumnCharset(connection, "user_gardens", "user_id");
+  if (userIdCharset && gardenUserCharset?.collation !== userIdCharset.collation) {
+    await connection.query(
+      `alter table user_gardens convert to character set ${userIdCharset.charset} collate ${userIdCharset.collation}`,
+    );
+  }
 
   // One-time: each garden account keeps its own garden as a link, and every
   // existing role except "garden" keeps seeing all gardens when its users
@@ -1841,6 +1854,40 @@ async function ensureUserGardens(connection: PoolConnection) {
   }
   await connection.query(
     `insert ignore into app_migrations (id) values ('user_gardens_v1')`,
+  );
+}
+
+/*
+ * One-time: whoever already sees problem reports also sees the linked task's
+ * tags and comment, so the new switches change nothing until an admin turns
+ * them off. New roles start without them.
+ */
+async function ensureProblemReportTaskView(connection: PoolConnection) {
+  const [rows] = await connection.query<RowDataPacket[]>(
+    `select 1 from app_migrations where id = 'problem_report_task_view_v1' limit 1`,
+  );
+  if (rows.length) {
+    return;
+  }
+  for (const key of ["problem_reports.task_tags", "problem_reports.task_comment"]) {
+    const [pageKey, actionKey] = key.split(".");
+    await connection.query(
+      `insert ignore into permissions (id, code, label, page_key, action_key)
+       values (?, ?, ?, ?, ?)`,
+      [makeStableId("perm", key), key, key, pageKey, actionKey],
+    );
+    await connection.query(
+      `insert ignore into role_permissions (role_id, permission_id)
+       select rp.role_id, target.id
+       from role_permissions rp
+       join permissions source on source.id = rp.permission_id
+       join permissions target on target.code = ?
+       where source.code = 'problem_reports.view'`,
+      [key],
+    );
+  }
+  await connection.query(
+    `insert ignore into app_migrations (id) values ('problem_report_task_view_v1')`,
   );
 }
 
@@ -4682,6 +4729,10 @@ export async function getProblemReports({
         pr.created_by,
         pr.created_at,
         pr.updated_at,
+        -- What the technician wrote on the linked task (problem-report-view.ts
+        -- decides who may see it).
+        (select t.comment_text from tasks t where t.id = pr.task_id) as task_comment,
+        (select t.tags from tasks t where t.id = pr.task_id) as task_tags,
         group_concat(pra.user_id order by pra.user_id separator ',') as assignee_ids
       from problem_reports pr
       left join problem_report_assignees pra on pra.problem_report_id = pr.id
@@ -4822,11 +4873,16 @@ export async function updateProblemReport(
     await connection.beginTransaction();
     try {
       const [existingRows] = await connection.query<RowDataPacket[]>(
-        "select task_id, device_group_code, created_by from problem_reports where id = ? limit 1 for update",
+        "select task_id, device_group_code, created_by, tags from problem_reports where id = ? limit 1 for update",
         [id],
       );
       const existing = existingRows[0] as
-        | { task_id?: string | null; device_group_code?: string; created_by?: string | null }
+        | {
+            task_id?: string | null;
+            device_group_code?: string;
+            created_by?: string | null;
+            tags?: unknown;
+          }
         | undefined;
       if (!existing) {
         await connection.rollback();
@@ -4866,6 +4922,7 @@ export async function updateProblemReport(
           dueDate,
           assigneeIds,
           createdBy: existing.created_by ?? undefined,
+          previousReportTags: normalizeTaskTags(existing.tags),
         });
       }
 
@@ -6032,6 +6089,8 @@ function mapProblemReportRow(row: ProblemReportRow): ProblemReport {
     createdBy: row.created_by ?? undefined,
     createdAt: toDateTimeString(row.created_at),
     updatedAt: toDateTimeString(row.updated_at),
+    taskComment: row.task_comment?.trim() || undefined,
+    taskTags: row.task_id ? normalizeTaskTags(row.task_tags) : undefined,
   };
 }
 
@@ -6312,8 +6371,29 @@ async function upsertTaskForProblemReport(
   input: Omit<Task, "id" | "createdAt" | "problemReportId" | "startsAt"> & {
     taskId: string;
     createdBy?: string;
+    /** The report's tags before this edit, so tags removed there leave the task too. */
+    previousReportTags?: string[];
   },
 ) {
+  // The technician's side of an existing task stays: its comment is never
+  // overwritten, and its own tags stay. Tags follow the report: added there →
+  // added here, removed there → removed here.
+  const [existingRows] = await connection.query<RowDataPacket[]>(
+    "select tags from tasks where id = ? limit 1",
+    [input.taskId],
+  );
+  const removedFromReport = new Set(
+    (input.previousReportTags ?? []).filter((tag) => !input.tags.includes(tag)),
+  );
+  const tags = existingRows.length
+    ? normalizeTaskTags([
+        ...normalizeTaskTags(existingRows[0].tags).filter(
+          (tag) => !removedFromReport.has(tag),
+        ),
+        ...input.tags,
+      ])
+    : input.tags;
+
   await connection.query<ResultSetHeader>(
     `
       insert into tasks
@@ -6322,7 +6402,6 @@ async function upsertTaskForProblemReport(
       on duplicate key update
         title = values(title),
         issue = values(issue),
-        comment_text = values(comment_text),
         phone = values(phone),
         device_id = values(device_id),
         status = values(status),
@@ -6339,7 +6418,7 @@ async function upsertTaskForProblemReport(
       input.deviceId,
       input.status,
       input.priority,
-      JSON.stringify(input.tags),
+      JSON.stringify(tags),
       input.dueDate,
       input.createdBy ?? null,
     ],

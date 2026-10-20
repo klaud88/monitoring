@@ -184,6 +184,7 @@ export function ProblemReportsManager({
         report.title.toLowerCase().includes(normalized) ||
         report.issue.toLowerCase().includes(normalized) ||
         report.phone?.toLowerCase().includes(normalized) ||
+        report.taskComment?.toLowerCase().includes(normalized) ||
         gardenName.toLowerCase().includes(normalized) ||
         device?.name.toLowerCase().includes(normalized);
 
@@ -764,7 +765,7 @@ export function ProblemReportsManager({
             <span>ბაღი</span>
             <span>პრიორიტეტი</span>
             <span>პრობლემა</span>
-            <span>ტეგები</span>
+            <span>კომენტარი</span>
             <span>ტელ.</span>
             <span>შემსრ.</span>
             <span>სტატუსი</span>
@@ -813,7 +814,13 @@ export function ProblemReportsManager({
                           {report.issue}
                         </span>
                       </Link>
-                      <TagCell tags={report.tags} />
+                      {/* The linked task's comment; absent when the role may not see it. */}
+                      <span
+                        className={`task-row-comment${report.taskComment ? "" : " empty"}`}
+                        title={report.taskComment || undefined}
+                      >
+                        {report.taskComment || "—"}
+                      </span>
                       <span className="task-row-phone">
                         {report.phone || "—"}
                       </span>
@@ -885,25 +892,6 @@ export function ProblemReportsManager({
   );
 }
 
-function TagCell({ tags }: { tags: string[] }) {
-  if (!tags.length) {
-    return <span className="task-row-tags empty">—</span>;
-  }
-
-  const shown = tags.slice(0, 2);
-  const hidden = tags.length - shown.length;
-
-  return (
-    <span className="task-row-tags" title={tags.join(", ")}>
-      {shown.map((tagName) => (
-        <span key={tagName} className="mini-pill tag">
-          {tagName}
-        </span>
-      ))}
-      {hidden > 0 ? <span className="mini-pill tag more">+{hidden}</span> : null}
-    </span>
-  );
-}
 
 function ReportFields({
   draft,

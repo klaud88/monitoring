@@ -1,17 +1,26 @@
 import type { Task, TaskPriority, TaskStatus } from "./types";
 
 /**
- * The task fields whose changes are written into the task's history
- * ("წარმოშობა"). Other edits (title, comment, tags…) are still logged, but
- * without a per-field change line.
+ * The task / problem-report fields whose changes are written into the
+ * history ("წარმოშობა") with their previous value, so an overwritten comment
+ * or text can still be read there. Other edits are logged without a line.
  */
 export type TaskChange =
   | { field: "status"; from: TaskStatus; to: TaskStatus }
   | { field: "priority"; from: TaskPriority; to: TaskPriority }
   | { field: "assignees"; from: string[]; to: string[] }
-  | { field: "dueDate"; from: string; to: string };
+  | { field: "dueDate"; from: string; to: string }
+  | { field: "title"; from: string; to: string }
+  | { field: "issue"; from: string; to: string }
+  | { field: "comment"; from: string; to: string }
+  | { field: "tags"; from: string[]; to: string[] };
 
-type TrackedTask = Pick<Task, "status" | "priority" | "assigneeIds" | "dueDate">;
+export type TaskChangeField = TaskChange["field"];
+
+type TrackedTask = Pick<Task, "status" | "priority" | "assigneeIds" | "dueDate"> &
+  Partial<Pick<Task, "title" | "issue" | "comment" | "tags">>;
+
+const textFields = ["title", "issue", "comment"] as const;
 
 const statuses: TaskStatus[] = ["planned", "in_progress", "blocked", "done"];
 const priorities: TaskPriority[] = ["low", "normal", "high", "urgent"];
@@ -40,6 +49,23 @@ export function diffTrackedTaskFields(
 
   if (before.dueDate !== after.dueDate) {
     changes.push({ field: "dueDate", from: before.dueDate, to: after.dueDate });
+  }
+
+  // Compared only when both sides carry the field (a problem report has no
+  // comment of its own).
+  for (const field of textFields) {
+    if (before[field] === undefined || after[field] === undefined) {
+      continue;
+    }
+    const from = (before[field] ?? "").trim();
+    const to = (after[field] ?? "").trim();
+    if (from !== to) {
+      changes.push({ field, from, to });
+    }
+  }
+
+  if (before.tags && after.tags && !sameMembers(before.tags, after.tags)) {
+    changes.push({ field: "tags", from: [...before.tags], to: [...after.tags] });
   }
 
   return changes;
@@ -77,8 +103,12 @@ function isTaskChange(value: unknown): value is TaskChange {
         priorities.includes(change.to as TaskPriority)
       );
     case "assignees":
+    case "tags":
       return isStringArray(change.from) && isStringArray(change.to);
     case "dueDate":
+    case "title":
+    case "issue":
+    case "comment":
       return typeof change.from === "string" && typeof change.to === "string";
     default:
       return false;

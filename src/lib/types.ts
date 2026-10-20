@@ -50,7 +50,9 @@ export type PermissionAction =
   | "location_edit"
   | "task_create"
   | "export"
-  | "all_gardens";
+  | "all_gardens"
+  | "task_tags"
+  | "task_comment";
 export type PermissionKey = `${PageKey}.${PermissionAction}`;
 
 export type AppUser = {
@@ -149,6 +151,10 @@ export type ProblemReport = {
   createdBy?: string;
   createdAt: string;
   updatedAt: string;
+  /** The linked task's comment and tags, set by whoever works the task.
+   *  Stripped for viewers without problem_reports.task_comment / task_tags. */
+  taskComment?: string;
+  taskTags?: string[];
 };
 
 export type ProblemCategory = {

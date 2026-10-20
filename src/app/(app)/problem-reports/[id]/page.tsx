@@ -11,13 +11,16 @@ import {
   FileText,
   History,
   MapPin,
+  MessageSquare,
   Phone,
   Tag,
   UserRoundCheck,
 } from "lucide-react";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { getGardenDisplayName } from "@/lib/device-options";
+import { OriginHistoryRows } from "@/components/history/origin-history";
 import { getGardenScope } from "@/lib/garden-scope";
+import { buildHistoryRows } from "@/lib/history-view";
 import { getFirstAllowedPath } from "@/lib/navigation";
 import {
   getDevices,
@@ -65,14 +68,37 @@ export default async function ProblemReportDetailsPage({
   if (!report) {
     notFound();
   }
+  /* The linked task's comment and tags, for roles allowed to see them. */
+  const showTaskComment = hasPermission(user, "problem_reports.task_comment");
+  const showTaskTags = hasPermission(user, "problem_reports.task_tags");
+  const tags = showTaskTags
+    ? [...new Set([...report.tags, ...(report.taskTags ?? [])])]
+    : report.tags;
 
   const createdEntry = auditTrail.find(
     (entry) => entry.action === "problem_report.create",
   );
-  /* Every edit is listed, newest first. */
-  const editEntries = auditTrail
-    .filter((entry) => entry.action === "problem_report.update")
-    .reverse();
+  /* The linked task's comment and tag edits join the report's own, for
+     roles that may see them; edits that came from this report are already
+     in its own rows. Newest first. */
+  const taskTrail =
+    report.taskId && (showTaskComment || showTaskTags)
+      ? (await getEntityAuditTrail("task", report.taskId)).filter(
+          (entry) =>
+            entry.action === "task.update" &&
+            (entry.metadata as { source?: string } | null)?.source !== "problem_report",
+        )
+      : [];
+  const userNames = new Map(users.map((item) => [item.id, item.name]));
+  const editEntries = [
+    ...buildHistoryRows(
+      auditTrail.filter((entry) => entry.action === "problem_report.update"),
+      userNames,
+    ),
+    ...buildHistoryRows(taskTrail, userNames, (field) =>
+      field === "comment" ? showTaskComment : field === "tags" ? showTaskTags : false,
+    ).filter((row) => row.lines.length > 0),
+  ].sort((a, b) => b.at.localeCompare(a.at));
 
   const device = devices.find((item) => item.id === report.deviceId);
   const assignees = users.filter((item) => report.assigneeIds.includes(item.id));
@@ -189,14 +215,28 @@ export default async function ProblemReportDetailsPage({
             </section>
           </article>
 
+          {showTaskComment ? (
+            <article className="detail-card">
+              <div className="detail-card-head">
+                <h2>კომენტარი</h2>
+                <MessageSquare size={16} />
+              </div>
+              {report.taskComment ? (
+                <p className="detail-body-text">{report.taskComment}</p>
+              ) : (
+                <p className="muted">კომენტარი ჯერ არ არის.</p>
+              )}
+            </article>
+          ) : null}
+
           <article className="detail-card">
             <div className="detail-card-head">
               <h2>ტეგები</h2>
               <Tag size={16} />
             </div>
-            {report.tags.length ? (
+            {tags.length ? (
               <div className="detail-chips">
-                {report.tags.map((tagName) => (
+                {tags.map((tagName) => (
                   <span key={tagName} className="mini-pill tag">
                     {tagName}
                   </span>
@@ -225,18 +265,7 @@ export default async function ProblemReportDetailsPage({
                 </span>
               </div>
 
-              {editEntries.map((entry) => (
-                <div key={entry.id} className="origin-row">
-                  <span className="origin-kind edit">რედაქტირება</span>
-                  <span className="origin-user">
-                    {entry.userName ?? "უცნობი"}
-                  </span>
-                  <span className="origin-change" />
-                  <span className="origin-time">
-                    {formatDateTime(entry.createdAt)}
-                  </span>
-                </div>
-              ))}
+              <OriginHistoryRows rows={editEntries} />
 
               {editEntries.length === 0 ? (
                 <p className="muted">რედაქტირება არ ყოფილა.</p>

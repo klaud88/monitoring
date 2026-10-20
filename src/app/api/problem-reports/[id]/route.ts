@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { canAccessGarden, getGardenScope } from "@/lib/garden-scope";
+import { redactTaskFields } from "@/lib/problem-report-view";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { filterRegisteredTaskTags } from "@/lib/catalog";
@@ -122,6 +123,8 @@ export async function PATCH(
       priority: report.priority,
       assigneeIds: report.assigneeIds,
       tags: report.tags,
+      /* Each changed field with its previous value, for the history. */
+      changes: diffTrackedTaskFields(existing, report),
     },
     ipAddress: request.headers.get("x-forwarded-for") ?? undefined,
     userAgent: request.headers.get("user-agent") ?? undefined,
@@ -134,7 +137,7 @@ export async function PATCH(
       (task) => task.id === linkedTaskBefore.id,
     );
     const changes = linkedTaskAfter
-      ? diffTrackedTaskFields(linkedTaskBefore, linkedTaskAfter)
+      ? diffTrackedTaskFields(withComment(linkedTaskBefore), withComment(linkedTaskAfter))
       : [];
     if (changes.length) {
       await logAudit({
@@ -149,7 +152,7 @@ export async function PATCH(
     }
   }
 
-  return NextResponse.json({ report });
+  return NextResponse.json({ report: redactTaskFields(report, user) });
 }
 
 export async function DELETE(
@@ -182,4 +185,9 @@ export async function DELETE(
   });
 
   return NextResponse.json({ ok: true });
+}
+
+/* An empty comment is "", so writing the first one counts as a change. */
+function withComment<T extends { comment?: string }>(task: T) {
+  return { ...task, comment: task.comment ?? "" };
 }

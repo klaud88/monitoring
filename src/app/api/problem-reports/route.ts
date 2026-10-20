@@ -2,9 +2,11 @@ import { NextResponse, type NextRequest } from "next/server";
 import { canAccessGarden, getGardenScope } from "@/lib/garden-scope";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
-import { filterRegisteredTaskTags } from "@/lib/catalog";
+import { filterRegisteredTaskTags, normalizeTaskTags } from "@/lib/catalog";
+import { redactTaskFields } from "@/lib/problem-report-view";
 import {
   createProblemReport,
+  createTaskTag,
   getActiveProblemCategory,
   getDeviceGroupCode,
   getDevices,
@@ -26,9 +28,11 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.json({
-    reports: await getProblemReports({
-      gardenCodes: getGardenScope(user, "problem_reports"),
-    }),
+    reports: (
+      await getProblemReports({
+        gardenCodes: getGardenScope(user, "problem_reports"),
+      })
+    ).map((report) => redactTaskFields(report, user)),
   });
 }
 
@@ -101,6 +105,11 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // A ready-made title (category) is also a tag on the report and its
+  // task, registered on first use, whatever the reporter may tag.
+  const categoryTag = category ? await createTaskTag(category.title) : null;
+  const reportTags = normalizeTaskTags([...tags, ...(categoryTag ? [categoryTag] : [])]);
+
   const report = await createProblemReport(
     {
       title,
@@ -110,7 +119,7 @@ export async function POST(request: NextRequest) {
       assigneeIds,
       status,
       priority,
-      tags,
+      tags: reportTags,
       dueDate,
       categoryId: category?.id,
       createdBy: user?.id,
@@ -131,5 +140,8 @@ export async function POST(request: NextRequest) {
     userAgent: request.headers.get("user-agent") ?? undefined,
   });
 
-  return NextResponse.json({ report }, { status: 201 });
+  return NextResponse.json(
+    { report: redactTaskFields(report, user) },
+    { status: 201 },
+  );
 }

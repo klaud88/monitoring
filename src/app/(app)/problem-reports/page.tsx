@@ -12,6 +12,7 @@ import {
   getUsers,
 } from "@/lib/repositories";
 import { canAccessGarden, getGardenScope } from "@/lib/garden-scope";
+import { redactTaskFields } from "@/lib/problem-report-view";
 import { canChooseDueDate } from "@/lib/working-days";
 
 export default async function ProblemReportsPage({
@@ -44,7 +45,7 @@ export default async function ProblemReportsPage({
 
   return (
     <ProblemReportsManager
-      initialReports={reports}
+      initialReports={reports.map((report) => redactTaskFields(report, user))}
       categories={categories.map(({ id, title, resolvedUserIds }) => ({
         id,
         title,

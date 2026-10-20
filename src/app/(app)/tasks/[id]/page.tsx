@@ -25,7 +25,8 @@ import {
   getTasks,
   getUsers,
 } from "@/lib/repositories";
-import { readTaskChanges, type TaskChange } from "@/lib/task-history";
+import { OriginHistoryRows } from "@/components/history/origin-history";
+import { buildHistoryRows } from "@/lib/history-view";
 import { resolveTaskVisibilityScope } from "@/lib/task-visibility";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
 
@@ -35,18 +36,7 @@ const editActions = new Set([
   "task.assign",
 ]);
 
-const editActionLabels: Record<string, string> = {
-  "task.update": "რედაქტირება",
-  "task.status_local_change": "სტატუსის შეცვლა",
-  "task.assign": "შემსრულებლის შეცვლა",
-};
 
-const changeFieldLabels: Record<TaskChange["field"], string> = {
-  status: "სტატუსი",
-  priority: "პრიორიტეტი",
-  assignees: "შემსრ.",
-  dueDate: "ვადა",
-};
 
 const statusLabels: Record<TaskStatus, string> = {
   planned: "დაგეგმილი",
@@ -89,11 +79,11 @@ export default async function TaskDetailsPage({
 
   const createdEntry = auditTrail.find((entry) => entry.action === "task.create");
   /* Every edit and status change is listed, newest first. */
-  const editEntries = auditTrail
-    .filter((entry) => editActions.has(entry.action))
-    .reverse()
-    .map((entry) => ({ ...entry, changes: readTaskChanges(entry.metadata) }));
   const userNames = new Map(users.map((item) => [item.id, item.name]));
+  const editEntries = buildHistoryRows(
+    auditTrail.filter((entry) => editActions.has(entry.action)).reverse(),
+    userNames,
+  );
 
   const device = devices.find((item) => item.id === task.deviceId);
   const assignees = users.filter((item) => task.assigneeIds.includes(item.id));
@@ -258,29 +248,7 @@ export default async function TaskDetailsPage({
                 </span>
               </div>
 
-              {editEntries.map((entry) => (
-                <div key={entry.id} className="origin-row">
-                  <span className="origin-kind edit">
-                    {getEditKindLabel(entry.action, entry.changes)}
-                  </span>
-                  <span className="origin-user">
-                    {entry.userName ?? "უცნობი"}
-                  </span>
-                  <span className="origin-change">
-                    {entry.changes.map((change) => (
-                      <span key={change.field} className="origin-change-line">
-                        <b>{changeFieldLabels[change.field]}:</b>{" "}
-                        {formatChangeSide(change, "from", userNames)}
-                        {" → "}
-                        {formatChangeSide(change, "to", userNames)}
-                      </span>
-                    ))}
-                  </span>
-                  <span className="origin-time">
-                    {formatDateTime(entry.createdAt)}
-                  </span>
-                </div>
-              ))}
+              <OriginHistoryRows rows={editEntries} />
 
               {editEntries.length === 0 ? (
                 <p className="muted">რედაქტირება არ ყოფილა.</p>
@@ -395,41 +363,7 @@ export default async function TaskDetailsPage({
   );
 }
 
-/** A save that only moved the status reads as a status change. */
-function getEditKindLabel(action: string, changes: TaskChange[]) {
-  if (
-    action === "task.update" &&
-    changes.length > 0 &&
-    changes.every((change) => change.field === "status")
-  ) {
-    return "სტატუსის შეცვლა";
-  }
 
-  return editActionLabels[action] ?? "რედაქტირება";
-}
-
-function formatChangeSide(
-  change: TaskChange,
-  side: "from" | "to",
-  userNames: Map<string, string>,
-): string {
-  if (change.field === "status") {
-    return statusLabels[change[side]];
-  }
-
-  if (change.field === "priority") {
-    return priorityLabels[change[side]];
-  }
-
-  if (change.field === "dueDate") {
-    return change[side] ? formatDate(change[side]) : "—";
-  }
-
-  const ids = change[side];
-  return ids.length
-    ? ids.map((id) => userNames.get(id) ?? "წაშლილი მომხმარებელი").join(", ")
-    : "—";
-}
 
 function formatDeviceStatus(status: "online" | "offline" | "error") {
   if (status === "online") {

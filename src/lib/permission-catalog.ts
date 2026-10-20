@@ -41,6 +41,9 @@ const allGardensAction: ActionDef = {
 const problemReportActions: ActionDef[] = [
   ...defaultActions,
   allGardensAction,
+  /* What the technician adds on the linked task, shown on the report. */
+  { key: "task_comment", label: "დავალების კომენტარის ნახვა", dependsOn: "view" },
+  { key: "task_tags", label: "დავალების ტეგების ნახვა", dependsOn: "view" },
   { key: "assign", label: "მომხმარებლები" },
   { key: "tag", label: "ტეგები" },
   { key: "status", label: "სტატუსები" },

@@ -8120,7 +8120,8 @@ a.task-card2:hover .task-card2-title {
   gap: 14px;
 }
 
-/* Same row anatomy as the task table, one column fewer (no comment). */
+/* Same row anatomy as the task table; the 5th column is the linked task's
+   comment instead of tags. */
 .report-grid {
   display: grid;
   grid-template-columns:
@@ -8138,7 +8139,7 @@ a.task-card2:hover .task-card2-title {
 
 .report-grid .task-row-device,
 .report-grid .task-row-summary,
-.report-grid .task-row-tags,
+.report-grid .task-row-comment,
 .report-grid.task-grid-head span:nth-child(2),
 .report-grid.task-grid-head span:nth-child(4),
 .report-grid.task-grid-head span:nth-child(5) {
@@ -9828,6 +9829,100 @@ html.wheel-locked body {
 .origin-change-line b {
   color: var(--ink-muted);
   font-weight: 600;
+}
+
+/* Comment / problem text lines stay one line; the full text is in the modal. */
+.origin-change-line.text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+.origin-kind-button {
+  border: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.origin-kind-button:hover {
+  filter: brightness(0.95);
+}
+
+/* "წარმოშობა" → earlier versions of a comment or problem text. */
+.history-modal {
+  width: min(560px, 100%);
+  max-height: min(80vh, 640px);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.history-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.history-modal-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.history-version {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  padding: 10px 12px;
+}
+
+.history-version-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.history-version-meta span {
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.history-version-text {
+  display: grid;
+  gap: 2px;
+}
+
+.history-version-text p {
+  margin: 0;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.history-version-text.old p {
+  color: var(--ink-muted);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+}
+
+.history-version-label {
+  color: var(--ink-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+@media (max-width: 760px) {
+  .history-modal {
+    max-height: 88vh;
+  }
 }
 
 @media (max-width: 760px) {

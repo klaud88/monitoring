@@ -132,8 +132,11 @@ export async function PATCH(
       deviceId,
       assigneeIds,
       tags,
-      /* Status, priority, assignee and deadline changes feed the task history. */
-      changes: diffTrackedTaskFields(existingTask, task),
+      /* Each changed field with its previous value feeds the task history. */
+      changes: diffTrackedTaskFields(
+        { ...existingTask, comment: existingTask.comment ?? "" },
+        { ...task, comment: task.comment ?? "" },
+      ),
     },
     ipAddress: request.headers.get("x-forwarded-for") ?? undefined,
     userAgent: request.headers.get("user-agent") ?? undefined
