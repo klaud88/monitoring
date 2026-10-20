@@ -92,13 +92,13 @@ export default async function ProblemReportDetailsPage({
   const userNames = new Map(users.map((item) => [item.id, item.name]));
   const editEntries = [
     ...buildHistoryRows(
-      auditTrail.filter((entry) => entry.action === "problem_report.update"),
+      auditTrail.filter((entry) => entry.action === "problem_report.update").reverse(),
       userNames,
     ),
-    ...buildHistoryRows(taskTrail, userNames, (field) =>
+    ...buildHistoryRows([...taskTrail].reverse(), userNames, (field) =>
       field === "comment" ? showTaskComment : field === "tags" ? showTaskTags : false,
-    ).filter((row) => row.lines.length > 0),
-  ].sort((a, b) => b.at.localeCompare(a.at));
+    ).filter((row) => row.field !== undefined),
+  ].sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
 
   const device = devices.find((item) => item.id === report.deviceId);
   const assignees = users.filter((item) => report.assigneeIds.includes(item.id));
@@ -222,7 +222,7 @@ export default async function ProblemReportDetailsPage({
                 <MessageSquare size={16} />
               </div>
               {report.taskComment ? (
-                <p className="detail-body-text">{report.taskComment}</p>
+                <p className="detail-body-text comment">{report.taskComment}</p>
               ) : (
                 <p className="muted">კომენტარი ჯერ არ არის.</p>
               )}
@@ -249,7 +249,7 @@ export default async function ProblemReportDetailsPage({
 
           <article className="detail-card">
             <div className="detail-card-head">
-              <h2>წარმოშობა</h2>
+              <h2>ცვლილების ისტორია</h2>
               <History size={16} />
             </div>
 

@@ -13,14 +13,15 @@ export type TaskChange =
   | { field: "title"; from: string; to: string }
   | { field: "issue"; from: string; to: string }
   | { field: "comment"; from: string; to: string }
+  | { field: "phone"; from: string; to: string }
   | { field: "tags"; from: string[]; to: string[] };
 
 export type TaskChangeField = TaskChange["field"];
 
 type TrackedTask = Pick<Task, "status" | "priority" | "assigneeIds" | "dueDate"> &
-  Partial<Pick<Task, "title" | "issue" | "comment" | "tags">>;
+  Partial<Pick<Task, "title" | "issue" | "comment" | "phone" | "tags">>;
 
-const textFields = ["title", "issue", "comment"] as const;
+const textFields = ["title", "issue", "comment", "phone"] as const;
 
 const statuses: TaskStatus[] = ["planned", "in_progress", "blocked", "done"];
 const priorities: TaskPriority[] = ["low", "normal", "high", "urgent"];
@@ -51,10 +52,10 @@ export function diffTrackedTaskFields(
     changes.push({ field: "dueDate", from: before.dueDate, to: after.dueDate });
   }
 
-  // Compared only when both sides carry the field (a problem report has no
-  // comment of its own).
+  // Skipped only when neither side carries the field (a problem report has
+  // no comment of its own); an empty one counts as "".
   for (const field of textFields) {
-    if (before[field] === undefined || after[field] === undefined) {
+    if (before[field] === undefined && after[field] === undefined) {
       continue;
     }
     const from = (before[field] ?? "").trim();
@@ -109,6 +110,7 @@ function isTaskChange(value: unknown): value is TaskChange {
     case "title":
     case "issue":
     case "comment":
+    case "phone":
       return typeof change.from === "string" && typeof change.to === "string";
     default:
       return false;

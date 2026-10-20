@@ -232,7 +232,7 @@ export default async function TaskDetailsPage({
 
           <article className="detail-card">
             <div className="detail-card-head">
-              <h2>წარმოშობა</h2>
+              <h2>ცვლილების ისტორია</h2>
               <History size={16} />
             </div>
 

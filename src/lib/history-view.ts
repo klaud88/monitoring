@@ -4,47 +4,37 @@ import { readTaskChanges } from "./task-history";
 import type { TaskPriority, TaskStatus } from "./types";
 
 /*
- * Audit rows of a task or problem report, shaped for the "წარმოშობა" list
- * (src/components/history/origin-history.tsx). Formatted here on the server
- * so the browser renders exactly what the server did.
+ * Audit rows of a task or problem report, shaped for the "ცვლილების
+ * ისტორია" list (src/components/history/origin-history.tsx): one row per
+ * changed field. Formatted here on the server so the browser renders exactly
+ * what the server did.
  */
-
-export type HistoryTextField = "comment" | "issue";
-
-export type HistoryLine = {
-  field: TaskChangeField;
-  label: string;
-  from: string;
-  to: string;
-};
 
 export type HistoryRow = {
   id: string;
+  /** The changed field; absent on rows logged before fields were recorded. */
+  field?: TaskChangeField;
   kindLabel: string;
-  /** Set when the row changed a long text: its label opens that text's history. */
-  textField?: HistoryTextField;
+  /** One line for the list: the new text, "+tag −tag" or "old → new". */
+  summary: string;
+  /** Full values for the field's history modal. */
+  from: string;
+  to: string;
   user: string;
   time: string;
   at: string;
-  lines: HistoryLine[];
 };
 
-const fieldLabels: Record<TaskChangeField, string> = {
+export const fieldLabels: Record<TaskChangeField, string> = {
   status: "სტატუსი",
   priority: "პრიორიტეტი",
-  assignees: "შემსრ.",
+  assignees: "შემსრულებელი",
   dueDate: "ვადა",
   title: "სათაური",
   issue: "პრობლემა",
   comment: "კომენტარი",
+  phone: "ტელეფონი",
   tags: "ტეგები",
-};
-
-const actionLabels: Record<string, string> = {
-  "task.update": "რედაქტირება",
-  "task.status_local_change": "სტატუსის შეცვლა",
-  "task.assign": "შემსრულებლის შეცვლა",
-  "problem_report.update": "რედაქტირება",
 };
 
 const statusLabels: Record<TaskStatus, string> = {
@@ -68,31 +58,27 @@ export function buildHistoryRows(
   keep: (field: TaskChangeField) => boolean = () => true,
 ): HistoryRow[] {
   return entries.flatMap((entry) => {
-    const all = readTaskChanges(entry.metadata);
-    const changes = all.filter((change) => keep(change.field));
-    if (all.length && !changes.length) {
-      // Every change in it is hidden from this viewer.
-      return [];
-    }
-    const textField: HistoryTextField | undefined = changes.some(
-      (change) => change.field === "comment",
-    )
-      ? "comment"
-      : changes.some((change) => change.field === "issue")
-        ? "issue"
-        : undefined;
+    const base = {
+      user: entry.userName ?? "უცნობი",
+      time: formatDateTime(entry.createdAt),
+      at: entry.createdAt,
+    };
 
-    return [
-      {
-        id: entry.id,
-        kindLabel: getKindLabel(entry.action, changes, textField),
-        textField,
-        user: entry.userName ?? "უცნობი",
-        time: formatDateTime(entry.createdAt),
-        at: entry.createdAt,
-        lines: changes.map((change) => toLine(change, userNames)),
-      },
-    ];
+    // Logged before changes were recorded: one plain row, nothing to open.
+    if (!hasChangeList(entry.metadata)) {
+      return [{ ...base, id: entry.id, kindLabel: "რედაქტირება", summary: "", from: "", to: "" }];
+    }
+
+    // A save that changed nothing (or nothing this viewer may see) is left out.
+    return readTaskChanges(entry.metadata)
+      .filter((change) => keep(change.field))
+      .map((change) => ({
+        ...base,
+        ...describe(change, userNames),
+        id: `${entry.id}:${change.field}`,
+        field: change.field,
+        kindLabel: fieldLabels[change.field],
+      }));
   });
 }
 
@@ -108,58 +94,44 @@ export function formatDateTime(value: string) {
   }).format(date);
 }
 
-function getKindLabel(
-  action: string,
-  changes: TaskChange[],
-  textField: HistoryTextField | undefined,
-) {
-  if (textField === "comment") {
-    return "კომენტარის ცვლილება";
-  }
-  if (textField === "issue") {
-    return "პრობლემის ცვლილება";
-  }
-  if (changes.length && changes.every((change) => change.field === "tags")) {
-    return "ტეგების ცვლილება";
-  }
-  if (changes.length && changes.every((change) => change.field === "status")) {
-    return "სტატუსის შეცვლა";
-  }
-  return actionLabels[action] ?? "რედაქტირება";
+function hasChangeList(metadata: unknown) {
+  return Boolean(
+    metadata &&
+      typeof metadata === "object" &&
+      Array.isArray((metadata as { changes?: unknown }).changes),
+  );
 }
 
-function toLine(change: TaskChange, userNames: Map<string, string>): HistoryLine {
-  const label = fieldLabels[change.field];
+function describe(
+  change: TaskChange,
+  userNames: Map<string, string>,
+): Pick<HistoryRow, "summary" | "from" | "to"> {
   switch (change.field) {
     case "status":
-      return { field: change.field, label, from: statusLabels[change.from], to: statusLabels[change.to] };
+      return arrow(statusLabels[change.from], statusLabels[change.to]);
     case "priority":
-      return { field: change.field, label, from: priorityLabels[change.from], to: priorityLabels[change.to] };
+      return arrow(priorityLabels[change.from], priorityLabels[change.to]);
     case "dueDate":
-      return { field: change.field, label, from: formatDate(change.from), to: formatDate(change.to) };
+      return arrow(formatDate(change.from), formatDate(change.to));
     case "assignees":
-      return {
-        field: change.field,
-        label,
-        from: names(change.from, userNames),
-        to: names(change.to, userNames),
-      };
+      return arrow(names(change.from, userNames), names(change.to, userNames));
     case "tags": {
       const added = change.to.filter((tag) => !change.from.includes(tag));
       const removed = change.from.filter((tag) => !change.to.includes(tag));
       return {
-        field: change.field,
-        label,
+        summary: [...added.map((tag) => `+${tag}`), ...removed.map((tag) => `−${tag}`)].join(" "),
         from: change.from.join(", ") || "—",
-        to: [
-          ...added.map((tag) => `+${tag}`),
-          ...removed.map((tag) => `−${tag}`),
-        ].join(" "),
+        to: change.to.join(", ") || "—",
       };
     }
     default:
-      return { field: change.field, label, from: change.from || "—", to: change.to || "—" };
+      // Long texts: the list shows what it became; the modal has the old one.
+      return { summary: change.to || "—", from: change.from || "—", to: change.to || "—" };
   }
+}
+
+function arrow(from: string, to: string) {
+  return { summary: `${from} → ${to}`, from, to };
 }
 
 function names(ids: string[], userNames: Map<string, string>) {

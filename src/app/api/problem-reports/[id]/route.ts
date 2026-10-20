@@ -76,9 +76,11 @@ export async function PATCH(
           await getUsers(),
         )
       : existing.assigneeIds;
-  const tags = canTag
-    ? filterRegisteredTaskTags(body?.tags, await getTaskTagNames())
-    : existing.tags;
+  // Tags not sent = left as they are, not cleared.
+  const tags =
+    canTag && body?.tags !== undefined
+      ? filterRegisteredTaskTags(body.tags, await getTaskTagNames())
+      : existing.tags;
 
   if (!title || !issue || !deviceId || !dueDate) {
     return NextResponse.json(

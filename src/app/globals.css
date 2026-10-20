@@ -9822,21 +9822,13 @@ html.wheel-locked body {
   font-size: 12.5px;
 }
 
-.origin-change-line {
-  overflow-wrap: anywhere;
-}
-
-.origin-change-line b {
-  color: var(--ink-muted);
-  font-weight: 600;
-}
-
-/* Comment / problem text lines stay one line; the full text is in the modal. */
-.origin-change-line.text {
+/* What changed, on one line; the full values are in the field's modal. */
+.origin-summary {
+  min-width: 0;
+  font-size: 12.5px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  overflow-wrap: normal;
 }
 
 .origin-kind-button {
@@ -9935,8 +9927,13 @@ html.wheel-locked body {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .origin-change:empty {
+  .origin-change:empty,
+  .origin-summary:empty {
     display: none;
+  }
+
+  .origin-kind {
+    justify-self: start;
   }
 }
 

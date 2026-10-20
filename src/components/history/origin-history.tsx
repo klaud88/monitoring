@@ -2,31 +2,27 @@
 
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
-import type { HistoryRow, HistoryTextField } from "@/lib/history-view";
-
-const modalTitles: Record<HistoryTextField, string> = {
-  comment: "კომენტარის ისტორია",
-  issue: "პრობლემის ტექსტის ისტორია",
-};
+import type { HistoryRow } from "@/lib/history-view";
+import type { TaskChangeField } from "@/lib/task-history";
 
 /**
- * The edit rows of a "წარმოშობა" list. A row that changed the comment or the
- * problem text has a clickable label: it opens every earlier version of that
- * text, with who changed it and when.
+ * The edit rows of a "ცვლილების ისტორია" list, one per changed field. A
+ * row's label is the field; clicking it opens every change of that field,
+ * with what it was before, who changed it and when.
  */
 export function OriginHistoryRows({ rows }: { rows: HistoryRow[] }) {
-  const [openField, setOpenField] = useState<HistoryTextField | null>(null);
+  const [openField, setOpenField] = useState<TaskChangeField | null>(null);
 
   return (
     <>
       {rows.map((row) => (
         <div key={row.id} className="origin-row">
-          {row.textField ? (
+          {row.field ? (
             <button
               type="button"
               className="origin-kind edit origin-kind-button"
-              onClick={() => setOpenField(row.textField ?? null)}
-              title="ძველი ვერსიების ნახვა"
+              onClick={() => setOpenField(row.field ?? null)}
+              title="წინა ცვლილებების ნახვა"
             >
               {row.kindLabel}
             </button>
@@ -34,25 +30,16 @@ export function OriginHistoryRows({ rows }: { rows: HistoryRow[] }) {
             <span className="origin-kind edit">{row.kindLabel}</span>
           )}
           <span className="origin-user">{row.user}</span>
-          <span className="origin-change">
-            {row.lines.map((line) => (
-              <span
-                key={line.field}
-                className={`origin-change-line${line.field === "comment" || line.field === "issue" ? " text" : ""}`}
-              >
-                <b>{line.label}:</b>{" "}
-                {line.field === "tags" ? line.to : `${line.from} → ${line.to}`}
-              </span>
-            ))}
+          <span className="origin-summary" title={row.summary || undefined}>
+            {row.summary}
           </span>
           <span className="origin-time">{row.time}</span>
         </div>
       ))}
 
       {openField ? (
-        <TextHistoryModal
-          field={openField}
-          rows={rows}
+        <FieldHistoryModal
+          rows={rows.filter((row) => row.field === openField)}
           onClose={() => setOpenField(null)}
         />
       ) : null}
@@ -60,12 +47,11 @@ export function OriginHistoryRows({ rows }: { rows: HistoryRow[] }) {
   );
 }
 
-function TextHistoryModal({
-  field,
+function FieldHistoryModal({
   rows,
   onClose,
 }: {
-  field: HistoryTextField;
+  /** Changes of one field, newest first. */
   rows: HistoryRow[];
   onClose: () => void;
 }) {
@@ -79,13 +65,6 @@ function TextHistoryModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // Rows come newest first; each holds the text before and after that edit.
-  const versions = rows.flatMap((row) =>
-    row.lines
-      .filter((line) => line.field === field)
-      .map((line) => ({ id: row.id, user: row.user, time: row.time, from: line.from, to: line.to })),
-  );
-
   return (
     <div className="confirm-dialog-backdrop" role="presentation" onClick={onClose}>
       <section
@@ -96,29 +75,31 @@ function TextHistoryModal({
         onClick={(event) => event.stopPropagation()}
       >
         <header className="history-modal-head">
-          <h2 id="history-modal-title">{modalTitles[field]}</h2>
+          <h2 id="history-modal-title">
+            {rows[0]?.kindLabel} — ცვლილების ისტორია
+          </h2>
           <button className="icon-button" type="button" aria-label="დახურვა" onClick={onClose}>
             <X size={18} />
           </button>
         </header>
         <ol className="history-modal-list">
-          {versions.map((version, index) => (
-            <li key={version.id} className="history-version">
+          {rows.map((row, index) => (
+            <li key={row.id} className="history-version">
               <div className="history-version-meta">
-                <strong>{version.user}</strong>
-                <span>{version.time}</span>
+                <strong>{row.user}</strong>
+                <span>{row.time}</span>
               </div>
               <div className="history-version-text">
                 <span className="history-version-label">
                   {index === 0 ? "მიმდინარე" : "გახდა"}
                 </span>
-                <p>{version.to}</p>
+                <p>{row.to}</p>
               </div>
               <div className="history-version-text old">
                 <span className="history-version-label">
-                  {index === versions.length - 1 ? "თავდაპირველი" : "იყო"}
+                  {index === rows.length - 1 ? "თავდაპირველი" : "იყო"}
                 </span>
-                <p>{version.from}</p>
+                <p>{row.from}</p>
               </div>
             </li>
           ))}
