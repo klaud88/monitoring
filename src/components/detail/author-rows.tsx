@@ -15,7 +15,20 @@ export function AuthorRows({ author }: { author?: SessionUser }) {
     <dl className="detail-list author-list">
       <div>
         <dt>ავტორი</dt>
-        <dd>{author?.name ?? "უცნობი"}</dd>
+        <dd>
+          {author ? (
+            <span
+              className="author-chip"
+              style={{ backgroundColor: author.color, color: readableOn(author.color) }}
+              title={author.name}
+            >
+              <i>{author.initials}</i>
+              <span>{author.name}</span>
+            </span>
+          ) : (
+            "უცნობი"
+          )}
+        </dd>
       </div>
       <div>
         <dt>ტელეფონი</dt>
@@ -43,4 +56,15 @@ export function AuthorRows({ author }: { author?: SessionUser }) {
       </div>
     </dl>
   );
+}
+
+/** White on dark colours, dark on light ones, so any user colour reads. */
+function readableOn(color: string) {
+  const hex = color.replace("#", "");
+  const full = hex.length === 3 ? [...hex].map((c) => c + c).join("") : hex;
+  if (!/^[0-9a-f]{6}$/i.test(full)) {
+    return "#fff";
+  }
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16));
+  return (r * 299 + g * 587 + b * 114) / 1000 > 160 ? "#1f2937" : "#fff";
 }
