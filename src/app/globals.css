@@ -7872,50 +7872,11 @@ a.task-card2:hover .task-card2-title {
   margin: 0;
 }
 
-/* "მომხმარებლის მონაცემები": reporter and garden contacts above the garden. */
-.people-section {
-  display: grid;
-  gap: 8px;
+/* "მომხმარებლის მონაცემები": the form's author, then the garden below. */
+.author-list {
   margin-bottom: 10px;
-}
-
-.detail-subhead {
-  margin: 6px 0 0;
-  color: var(--ink-muted);
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-
-.people-section .detail-subhead:first-child {
-  margin-top: 0;
-}
-
-.person-contact {
-  display: grid;
-  gap: 4px;
-}
-
-.person-contact-lines {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-  padding-left: 42px;
-  font-size: 12.5px;
-}
-
-.person-contact-lines a {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  color: var(--brand-dark);
-  overflow-wrap: anywhere;
-  text-decoration: none;
-}
-
-.person-contact-lines a:hover {
-  text-decoration: underline;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--panel-line);
 }
 
 .detail-list > div {
@@ -8664,14 +8625,12 @@ button.matrix-cell:hover {
 
 /* Offline calendar colours (rules: deploy/logic.md). */
 .matrix-cell.missed,
-.matrix-cell.evening,
 .matrix-cell.unstable {
   color: #fff;
 }
 
 .matrix-cell.ok,
-.matrix-cell.late,
-.matrix-cell.snapshot {
+.matrix-cell.late {
   color: var(--ink-muted);
 }
 
@@ -8685,10 +8644,6 @@ button.matrix-cell:hover {
 
 .matrix-cell.late {
   background: #f9a8d4;
-}
-
-.matrix-cell.evening {
-  background: #ea580c;
 }
 
 .matrix-cell.missed {
@@ -8706,20 +8661,17 @@ button.matrix-cell:hover {
   color: var(--ink-muted);
 }
 
+/* Weekend: striped, not graded. */
 .matrix-cell.weekend {
-  background: transparent;
-  box-shadow: inset 0 0 0 1px var(--panel-row-line);
-  opacity: 0.55;
-  color: var(--ink-subtle);
-}
-
-.matrix-cell.snapshot {
   background: repeating-linear-gradient(
     135deg,
     var(--line-strong) 0 2px,
-    transparent 2px 4px
+    transparent 2px 5px
   );
+  box-shadow: inset 0 0 0 1px var(--panel-row-line);
+  color: var(--ink-subtle);
 }
+
 
 :root[data-theme="dark"] .matrix-cell.unstable {
   background: #a78bfa;
@@ -11016,5 +10968,235 @@ html.wheel-locked body {
     grid-column: 2 / -1;
     grid-row: 2;
     justify-self: start;
+  }
+}
+
+/* Calendar day detail (click on a cell): top-centre modal. */
+.day-detail-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  background: rgba(8, 16, 28, 0.42);
+  padding: 72px 16px 16px;
+}
+
+.day-detail-modal {
+  display: grid;
+  gap: 14px;
+  width: min(520px, 100%);
+  max-height: calc(100vh - 96px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 16px;
+  animation: day-detail-in 0.16s ease-out;
+}
+
+@keyframes day-detail-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: none; }
+}
+
+.day-detail-modal header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.day-detail-modal h2 {
+  margin: 2px 0 6px;
+  font-size: 19px;
+  line-height: 1.22;
+}
+
+.day-detail-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink-muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.day-detail-state .matrix-cell {
+  width: 14px;
+  height: 14px;
+  font-size: 0;
+  cursor: default;
+}
+
+.day-detail-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.day-detail-summary div {
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  padding: 8px 10px;
+}
+
+.day-detail-summary span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.day-detail-summary strong {
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.day-detail-summary strong.off {
+  color: var(--red);
+}
+
+.day-detail-summary strong.on {
+  color: var(--green);
+}
+
+.day-detail-strip {
+  display: grid;
+  gap: 4px;
+}
+
+.day-detail-bar {
+  position: relative;
+  height: 14px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: rgba(22, 163, 74, 0.32);
+}
+
+.day-detail-drop {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--red);
+}
+
+.day-detail-future {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--surface-muted);
+}
+
+.day-detail-hours {
+  position: relative;
+  height: 14px;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.day-detail-hours span {
+  position: absolute;
+  transform: translateX(-50%);
+}
+
+.day-detail-hours span:first-child {
+  transform: none;
+}
+
+.day-detail-hours span:last-child {
+  transform: translateX(-100%);
+}
+
+.day-detail-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.day-detail-list li {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  padding: 8px 10px;
+}
+
+.day-detail-index {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: var(--danger-soft);
+  color: var(--red);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.day-detail-time {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.day-detail-time svg {
+  color: var(--red);
+}
+
+.day-detail-time strong {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.day-detail-time em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.day-detail-length {
+  color: var(--red);
+  font-size: 14px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.day-detail-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.day-detail-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+@media (max-width: 760px) {
+  .day-detail-backdrop {
+    padding-top: 16px;
+  }
+
+  .day-detail-summary strong {
+    font-size: 14px;
   }
 }

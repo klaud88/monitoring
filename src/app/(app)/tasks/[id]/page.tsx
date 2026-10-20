@@ -20,13 +20,11 @@ import { getGardenDisplayName } from "@/lib/device-options";
 import { withoutDeviceCodes } from "@/lib/display";
 import { getFirstAllowedPath } from "@/lib/navigation";
 import {
-  getDeviceGroupCode,
   getDevices,
-  getRoleLabel,
   getTasks,
   getUsers,
 } from "@/lib/repositories";
-import { PeopleSection } from "@/components/detail/people-section";
+import { AuthorRows } from "@/components/detail/author-rows";
 import { OriginHistoryRows } from "@/components/history/origin-history";
 import { buildHistoryRows } from "@/lib/history-view";
 import { getLinkedHistory } from "@/lib/linked-history";
@@ -85,17 +83,9 @@ export default async function TaskDetailsPage({
   const editEntries = buildHistoryRows(history.edits, userNames);
 
   const device = devices.find((item) => item.id === task.deviceId);
-  /* Who reported it (the problem report's author when there is one), and
-     the garden's own accounts to call. */
+  /* Who filled the form in: the problem report's author when the task came
+     from one (the card's "ავტორი"). */
   const reporter = users.find((item) => item.id === history.created?.userId);
-  const reporterRole = reporter ? await getRoleLabel(reporter.role) : undefined;
-  const gardenCode = device ? getDeviceGroupCode(device) : "";
-  const gardenContacts = users.filter(
-    (item) =>
-      item.role === "garden" &&
-      Boolean(gardenCode) &&
-      (item.gardenCodes ?? []).includes(gardenCode),
-  );
   const assignees = users.filter((item) => task.assigneeIds.includes(item.id));
   const displayTitle = withoutDeviceCodes(task.title, [device?.code]);
   const displayIssue = withoutDeviceCodes(task.issue, [device?.code]);
@@ -319,11 +309,7 @@ export default async function TaskDetailsPage({
               <h2>მომხმარებლის მონაცემები</h2>
               <Cpu size={16} />
             </div>
-            <PeopleSection
-              reporter={reporter}
-              reporterRole={reporterRole}
-              gardenContacts={gardenContacts}
-            />
+            <AuthorRows author={reporter} />
             {device ? (
               <dl className="detail-list">
                 <div>

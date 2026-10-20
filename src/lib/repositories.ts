@@ -3645,12 +3645,10 @@ export async function ensureTodayOfflineSnapshot() {
    inside the hours the garden works. Rules and colours: deploy/logic.md.   */
 export const OFFLINE_WINDOW_START_HOUR = 9;
 export const OFFLINE_WINDOW_END_HOUR = 17;
-/** The morning rush (09:00–11:00), when most cards are swiped. */
-export const OFFLINE_MORNING_END_HOUR = 11;
 /** Online this long without a break = the stored swipes went through. */
 export const DELIVERY_ONLINE_MINUTES = 20;
-/** Offline this long in the morning rush = the morning swipes came late. */
-export const MORNING_OUTAGE_MINUTES = 30;
+/** One drop this long = the swipes came late, once it was back (renewed). */
+export const LONG_OUTAGE_MINUTES = 30;
 /** This many separate drops in the window = unstable link. */
 export const UNSTABLE_MIN_EVENTS = 3;
 /** Drops split by less than this much uptime are one drop, not two. */
@@ -3660,11 +3658,22 @@ const DEFAULT_OFFLINE_LEVEL_WINDOW_DAYS = 90;
 const SYNC_RUN_RETENTION_DAYS = 120;
 
 /**
- * missed: never online long enough in the window; evening: dropped in the
- * afternoon and still down at the end; late: morning swipes arrived late;
- * unstable: kept dropping; ok: only short drops.
+ * missed: never online long enough in the window; late (renewed): one long
+ * drop, the rest of the window online; unstable: kept dropping; ok: only
+ * short drops.
  */
-export type DailyOfflineLevel = "missed" | "evening" | "late" | "unstable" | "ok";
+export type DailyOfflineLevel = "missed" | "late" | "unstable" | "ok";
+
+/** One drop inside the working window, as Tbilisi "HH:MM". */
+export type DailyOfflineDrop = {
+  start: string;
+  end: string;
+  minutes: number;
+  /** Already offline when the window opened (09:00). */
+  fromBefore?: boolean;
+  /** Still offline when the window closed, or (today) still offline now. */
+  ongoing?: boolean;
+};
 
 export type DailyOfflineEntry = {
   deviceId: string;
@@ -3674,11 +3683,13 @@ export type DailyOfflineEntry = {
   minutes: number;
   /** Separate drops inside the window. */
   events: number;
-  /** Offline minutes in the morning rush. */
-  morningMinutes: number;
+  /** The drops themselves, in time order. */
+  drops: DailyOfflineDrop[];
+  /** Minutes of the window judged so far (480, or less today). */
+  windowMinutes: number;
   /** Longest unbroken online stretch inside the window, in minutes. */
   longestOnline: number;
-  /** Today before the window closes: missed/evening are not final yet. */
+  /** Today before the window closes: missed is not final yet. */
   pending?: boolean;
 };
 
@@ -3741,7 +3752,6 @@ function gradeDay(
 ): Omit<DailyOfflineEntry, "deviceId" | "date"> {
   const windowStart = dayMs + OFFLINE_WINDOW_START_HOUR * 3600_000;
   const windowEnd = dayMs + OFFLINE_WINDOW_END_HOUR * 3600_000;
-  const morningEnd = dayMs + OFFLINE_MORNING_END_HOUR * 3600_000;
   // Today is judged on what has happened so far.
   const evalEnd = Math.min(windowEnd, nowMs);
   const open = nowMs < windowEnd;
@@ -3750,6 +3760,8 @@ function gradeDay(
     .map((span) => ({
       start: Math.max(span.start, windowStart),
       end: Math.min(span.end, evalEnd),
+      fromBefore: span.start < windowStart,
+      ongoing: span.end >= evalEnd,
     }))
     .filter((span) => span.end > span.start)
     .sort((a, b) => a.start - b.start);
@@ -3770,31 +3782,12 @@ function gradeDay(
   const delivery = DELIVERY_ONLINE_MINUTES;
   const longestOnline = Math.max(0, ...online.map(minutesOf));
   const minutes = drops.reduce((sum, drop) => sum + minutesOf(drop), 0);
-  const morningMinutes = drops.reduce(
-    (sum, drop) =>
-      sum + Math.max(0, Math.min(drop.end, morningEnd) - drop.start) / 60_000,
-    0,
-  );
-  const last = drops[drops.length - 1];
-  const stillDown = Boolean(last && last.end >= evalEnd);
+  const clock = (ms: number) => new Date(ms).toISOString().slice(11, 16);
 
   let level: DailyOfflineLevel;
   if (longestOnline < delivery) {
     level = "missed";
-  } else if (
-    stillDown &&
-    last.start >= morningEnd &&
-    online.some((span) => span.end <= last.start && minutesOf(span) >= delivery)
-  ) {
-    level = "evening";
-  } else if (
-    morningMinutes >= MORNING_OUTAGE_MINUTES &&
-    online.some(
-      (span) =>
-        span.start >= Math.max(...drops.filter((d) => d.start < morningEnd).map((d) => d.end)) &&
-        minutesOf(span) >= delivery,
-    )
-  ) {
+  } else if (drops.some((drop) => minutesOf(drop) >= LONG_OUTAGE_MINUTES)) {
     level = "late";
   } else if (drops.length >= UNSTABLE_MIN_EVENTS) {
     level = "unstable";
@@ -3806,9 +3799,16 @@ function gradeDay(
     level,
     minutes: Math.round(minutes),
     events: drops.length,
-    morningMinutes: Math.round(morningMinutes),
+    drops: drops.map((drop) => ({
+      start: clock(drop.start),
+      end: clock(drop.end),
+      minutes: Math.round(minutesOf(drop)),
+      ...(drop.fromBefore ? { fromBefore: true } : {}),
+      ...(drop.ongoing ? { ongoing: true } : {}),
+    })),
+    windowMinutes: Math.round(Math.max(0, evalEnd - windowStart) / 60_000),
     longestOnline: Math.round(longestOnline),
-    ...(open && (level === "missed" || level === "evening") ? { pending: true } : {}),
+    ...(open && level === "missed" ? { pending: true } : {}),
   };
 }
 
