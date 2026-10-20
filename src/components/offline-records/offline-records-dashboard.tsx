@@ -88,7 +88,7 @@ const legendItems: { state: CellState; hint: string }[] = [
   { state: "weekend", hint: "არ ფასდება" },
   {
     state: "no-data",
-    hint: "კავშირი ვერ დამყარდა: მოწყობილობების 20%-ზე ნაკლები იყო ონლაინ, ან შემოწმება არ მუშაობდა",
+    hint: "კავშირი ვერ დამყარდა: ყველა დამატებული მოწყობილობის (არა ერთი ბაღის) 20%-ზე ნაკლები იყო ონლაინ, ან შემოწმება არ მუშაობდა",
   },
 ];
 
@@ -295,9 +295,10 @@ export function OfflineRecordsDashboard({
     [dailyLevels],
   );
 
-  /** Covered weekdays on which under 20% of the devices got online: the
-   *  check could not reach them, so nobody is graded that day. */
-  const blackoutDays = useMemo(() => {
+  /** Per day: how many of ALL added devices (every garden, excluded ones
+   *  aside) got online. Under 20% means the check could not reach them, so
+   *  nobody is graded that day. */
+  const blackoutStats = useMemo(() => {
     const missedByDay = new Map<string, number>();
     dailyLevels.levels.forEach((entry) => {
       if (
@@ -308,15 +309,32 @@ export function OfflineRecordsDashboard({
         missedByDay.set(entry.date, (missedByDay.get(entry.date) ?? 0) + 1);
       }
     });
-    const days = new Set<string>();
+    const stats = new Map<string, { online: number; total: number }>();
     const total = activeDeviceIds.size;
     missedByDay.forEach((missed, date) => {
       if (total && (total - missed) / total < BLACKOUT_ONLINE_SHARE) {
-        days.add(date);
+        stats.set(date, { online: total - missed, total });
       }
     });
-    return days;
+    return stats;
   }, [activeDeviceIds, dailyLevels]);
+  const blackoutDays = useMemo(
+    () => new Set(blackoutStats.keys()),
+    [blackoutStats],
+  );
+
+  /** Why a day has no data, with the numbers behind the 20% rule. */
+  const noDataNote = useCallback(
+    (date: string) => {
+      const stats = blackoutStats.get(date);
+      if (!stats) {
+        return "ამ დღეს შემოწმება არ მუშაობდა";
+      }
+      const share = Math.round((stats.online / stats.total) * 100);
+      return `კავშირი ვერ დამყარდა — ყველა მოწყობილობიდან (${stats.total}) ონლაინ იყო მხოლოდ ${stats.online} (${share}%)`;
+    },
+    [blackoutStats],
+  );
 
   const offlineByDay = useMemo(() => {
     const map = new Map<string, Set<string>>();
@@ -928,7 +946,12 @@ export function OfflineRecordsDashboard({
                               key={column.date}
                               type="button"
                               className={`matrix-cell ${state}${column.isMonthStart ? " month-start" : ""}${picked ? " picked" : ""}`}
-                              title={describeDay(column.date, state, graded)}
+                              title={describeDay(
+                                column.date,
+                                state,
+                                graded,
+                                noDataNote(column.date),
+                              )}
                               onClick={() =>
                                 setSelectedCell(
                                   picked
@@ -1226,6 +1249,7 @@ export function OfflineRecordsDashboard({
           graded={levelByDeviceDay.get(
             `${selectedCell.deviceId}|${selectedCell.date}`,
           )}
+          noDataNote={noDataNote(selectedCell.date)}
           onClose={() => setSelectedCell(null)}
         />
       ) : null}
@@ -1249,12 +1273,15 @@ function DayDetailModal({
   date,
   state,
   graded,
+  noDataNote,
   onClose,
 }: {
   deviceName: string;
   date: string;
   state: CellState;
   graded: DailyOfflineEntry | undefined;
+  /** Why the day has no data (check down, or under 20% of all devices online). */
+  noDataNote: string;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -1404,7 +1431,7 @@ function DayDetailModal({
         ) : (
           <p className="day-detail-empty">
             <XCircle size={18} />
-            მონაცემი არ არის: ამ დღეს კავშირი ვერ დამყარდა (შემოწმება არ მუშაობდა ან მოწყობილობების 20%-ზე ნაკლები იყო ონლაინ).
+            მონაცემი არ არის: {noDataNote}.
           </p>
         )}
       </section>
@@ -1560,6 +1587,7 @@ function describeDay(
   date: string,
   state: CellState,
   graded: DailyOfflineEntry | undefined,
+  noDataNote = "კავშირი ვერ დამყარდა",
 ) {
   const day = formatDate(date);
   // One line per drop: "10:16–17:00 (6სთ 44წთ)".
@@ -1582,7 +1610,7 @@ function describeDay(
     case "unstable":
       return `${day} — არასტაბილური: ${graded?.events ?? 0} გათიშვა${drops}`;
     case "no-data":
-      return `${day} — მონაცემი არ არის: კავშირი ვერ დამყარდა`;
+      return `${day} — მონაცემი არ არის: ${noDataNote}`;
     default:
       return `${day} — ${levelLabels.ok}${drops}`;
   }

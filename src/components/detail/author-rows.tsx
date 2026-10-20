@@ -22,8 +22,7 @@ export function AuthorRows({ author }: { author?: SessionUser }) {
               style={{ backgroundColor: author.color, color: readableOn(author.color) }}
               title={author.name}
             >
-              <i>{author.initials}</i>
-              <span>{author.name}</span>
+              {author.name}
             </span>
           ) : (
             "უცნობი"
