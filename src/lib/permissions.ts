@@ -1,3 +1,4 @@
+import { isFeatureDisabled } from "./feature-flags";
 import type { PermissionKey, SessionUser } from "./types";
 
 /* Kept free of server-only imports: client components reach this through
@@ -8,10 +9,15 @@ import type { PermissionKey, SessionUser } from "./types";
 // full SessionUser) so callers like isAssignableTaskUser can check an
 // arbitrary candidate user's permissions, not only the viewer's own.
 export function hasPermission(
-  user: Pick<SessionUser, "role" | "permissions"> | null,
+  user: Pick<SessionUser, "role" | "permissions" | "disabledFeatures"> | null,
   permission: PermissionKey,
 ) {
   if (!user) {
+    return false;
+  }
+
+  // An organisation-level switch-off beats every role, admin included.
+  if (isFeatureDisabled(user.disabledFeatures, permission)) {
     return false;
   }
 
@@ -20,4 +26,12 @@ export function hasPermission(
 
 export function isAdmin(user: SessionUser | null) {
   return user?.role === "admin";
+}
+
+/** Admin-only pages that sit outside the role catalog (feature-flags.ts). */
+export function canUseAdminFeature(
+  user: SessionUser | null,
+  feature: "problem_categories" | "audit_logs",
+) {
+  return isAdmin(user) && !isFeatureDisabled(user?.disabledFeatures, feature);
 }

@@ -1,6 +1,8 @@
 import bcrypt from "bcryptjs";
 import { jwtVerify, SignJWT } from "jose";
 import { queryRows } from "./db";
+import { isFeatureDisabled } from "./feature-flags";
+import { getDisabledFeatures } from "./features";
 import { hasPermission, isAdmin } from "./permissions";
 import { SESSION_COOKIE } from "./session";
 import type { AppUser, PermissionKey, SessionUser } from "./types";
@@ -164,6 +166,12 @@ export async function verifySessionToken(token?: string): Promise<SessionUser | 
       // Deleted or disabled since this token was issued.
       return null;
     }
+    const disabledFeatures = await getDisabledFeatures();
+    const permissions =
+      live?.permissions ??
+      (Array.isArray(payload.permissions)
+        ? (payload.permissions as PermissionKey[])
+        : []);
 
     return {
       id: payload.sub,
@@ -172,11 +180,12 @@ export async function verifySessionToken(token?: string): Promise<SessionUser | 
       role: live?.role ?? String(payload.role),
       initials: String(payload.initials ?? ""),
       color: String(payload.color ?? "#2563eb"),
-      permissions:
-        live?.permissions ??
-        (Array.isArray(payload.permissions)
-          ? (payload.permissions as PermissionKey[])
-          : []),
+      // Switched-off features drop out here and again in hasPermission,
+      // so a raw permissions.includes() check can't see them either.
+      permissions: permissions.filter(
+        (permission) => !isFeatureDisabled(disabledFeatures, permission),
+      ),
+      disabledFeatures,
       deviceGroupCode: payload.deviceGroupCode
         ? String(payload.deviceGroupCode)
         : undefined,

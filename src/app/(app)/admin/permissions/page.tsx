@@ -23,6 +23,7 @@ export default async function PermissionsPage() {
     <PermissionsManager
       roles={roles}
       canEdit={isAdmin(user)}
+      disabledFeatures={user?.disabledFeatures}
     />
   );
 }

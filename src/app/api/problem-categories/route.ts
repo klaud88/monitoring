@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, hasPermission, isAdmin, verifySessionToken } from "@/lib/auth";
+import { canUseAdminFeature } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
 import { readProblemCategoryInput } from "@/lib/problem-category-input";
 import { getProblemCategories, saveProblemCategory } from "@/lib/repositories";
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const user = await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
-  if (!isAdmin(user)) {
+  if (!canUseAdminFeature(user, "problem_categories")) {
     return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   }
 

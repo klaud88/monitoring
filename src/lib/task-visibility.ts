@@ -12,8 +12,7 @@ export type TaskVisibilityScope = {
  * tasks.view_all always wins when present. Its absence means "only my own
  * assigned tasks" by design — this is the restrictive default, not a
  * fallback to "see everything": a role must be explicitly granted
- * tasks.view_all (or tasks.view_assigned, which resolves the same way) to
- * see tasks it isn't personally assigned to. tasks.info additionally pulls
+ * tasks.view_all to see tasks it isn't personally assigned to. tasks.info additionally pulls
  * in every task marked informational, regardless of assignment.
  */
 export function resolveTaskVisibilityScope(

@@ -26,7 +26,6 @@ const deviceActions: ActionDef[] = [...defaultActions, ...tagRegistryActions];
 const taskActions: ActionDef[] = [
   ...defaultActions,
   { key: "view_all", label: "დავალებები სრული", dependsOn: "view" },
-  { key: "view_assigned", label: "დავალებები მონიშნული", dependsOn: "view" },
   { key: "info", label: "INFO", dependsOn: "view" },
   { key: "assignable", label: "შემსრულებლებში დამატება", dependsOn: "view" },
   ...tagRegistryActions,
@@ -65,7 +64,16 @@ export const permissionPages: {
   label: string;
   actions?: ActionDef[];
 }[] = [
-  { key: "dashboard", label: "რუკა" },
+  {
+    key: "dashboard",
+    label: "რუკა",
+    actions: [
+      { key: "view", label: "ნახვა" },
+      { key: "refresh", label: "მოწყობილობების განახლება", dependsOn: "view" },
+      { key: "location_edit", label: "ლოკაციის შეცვლა", dependsOn: "view" },
+      { key: "task_create", label: "სწრაფი დავალება", dependsOn: "view" },
+    ],
+  },
   { key: "devices", label: "მოწყობილობები", actions: deviceActions },
   { key: "regions", label: "რაიონები" },
   { key: "tasks", label: "დავალებები", actions: taskActions },
@@ -82,10 +90,23 @@ export const permissionPages: {
   {
     key: "offline_records",
     label: "Offline აღრიცხვა",
-    actions: [...defaultActions, { key: "alerts", label: "შეტყობინებები" }],
+    actions: [
+      { key: "view", label: "ნახვა" },
+      { key: "create", label: "Snapshot" },
+      { key: "edit", label: "მონიტორინგის მართვა" },
+      { key: "delete", label: "ისტორიის გასუფთავება / სიიდან ამოღება" },
+      { key: "alerts", label: "შეტყობინებები" },
+    ],
   },
   { key: "users", label: "მომხმარებლები" },
-  { key: "analytics", label: "ანალიტიკა" },
+  {
+    key: "analytics",
+    label: "ანალიტიკა",
+    actions: [
+      { key: "view", label: "ნახვა" },
+      { key: "export", label: "CSV ექსპორტი", dependsOn: "view" },
+    ],
+  },
   { key: "permissions", label: "უფლებები" },
 ];
 

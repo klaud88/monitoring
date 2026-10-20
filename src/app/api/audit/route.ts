@@ -1,12 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
+import { canUseAdminFeature } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
 import { getAuditLogs } from "@/lib/repositories";
 
 export async function GET(request: NextRequest) {
   const user = await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
   if (!user) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
-  if (user.role !== "admin") return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+  if (!canUseAdminFeature(user, "audit_logs")) return NextResponse.json({ message: "Forbidden" }, { status: 403 });
 
   const sp = request.nextUrl.searchParams;
   const result = await getAuditLogs({

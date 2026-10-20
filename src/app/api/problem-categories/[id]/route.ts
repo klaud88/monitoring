@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE, isAdmin, verifySessionToken } from "@/lib/auth";
+import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
+import { canUseAdminFeature } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
 import { readProblemCategoryInput } from "@/lib/problem-category-input";
 import { saveProblemCategory } from "@/lib/repositories";
@@ -9,7 +10,7 @@ export async function PATCH(
   context: { params: Promise<{ id: string }> },
 ) {
   const user = await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
-  if (!isAdmin(user)) {
+  if (!canUseAdminFeature(user, "problem_categories")) {
     return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   }
 
@@ -54,7 +55,7 @@ export async function DELETE(
   context: { params: Promise<{ id: string }> },
 ) {
   const user = await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
-  if (!isAdmin(user)) {
+  if (!canUseAdminFeature(user, "problem_categories")) {
     return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   }
 

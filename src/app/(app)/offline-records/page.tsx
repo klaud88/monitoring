@@ -35,6 +35,12 @@ export default async function OfflineRecordsPage() {
       initialMonitoredDevices={monitoredDevices}
       dailyLevels={dailyLevels}
       userId={user?.id ?? "anonymous"}
+      permissions={{
+        create: hasPermission(user, "offline_records.create"),
+        edit: hasPermission(user, "offline_records.edit"),
+        delete: hasPermission(user, "offline_records.delete"),
+        alerts: hasPermission(user, "offline_records.alerts"),
+      }}
     />
   );
 }

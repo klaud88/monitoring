@@ -1,7 +1,8 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { ProblemCategoriesManager } from "@/components/admin/problem-categories-manager";
-import { SESSION_COOKIE, isAdmin, verifySessionToken } from "@/lib/auth";
+import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
+import { canUseAdminFeature } from "@/lib/permissions";
 import { getFirstAllowedPath } from "@/lib/navigation";
 import { getProblemCategories, getRoles, getUsers } from "@/lib/repositories";
 import { isAssignableTaskUser } from "@/lib/task-assignees";
@@ -10,7 +11,7 @@ export default async function ProblemCategoriesPage() {
   const cookieStore = await cookies();
   const user = await verifySessionToken(cookieStore.get(SESSION_COOKIE)?.value);
 
-  if (!isAdmin(user)) {
+  if (!canUseAdminFeature(user, "problem_categories")) {
     redirect(getFirstAllowedPath(user));
   }
 

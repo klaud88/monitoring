@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import {
   Eye,
   EyeOff,
+  Lock,
   LockKeyhole,
   Save,
   Plus,
@@ -13,17 +14,24 @@ import {
 } from "lucide-react";
 import {
   defaultActions,
-  permissionPages as pages,
+  permissionPages,
 } from "@/lib/permission-catalog";
+import { isFeatureDisabled } from "@/lib/feature-flags";
 import type { AppRole, PermissionKey } from "@/lib/types";
 
 export function PermissionsManager({
   roles,
   canEdit,
+  disabledFeatures = [],
 }: {
   roles: AppRole[];
   canEdit: boolean;
+  /* Switched off for this organisation by the platform admin: shown greyed
+     out and locked. A role keeps its stored rows for them, so switching a
+     feature back on restores them. */
+  disabledFeatures?: string[];
 }) {
+  const pages = permissionPages;
   const [roleList, setRoleList] = useState(roles);
   const [selectedRoleId, setSelectedRoleId] = useState(roles[0]?.id || "");
   const [saving, setSaving] = useState(false);
@@ -255,16 +263,45 @@ export function PermissionsManager({
             </div>
             {pages.map((page) => {
               const actions = page.actions ?? defaultActions;
+              const pageOff = isFeatureDisabled(disabledFeatures, page.key);
               const canView =
-                isAdminRole ||
-                selectedPermissions.includes(`${page.key}.view` as PermissionKey);
+                !pageOff &&
+                (isAdminRole ||
+                  selectedPermissions.includes(`${page.key}.view` as PermissionKey));
               return (
-                <div key={page.key} className="permission-row">
-                  <strong>{page.label}</strong>
+                <div
+                  key={page.key}
+                  className={`permission-row ${pageOff ? "platform-off" : ""}`}
+                >
+                  <strong>
+                    {page.label}
+                    {pageOff ? (
+                      <small className="platform-off-note">
+                        <Lock size={12} />
+                        გამორთულია პლატფორმიდან
+                      </small>
+                    ) : null}
+                  </strong>
                   <div className="permission-action-list">
                     {actions.map((action) => {
                       const permission =
                         `${page.key}.${action.key}` as PermissionKey;
+                      const off = isFeatureDisabled(disabledFeatures, permission);
+                      if (off) {
+                        return (
+                          <button
+                            key={permission}
+                            type="button"
+                            className={`permission-toggle platform-off ${action.dependsOn ? "sub-permission" : ""}`}
+                            aria-label={`${page.label} ${action.label}`}
+                            disabled
+                            title="გამორთულია პლატფორმიდან"
+                          >
+                            <Lock size={18} />
+                            <span>{action.label}</span>
+                          </button>
+                        );
+                      }
                       const enabled =
                         isAdminRole || selectedPermissions.includes(permission);
                       const parentPermission = action.dependsOn
@@ -296,8 +333,14 @@ export function PermissionsManager({
                   <span
                     className={`visibility-pill ${canView ? "visible" : "hidden"}`}
                   >
-                    {canView ? <Eye size={15} /> : <EyeOff size={15} />}
-                    {canView ? "ჩანს" : "დამალულია"}
+                    {pageOff ? (
+                      <Lock size={15} />
+                    ) : canView ? (
+                      <Eye size={15} />
+                    ) : (
+                      <EyeOff size={15} />
+                    )}
+                    {pageOff ? "გამორთულია" : canView ? "ჩანს" : "დამალულია"}
                   </span>
                 </div>
               );

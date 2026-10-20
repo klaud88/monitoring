@@ -34,7 +34,12 @@ export default async function DashboardPage() {
       initialTags={taskTags}
       regionNames={regions.map((region) => region.name)}
       users={users}
-      canEditDeviceLocations={hasPermission(user, "devices.edit")}
+      canEditDeviceLocations={hasPermission(user, "dashboard.location_edit")}
+      canRefreshDevices={hasPermission(user, "dashboard.refresh")}
+      canCreateTasks={
+        hasPermission(user, "dashboard.task_create") &&
+        hasPermission(user, "tasks.create")
+      }
       canCreateTaskTags={hasPermission(user, "tasks.tag_create")}
       canDeleteTaskTags={hasPermission(user, "tasks.tag_delete")}
     />

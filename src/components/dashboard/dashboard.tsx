@@ -47,6 +47,8 @@ type DashboardProps = {
   initialTags: string[];
   users: AppUser[];
   canEditDeviceLocations: boolean;
+  canRefreshDevices: boolean;
+  canCreateTasks: boolean;
   canCreateTaskTags: boolean;
   canDeleteTaskTags: boolean;
   /** Region names from the database (the regions page), not a fixed list. */
@@ -89,6 +91,8 @@ export function Dashboard({
   regionNames,
   users,
   canEditDeviceLocations,
+  canRefreshDevices,
+  canCreateTasks,
   canCreateTaskTags,
   canDeleteTaskTags,
 }: DashboardProps) {
@@ -949,15 +953,17 @@ export function Dashboard({
                   <RotateCcw size={15} />
                   <span>გასუფთავება</span>
                 </button>
-                <button
-                  className="primary-button"
-                  type="button"
-                  disabled={refreshingDevices}
-                  onClick={() => void refreshDevices()}
-                >
-                  <RefreshCw size={15} />
-                  <span>{refreshingDevices ? "ახლდება" : "განახლება"}</span>
-                </button>
+                {canRefreshDevices ? (
+                  <button
+                    className="primary-button"
+                    type="button"
+                    disabled={refreshingDevices}
+                    onClick={() => void refreshDevices()}
+                  >
+                    <RefreshCw size={15} />
+                    <span>{refreshingDevices ? "ახლდება" : "განახლება"}</span>
+                  </button>
+                ) : null}
               </div>
 
               {availableTags.length ? (
@@ -1027,18 +1033,20 @@ export function Dashboard({
               )}
             </button>
           </div>
-          <button
-            className="map-rail-add"
-            type="button"
-            onClick={() => {
-              setTaskSaveError("");
-              setShowCreateTask(true);
-            }}
-            aria-label="დამატება"
-            title="დამატება"
-          >
-            <Plus size={16} strokeWidth={2.4} />
-          </button>
+          {canCreateTasks ? (
+            <button
+              className="map-rail-add"
+              type="button"
+              onClick={() => {
+                setTaskSaveError("");
+                setShowCreateTask(true);
+              }}
+              aria-label="დამატება"
+              title="დამატება"
+            >
+              <Plus size={16} strokeWidth={2.4} />
+            </button>
+          ) : null}
         </header>
 
         {railExpanded ? (

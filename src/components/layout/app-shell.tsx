@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { LogOut } from "lucide-react";
-import { SESSION_COOKIE, hasPermission, isAdmin, verifySessionToken } from "@/lib/auth";
+import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
+import { canUseAdminFeature } from "@/lib/permissions";
 import { getFirstAllowedPath } from "@/lib/navigation";
 import { getRoleLabel } from "@/lib/repositories";
 import type { PermissionKey } from "@/lib/types";
@@ -15,7 +16,7 @@ import { ThemeToggle } from "./theme-toggle";
 type NavPermission = {
   href: string;
   permission?: PermissionKey | PermissionKey[];
-  adminOnly?: boolean;
+  adminFeature?: "problem_categories" | "audit_logs";
 };
 
 const navPermissions: NavPermission[] = [
@@ -28,8 +29,8 @@ const navPermissions: NavPermission[] = [
   { href: "/admin/users", permission: "users.view" },
   { href: "/admin/permissions", permission: "permissions.view" },
   { href: "/analytics", permission: "analytics.view" },
-  { href: "/admin/problem-categories", adminOnly: true },
-  { href: "/admin/audit-logs", adminOnly: true },
+  { href: "/admin/problem-categories", adminFeature: "problem_categories" },
+  { href: "/admin/audit-logs", adminFeature: "audit_logs" },
 ];
 
 export async function AppShell({
@@ -39,12 +40,11 @@ export async function AppShell({
   const user = await verifySessionToken(cookieStore.get(SESSION_COOKIE)?.value);
   const homeHref = getFirstAllowedPath(user);
   const roleLabel = user ? await getRoleLabel(user.role) : "role";
-  const adminOnly = isAdmin(user);
 
   const allowedHrefs = navPermissions
     .filter((item) => {
-      if (item.adminOnly) {
-        return adminOnly;
+      if (item.adminFeature) {
+        return canUseAdminFeature(user, item.adminFeature);
       }
 
       if (!item.permission) {

@@ -17,5 +17,11 @@ export default async function AnalyticsPage() {
     getOfflineSnapshots(),
   ]);
 
-  return <AnalyticsDashboard devices={devices} snapshots={snapshots} />;
+  return (
+    <AnalyticsDashboard
+      devices={devices}
+      snapshots={snapshots}
+      canExport={hasPermission(user, "analytics.export")}
+    />
+  );
 }

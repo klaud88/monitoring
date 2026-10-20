@@ -37,6 +37,13 @@ type Props = {
   dailyLevels: DailyOfflineEntry[];
   /** The saved row order is per person, so two people can order it differently. */
   userId: string;
+  /** offline_records.* actions; the buttons each one gates are hidden without it. */
+  permissions: {
+    create: boolean;
+    edit: boolean;
+    delete: boolean;
+    alerts: boolean;
+  };
 };
 
 const levelLabels: Record<DailyOfflineLevel, string> = {
@@ -81,7 +88,9 @@ export function OfflineRecordsDashboard({
   initialMonitoredDevices,
   dailyLevels,
   userId,
+  permissions,
 }: Props) {
+  const canPollMonitoring = permissions.alerts;
   const [devices] = useState(initialDevices);
   const [snapshots, setSnapshots] = useState(initialSnapshots);
   const [monitoredDevices, setMonitoredDevices] = useState(
@@ -381,6 +390,9 @@ export function OfflineRecordsDashboard({
   }
 
   useEffect(() => {
+    if (!canPollMonitoring) {
+      return;
+    }
     let cancelled = false;
 
     async function refreshMonitoring() {
@@ -414,7 +426,7 @@ export function OfflineRecordsDashboard({
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, []);
+  }, [canPollMonitoring]);
 
   useEffect(() => {
     if (!historyDeviceId) {
@@ -614,15 +626,17 @@ export function OfflineRecordsDashboard({
               onChange={(event) => setToDate(event.target.value)}
             />
           </label>
-          <button
-            className="ghost-button"
-            type="button"
-            disabled={busyAction === "capture"}
-            onClick={captureSnapshot}
-          >
-            <RefreshCw size={15} />
-            <span>Snapshot</span>
-          </button>
+          {permissions.create ? (
+            <button
+              className="ghost-button"
+              type="button"
+              disabled={busyAction === "capture"}
+              onClick={captureSnapshot}
+            >
+              <RefreshCw size={15} />
+              <span>Snapshot</span>
+            </button>
+          ) : null}
         </div>
       </section>
 
@@ -838,7 +852,10 @@ export function OfflineRecordsDashboard({
                         <button
                           type="button"
                           className={`matrix-switch${monitored ? " on" : ""}`}
-                          disabled={busyAction === `monitor-${row.deviceId}`}
+                          disabled={
+                            !permissions.edit ||
+                            busyAction === `monitor-${row.deviceId}`
+                          }
                           onClick={() => void toggleMonitoring(row.deviceId)}
                           role="switch"
                           aria-checked={monitored}
@@ -921,20 +938,22 @@ export function OfflineRecordsDashboard({
                       <strong>{device.label}</strong>
                       <span>{device.count} დღე offline</span>
                     </div>
-                    <div className="rank-row-actions">
-                      <button
-                        className="icon-button danger"
-                        type="button"
-                        onClick={() => removeFrequencyDevice(device.deviceId)}
-                        disabled={
-                          busyAction === `frequency-remove-${device.deviceId}`
-                        }
-                        aria-label={`${device.label} სიხშირიდან წაშლა`}
-                        title="სიხშირიდან წაშლა"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
+                    {permissions.delete ? (
+                      <div className="rank-row-actions">
+                        <button
+                          className="icon-button danger"
+                          type="button"
+                          onClick={() => removeFrequencyDevice(device.deviceId)}
+                          disabled={
+                            busyAction === `frequency-remove-${device.deviceId}`
+                          }
+                          aria-label={`${device.label} სიხშირიდან წაშლა`}
+                          title="სიხშირიდან წაშლა"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                   <div
                     className="rank-bar"
@@ -1031,26 +1050,28 @@ export function OfflineRecordsDashboard({
               </select>
             </label>
           </div>
-          <div className="offline-monitor-actions">
-            <button
-              className="primary-button"
-              type="button"
-              disabled={!selectedDeviceIds.length || busyAction === "monitor"}
-              onClick={() => updateMonitoring(true)}
-            >
-              <BellRing size={17} />
-              <span>მონიტორინგი</span>
-            </button>
-            <button
-              className="ghost-button"
-              type="button"
-              disabled={!selectedDeviceIds.length || busyAction === "stop"}
-              onClick={() => updateMonitoring(false)}
-            >
-              <XCircle size={17} />
-              <span>გაჩერება</span>
-            </button>
-          </div>
+          {permissions.edit ? (
+            <div className="offline-monitor-actions">
+              <button
+                className="primary-button"
+                type="button"
+                disabled={!selectedDeviceIds.length || busyAction === "monitor"}
+                onClick={() => updateMonitoring(true)}
+              >
+                <BellRing size={17} />
+                <span>მონიტორინგი</span>
+              </button>
+              <button
+                className="ghost-button"
+                type="button"
+                disabled={!selectedDeviceIds.length || busyAction === "stop"}
+                onClick={() => updateMonitoring(false)}
+              >
+                <XCircle size={17} />
+                <span>გაჩერება</span>
+              </button>
+            </div>
+          ) : null}
 
           <div className="offline-device-list">
             {filteredDevices.map((device) => {
@@ -1106,7 +1127,11 @@ export function OfflineRecordsDashboard({
           deviceName={historyDevice?.name ?? historyMonitoringRecord.deviceName}
           record={historyMonitoringRecord}
           clearing={busyAction === `clear-${historyMonitoringRecord.deviceId}`}
-          onClear={() => void clearHistory(historyMonitoringRecord.deviceId)}
+          onClear={
+            permissions.delete
+              ? () => void clearHistory(historyMonitoringRecord.deviceId)
+              : undefined
+          }
           onClose={() => setHistoryDeviceId(null)}
         />
       ) : null}
@@ -1125,7 +1150,8 @@ function MonitoringHistoryModal({
   deviceName: string;
   record: MonitoredDevice;
   clearing: boolean;
-  onClear: () => void;
+  /** Absent when the viewer may not clear history (offline_records.delete). */
+  onClear?: () => void;
   onClose: () => void;
 }) {
   return (
@@ -1148,16 +1174,18 @@ function MonitoringHistoryModal({
             <span>{record.offlineCount} offline შემთხვევა</span>
           </div>
           <div className="offline-history-actions">
-            <button
-              className="ghost-button danger"
-              type="button"
-              onClick={onClear}
-              disabled={clearing || !record.offlinePeriods.length}
-              title="ისტორიის სრულად წაშლა"
-            >
-              <Trash2 size={15} />
-              <span>{clearing ? "იშლება..." : "გასუფთავება"}</span>
-            </button>
+            {onClear ? (
+              <button
+                className="ghost-button danger"
+                type="button"
+                onClick={onClear}
+                disabled={clearing || !record.offlinePeriods.length}
+                title="ისტორიის სრულად წაშლა"
+              >
+                <Trash2 size={15} />
+                <span>{clearing ? "იშლება..." : "გასუფთავება"}</span>
+              </button>
+            ) : null}
             <button
               className="icon-button"
               type="button"

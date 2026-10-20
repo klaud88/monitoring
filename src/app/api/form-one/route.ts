@@ -32,7 +32,10 @@ export async function POST(request: NextRequest) {
   const gardenLabel = String(body?.gardenLabel || "").trim();
   const phone = String(body?.phone || "").trim();
   const submittedDate = getTbilisiDateKey();
-  const dueDate = String(body?.dueDate || "").trim();
+  // Setting the due date is its own function, on create as on edit.
+  const dueDate = hasPermission(user, "form_one.due_date_edit")
+    ? String(body?.dueDate || "").trim()
+    : "";
   const items = normalizeApiItems(body?.items);
 
   if (dueDate && (dueDate.length > 10 || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate))) {

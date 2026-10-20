@@ -45,7 +45,11 @@ export type PermissionAction =
   | "tag_create"
   | "tag_edit"
   | "tag_delete"
-  | "status";
+  | "status"
+  | "refresh"
+  | "location_edit"
+  | "task_create"
+  | "export";
 export type PermissionKey = `${PageKey}.${PermissionAction}`;
 
 export type AppUser = {
@@ -63,6 +67,8 @@ export type AppUser = {
   twoFactorEnabled?: boolean;
   /** Base32 TOTP secret — server/internal only, never sent to the client. */
   twoFactorSecret?: string;
+  /** Features this organisation has switched off (feature-flags.ts); set on the session. */
+  disabledFeatures?: string[];
 };
 
 export type ProblemRecord = {

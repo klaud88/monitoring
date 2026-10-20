@@ -1,8 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, isAdmin, verifySessionToken, clearSessionPermissionCache } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
-import { updateRolePermissions } from "@/lib/repositories";
+import { getRoles, updateRolePermissions } from "@/lib/repositories";
 import { isKnownPermissionKey } from "@/lib/permission-catalog";
+import { isFeatureDisabled } from "@/lib/feature-flags";
+import { getDisabledFeatures } from "@/lib/features";
 
 export async function PUT(
   request: NextRequest,
@@ -30,6 +32,24 @@ export async function PUT(
   const permissions = [
     ...new Set((body.permissions as unknown[]).map(String)),
   ].filter(isKnownPermissionKey);
+
+  // What the platform admin switched off can't be granted from here. Rows a
+  // role already holds for such a feature are kept, so switching it back on
+  // restores them.
+  const disabled = await getDisabledFeatures();
+  if (disabled.length) {
+    const current = (await getRoles()).find((role) => role.id === id);
+    const blocked = permissions.filter(
+      (key) =>
+        isFeatureDisabled(disabled, key) && !current?.permissions.includes(key),
+    );
+    if (blocked.length) {
+      return NextResponse.json(
+        { message: `გამორთულია პლატფორმიდან: ${blocked.join(", ")}` },
+        { status: 400 },
+      );
+    }
+  }
 
   const role = await updateRolePermissions(id, permissions);
   // Sessions read permissions live; make this change apply right away.

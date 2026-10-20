@@ -72,9 +72,18 @@ export function generateTotpToken(secretBase32: string, forTime: number = Date.n
 
 /** Accepts a code from the current step or the one immediately before/after it. */
 export function verifyTotpToken(secretBase32: string, token: string, window = TOTP_WINDOW): boolean {
+  return matchTotpCounter(secretBase32, token, window) !== null;
+}
+
+/** The time step a code belongs to, or null; lets a caller refuse a code used before. */
+export function matchTotpCounter(
+  secretBase32: string,
+  token: string,
+  window = TOTP_WINDOW,
+): number | null {
   const normalized = token.trim();
   if (!/^\d{6}$/.test(normalized)) {
-    return false;
+    return null;
   }
 
   const secret = base32Decode(secretBase32);
@@ -83,11 +92,11 @@ export function verifyTotpToken(secretBase32: string, token: string, window = TO
   for (let step = -window; step <= window; step++) {
     const candidate = hotp(secret, counter + step);
     if (timingSafeEqual(Buffer.from(candidate), Buffer.from(normalized))) {
-      return true;
+      return counter + step;
     }
   }
 
-  return false;
+  return null;
 }
 
 export function buildOtpAuthUrl(opts: { secret: string; accountName: string; issuer: string }): string {

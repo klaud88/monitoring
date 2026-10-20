@@ -1,6 +1,7 @@
 import { jwtVerify } from "jose";
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE, TENANT_COOKIE } from "@/lib/session";
+import { verifyPlatformToken } from "@/lib/platform-session";
+import { PLATFORM_COOKIE, SESSION_COOKIE, TENANT_COOKIE } from "@/lib/session";
 
 const publicRoutes = [
   "/login",
@@ -18,6 +19,8 @@ const publicRoutes = [
   "/api/cron/status-poll",
   // Called by the portal on localhost; guarded by PORTAL_SYNC_SECRET.
   "/api/internal/login-identifiers",
+  "/api/internal/features",
+  "/api/internal/overview",
 ];
 
 const MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -49,16 +52,29 @@ async function isValidSession(token?: string) {
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // Pages and API of the platform admin both live under /platform, so its
+  // cookie (path=/platform) never reaches an organisation's process.
+  const isPlatformPath = isUnder(pathname, "/platform");
+
   // The portal process only serves the login page and the login call it
-  // forwards to an organisation; it holds no data of its own.
+  // forwards to an organisation, plus the platform admin pages; it holds
+  // no data of its own.
   if (process.env.PORTAL_MODE === "1") {
     if (pathname === "/login" || pathname === "/api/auth/login") {
       return NextResponse.next();
+    }
+    if (isPlatformPath) {
+      return guardPlatform(request);
     }
     if (pathname.startsWith("/api")) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     return NextResponse.redirect(new URL("/login", request.url));
+  }
+
+  // Platform admin lives only in the portal process.
+  if (isPlatformPath) {
+    return new NextResponse("Not found", { status: 404 });
   }
 
   const isPublic = publicRoutes.some(
@@ -120,14 +136,46 @@ export async function middleware(request: NextRequest) {
   // as untrusted rather than silently allowed through — a same-origin
   // browser request always sends a matching Origin on state-changing
   // methods, so neither case should occur in normal operation.
-  if (MUTATION_METHODS.has(request.method) && pathname.startsWith("/api")) {
-    const origin = request.headers.get("origin");
-    if (ALLOWED_ORIGINS.length === 0 || !origin || !ALLOWED_ORIGINS.includes(origin)) {
-      return NextResponse.json({ message: "Forbidden" }, { status: 403 });
-    }
+  if (isCrossOriginMutation(request)) {
+    return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   }
 
   return NextResponse.next();
+}
+
+function isUnder(pathname: string, route: string) {
+  return pathname === route || pathname.startsWith(`${route}/`);
+}
+
+function isCrossOriginMutation(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+  if (
+    !MUTATION_METHODS.has(request.method) ||
+    !(pathname.startsWith("/api") || isUnder(pathname, "/platform/api"))
+  ) {
+    return false;
+  }
+  const origin = request.headers.get("origin");
+  return ALLOWED_ORIGINS.length === 0 || !origin || !ALLOWED_ORIGINS.includes(origin);
+}
+
+/* Portal: /platform/login is open, everything else under /platform and
+   /platform/api needs the platform admin's session. */
+async function guardPlatform(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+  if (isCrossOriginMutation(request)) {
+    return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+  }
+  if (pathname === "/platform/login" || pathname === "/platform/api/login") {
+    return NextResponse.next();
+  }
+  if (await verifyPlatformToken(request.cookies.get(PLATFORM_COOKIE)?.value)) {
+    return NextResponse.next();
+  }
+  if (isUnder(pathname, "/platform/api")) {
+    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  }
+  return NextResponse.redirect(new URL("/platform/login", request.url));
 }
 
 export const config = {

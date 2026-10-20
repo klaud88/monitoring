@@ -6,7 +6,11 @@ export async function POST(request: NextRequest) {
   const user = await verifySessionToken(
     request.cookies.get(SESSION_COOKIE)?.value,
   );
-  if (!hasPermission(user, "offline_records.edit")) {
+  // The map's refresh button, or the offline-records monitoring screen.
+  if (
+    !hasPermission(user, "dashboard.refresh") &&
+    !hasPermission(user, "offline_records.edit")
+  ) {
     return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   }
 

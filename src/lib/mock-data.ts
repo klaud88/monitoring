@@ -2,9 +2,9 @@ import type { AppUser, AuditLog, Device, PermissionKey, Task } from "./types";
 
 const allPermissions: PermissionKey[] = [
   "dashboard.view",
-  "dashboard.create",
-  "dashboard.edit",
-  "dashboard.delete",
+  "dashboard.refresh",
+  "dashboard.location_edit",
+  "dashboard.task_create",
   "devices.view",
   "devices.create",
   "devices.edit",
@@ -57,9 +57,7 @@ const allPermissions: PermissionKey[] = [
   "permissions.edit",
   "permissions.delete",
   "analytics.view",
-  "analytics.create",
-  "analytics.edit",
-  "analytics.delete"
+  "analytics.export"
 ];
 
 export const mockUsers: AppUser[] = [

@@ -1,5 +1,5 @@
-import { timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
+import { isInternalRequest } from "@/lib/internal-auth";
 import { getLoginIdentifiers } from "@/lib/repositories";
 
 /*
@@ -8,10 +8,7 @@ import { getLoginIdentifiers } from "@/lib/repositories";
  * portal calls it on localhost with that secret as a bearer token.
  */
 export async function GET(request: NextRequest) {
-  const secret = process.env.PORTAL_SYNC_SECRET || "";
-  const provided = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || "";
-
-  if (!secret || !safeEqual(provided, secret)) {
+  if (!isInternalRequest(request)) {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   }
 
@@ -21,10 +18,4 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.json({ identifiers });
-}
-
-function safeEqual(a: string, b: string) {
-  const left = Buffer.from(a);
-  const right = Buffer.from(b);
-  return left.length === right.length && timingSafeEqual(left, right);
 }

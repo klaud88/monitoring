@@ -68,9 +68,11 @@ const monthNamesLong = [
 export function AnalyticsDashboard({
   devices,
   snapshots,
+  canExport,
 }: {
   devices: Device[];
   snapshots: OfflineSnapshot[];
+  canExport: boolean;
 }) {
   const [preset, setPreset] = useState<Preset>("12m");
   const [fromDate, setFromDate] = useState(oneYearAgo.toISOString().slice(0, 10));
@@ -245,10 +247,12 @@ export function AnalyticsDashboard({
               </button>
             ))}
           </div>
-          <button className="ghost-button" type="button" onClick={exportCsv}>
-            <Download size={15} />
-            <span>ექსპორტი</span>
-          </button>
+          {canExport ? (
+            <button className="ghost-button" type="button" onClick={exportCsv}>
+              <Download size={15} />
+              <span>ექსპორტი</span>
+            </button>
+          ) : null}
         </div>
       </section>
 

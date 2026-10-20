@@ -11,7 +11,7 @@ export async function PATCH(
   const user = await verifySessionToken(
     request.cookies.get(SESSION_COOKIE)?.value,
   );
-  if (!hasPermission(user, "devices.edit")) {
+  if (!hasPermission(user, "dashboard.location_edit")) {
     return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   }
 

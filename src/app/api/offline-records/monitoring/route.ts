@@ -54,7 +54,7 @@ export async function DELETE(request: NextRequest) {
   const user = await verifySessionToken(
     request.cookies.get(SESSION_COOKIE)?.value,
   );
-  if (!hasPermission(user, "offline_records.edit")) {
+  if (!hasPermission(user, "offline_records.delete")) {
     return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   }
 

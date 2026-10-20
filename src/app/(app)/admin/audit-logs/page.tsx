@@ -1,7 +1,8 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { AuditLogsManager } from "@/components/admin/audit-logs-manager";
-import { SESSION_COOKIE, isAdmin, verifySessionToken } from "@/lib/auth";
+import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
+import { canUseAdminFeature } from "@/lib/permissions";
 import { getFirstAllowedPath } from "@/lib/navigation";
 import { getAuditLogs, getUsers } from "@/lib/repositories";
 
@@ -9,7 +10,7 @@ export default async function AuditLogsPage() {
   const cookieStore = await cookies();
   const user = await verifySessionToken(cookieStore.get(SESSION_COOKIE)?.value);
 
-  if (!isAdmin(user)) {
+  if (!canUseAdminFeature(user, "audit_logs")) {
     redirect(getFirstAllowedPath(user));
   }
 

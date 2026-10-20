@@ -1,3 +1,4 @@
+import { hasPermission } from "./permissions";
 import type { PermissionKey, SessionUser } from "./types";
 
 type ProtectedRoute = {
@@ -19,17 +20,14 @@ export const protectedRoutes: ProtectedRoute[] = [
 ];
 
 export function hasSessionPermission(
-  user: Pick<SessionUser, "role" | "permissions"> | null | undefined,
+  user: Pick<SessionUser, "role" | "permissions" | "disabledFeatures"> | null | undefined,
   permission: PermissionKey,
 ) {
-  return Boolean(
-    user &&
-      (user.role === "admin" || user.permissions.includes(permission)),
-  );
+  return hasPermission(user ?? null, permission);
 }
 
 export function canAccessPath(
-  user: Pick<SessionUser, "role" | "permissions"> | null | undefined,
+  user: Pick<SessionUser, "role" | "permissions" | "disabledFeatures"> | null | undefined,
   path: string,
 ) {
   if (!user) {
@@ -54,7 +52,7 @@ export function canAccessPath(
 }
 
 export function getFirstAllowedPath(
-  user: Pick<SessionUser, "role" | "permissions"> | null | undefined,
+  user: Pick<SessionUser, "role" | "permissions" | "disabledFeatures"> | null | undefined,
 ) {
   if (!user) {
     return "/login";

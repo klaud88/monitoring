@@ -9,3 +9,6 @@ export const TENANT_COOKIE = "onebit_tenant";
 export function shouldUseSecureCookie() {
   return process.env.NODE_ENV === "production";
 }
+
+// Session of the platform admin (src/app/platform), portal process only.
+export const PLATFORM_COOKIE = "onebit_platform";

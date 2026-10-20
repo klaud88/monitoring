@@ -691,7 +691,6 @@ async function ensureOperationalSchema() {
       // before any role is saved through the Permissions UI.
       for (const key of [
         "tasks.view_all",
-        "tasks.view_assigned",
         "tasks.info",
         "tasks.assignable",
       ]) {
@@ -753,6 +752,57 @@ async function ensureOperationalSchema() {
         }
         await connection.query(
           `insert ignore into app_migrations (id) values ('tasks_assignable_seed_v1')`,
+        );
+      }
+      // One-time: the catalog now lists only functions that gate something
+      // real (see permission-catalog.ts). Each new key goes to the roles that
+      // could already do that thing through the key that used to gate it, and
+      // the keys that gated nothing are dropped.
+      const [catalogRows] = await connection.query<RowDataPacket[]>(
+        `select 1 from app_migrations where id = 'feature_catalog_v1' limit 1`,
+      );
+      if (catalogRows.length === 0) {
+        const grants: [string, string][] = [
+          ["dashboard.location_edit", "devices.edit"],
+          ["dashboard.task_create", "tasks.create"],
+          ["dashboard.refresh", "dashboard.view"],
+          ["analytics.export", "analytics.view"],
+          ["offline_records.delete", "offline_records.edit"],
+        ];
+        for (const [key, from] of grants) {
+          const [pageKey, actionKey] = key.split(".");
+          await connection.query(
+            `insert ignore into permissions (id, code, label, page_key, action_key)
+             values (?, ?, ?, ?, ?)`,
+            [makeStableId("perm", key), key, key, pageKey, actionKey],
+          );
+          await connection.query(
+            `insert ignore into role_permissions (role_id, permission_id)
+             select rp.role_id, target.id
+             from role_permissions rp
+             join permissions source on source.id = rp.permission_id
+             join permissions target on target.code = ?
+             where source.code = ?`,
+            [key, from],
+          );
+        }
+        const dropped = [
+          "dashboard.create",
+          "dashboard.edit",
+          "dashboard.delete",
+          "analytics.create",
+          "analytics.edit",
+          "analytics.delete",
+          "tasks.view_assigned",
+        ];
+        await connection.query(
+          `delete rp from role_permissions rp
+           join permissions p on p.id = rp.permission_id
+           where p.code in (?)`,
+          [dropped],
+        );
+        await connection.query(
+          `insert ignore into app_migrations (id) values ('feature_catalog_v1')`,
         );
       }
       // Drop FK on audit_logs.user_id so unknown/deleted user IDs are accepted
@@ -2244,9 +2294,9 @@ let fallbackRoles: AppRole[] = [
     label: "ადმინისტრატორი",
     permissions: [
       "dashboard.view",
-      "dashboard.create",
-      "dashboard.edit",
-      "dashboard.delete",
+      "dashboard.refresh",
+      "dashboard.location_edit",
+      "dashboard.task_create",
       "devices.view",
       "devices.create",
       "devices.edit",
@@ -2300,9 +2350,7 @@ let fallbackRoles: AppRole[] = [
       "permissions.edit",
       "permissions.delete",
       "analytics.view",
-      "analytics.create",
-      "analytics.edit",
-      "analytics.delete",
+      "analytics.export",
     ],
   },
   {
