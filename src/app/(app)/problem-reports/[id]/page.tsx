@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { getGardenDisplayName } from "@/lib/device-options";
+import { PeopleSection } from "@/components/detail/people-section";
 import { OriginHistoryRows } from "@/components/history/origin-history";
 import { getGardenScope } from "@/lib/garden-scope";
 import { buildHistoryRows } from "@/lib/history-view";
@@ -25,6 +26,7 @@ import { getLinkedHistory } from "@/lib/linked-history";
 import { getFirstAllowedPath } from "@/lib/navigation";
 import {
   getDevices,
+  getRoleLabel,
   getProblemReports,
   getUsers,
 } from "@/lib/repositories";
@@ -87,6 +89,17 @@ export default async function ProblemReportDetailsPage({
   );
 
   const device = devices.find((item) => item.id === report.deviceId);
+  /* Who reported it, and the garden's own accounts to call. */
+  const reporter = users.find(
+    (item) => item.id === (report.createdBy ?? history.created?.userId),
+  );
+  const reporterRole = reporter ? await getRoleLabel(reporter.role) : undefined;
+  const gardenContacts = users.filter(
+    (item) =>
+      item.role === "garden" &&
+      Boolean(report.deviceGroupCode) &&
+      (item.gardenCodes ?? []).includes(report.deviceGroupCode),
+  );
   const assignees = users.filter((item) => report.assigneeIds.includes(item.id));
   const canEditReport =
     hasPermission(user, "problem_reports.edit") ||
@@ -306,9 +319,14 @@ export default async function ProblemReportDetailsPage({
 
           <article className="detail-card">
             <div className="detail-card-head">
-              <h2>ბაღის კონტექსტი</h2>
+              <h2>მომხმარებლის მონაცემები</h2>
               <Cpu size={16} />
             </div>
+            <PeopleSection
+              reporter={reporter}
+              reporterRole={reporterRole}
+              gardenContacts={gardenContacts}
+            />
             {device ? (
               <dl className="detail-list">
                 <div>

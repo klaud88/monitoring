@@ -101,6 +101,7 @@ export function UsersManager({
   const [editDraft, setEditDraft] = useState<UserDraft>(() => buildEmptyDraft(defaultRole));
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const { confirm, confirmationDialog } = useConfirmDialog();
 
   const filteredUsers = useMemo(() => {
@@ -146,6 +147,7 @@ export function UsersManager({
     const data = (await response.json()) as { user: SessionUser };
     setUsers((current) => [data.user, ...current]);
     setDraft(emptyDraft);
+    setCreateOpen(false);
   }
 
   function startEdit(user: SessionUser) {
@@ -242,18 +244,42 @@ export function UsersManager({
             <small>ადმინი</small>
           </div>
         </div>
+        {permissions.create ? (
+          <button
+            className="primary-button create-fab"
+            type="button"
+            onClick={() => {
+              setError("");
+              setCreateOpen(true);
+            }}
+          >
+            <Plus size={17} />
+            <span>დამატება</span>
+          </button>
+        ) : null}
       </section>
 
       {error ? <p className="form-error page-error">{error}</p> : null}
 
-      <section className="content-grid user-admin-grid">
-        {permissions.create ? (
-          <form className="surface admin-form user-create-form" onSubmit={createUser}>
-            <div className="section-title">
+      {createOpen && permissions.create ? (
+        <section className="task-editor user-create-panel" aria-label="ახალი მომხმარებელი">
+          <header className="task-editor-head">
+            <div>
               <h2>ახალი მომხმარებელი</h2>
-              <Plus size={20} />
+              <p>დაკეცვისას ჩაწერილი რჩება — ველები მხოლოდ დამატების შემდეგ სუფთავდება.</p>
             </div>
-            <label>
+            <button
+              className="icon-button"
+              type="button"
+              onClick={() => setCreateOpen(false)}
+              aria-label="დაკეცვა"
+              title="დაკეცვა"
+            >
+              <ChevronUp size={17} />
+            </button>
+          </header>
+          <form className="task-editor-body" id="user-create-form" onSubmit={createUser}>
+            <label className="task-field span-2">
               <span>სახელი და გვარი</span>
               <input
                 value={draft.name}
@@ -263,7 +289,7 @@ export function UsersManager({
                 required
               />
             </label>
-            <label>
+            <label className="task-field span-2">
               <span>ელფოსტა</span>
               <input
                 type="email"
@@ -274,7 +300,7 @@ export function UsersManager({
                 required
               />
             </label>
-            <label>
+            <label className="task-field">
               <span>ტელეფონი</span>
               <input
                 type="tel"
@@ -285,57 +311,49 @@ export function UsersManager({
                 }
               />
             </label>
-            <div className="form-row">
-              <label>
-                <span>როლი</span>
-                <RoleSelect
-                  value={draft.role}
-                  onChange={(role) =>
-                    setDraft((current) => ({ ...current, role }))
-                  }
-                  roles={roleOptions}
-                />
-              </label>
-              <label>
-                <span>ინიციალები</span>
-                <input
-                  value={draft.initials}
-                  maxLength={3}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      initials: event.target.value.toUpperCase(),
-                    }))
-                  }
-                />
-              </label>
-            </div>
-            <div className="form-row">
-              <label>
-                <span>ფერი</span>
-                <input
-                  type="color"
-                  value={draft.color}
-                  onChange={(event) =>
-                    setDraft((current) => ({ ...current, color: event.target.value }))
-                  }
-                />
-              </label>
-              <label>
-                <span>პაროლი</span>
-                <input
-                  type="password"
-                  value={draft.password}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      password: event.target.value,
-                    }))
-                  }
-                  required
-                />
-              </label>
-            </div>
+            <label className="task-field">
+              <span>როლი</span>
+              <RoleSelect
+                value={draft.role}
+                onChange={(role) => setDraft((current) => ({ ...current, role }))}
+                roles={roleOptions}
+              />
+            </label>
+            <label className="task-field">
+              <span>ინიციალები</span>
+              <input
+                value={draft.initials}
+                maxLength={3}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    initials: event.target.value.toUpperCase(),
+                  }))
+                }
+              />
+            </label>
+            <label className="task-field">
+              <span>ფერი</span>
+              <input
+                type="color"
+                value={draft.color}
+                onChange={(event) =>
+                  setDraft((current) => ({ ...current, color: event.target.value }))
+                }
+              />
+            </label>
+            <label className="task-field span-2">
+              <span>პაროლი</span>
+              <input
+                type="password"
+                value={draft.password}
+                autoComplete="new-password"
+                onChange={(event) =>
+                  setDraft((current) => ({ ...current, password: event.target.value }))
+                }
+                required
+              />
+            </label>
             <GardenPicker
               gardens={gardens}
               value={draft.gardenCodes}
@@ -343,13 +361,26 @@ export function UsersManager({
                 setDraft((current) => ({ ...current, gardenCodes }))
               }
             />
-            <button className="primary-button" type="submit" disabled={saving}>
-              <Plus size={18} />
-              <span>მომხმარებლის დამატება</span>
-            </button>
           </form>
-        ) : null}
+          <div className="task-editor-foot">
+            <button
+              className="primary-button"
+              type="submit"
+              form="user-create-form"
+              disabled={saving}
+            >
+              <Plus size={17} />
+              <span>დამატება</span>
+            </button>
+            <button className="ghost-button" type="button" onClick={() => setCreateOpen(false)}>
+              <X size={16} />
+              <span>დაკეცვა</span>
+            </button>
+          </div>
+        </section>
+      ) : null}
 
+      <section className="user-admin-layout">
         <section className="surface user-admin-list">
           <div className="table-toolbar">
             <div className="search-field">

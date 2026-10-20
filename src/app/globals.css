@@ -3617,6 +3617,20 @@ p.task-comment-text {
   grid-template-columns: minmax(280px, 0.45fr) minmax(0, 1.55fr);
 }
 
+/* Users page: "დამატება" sits top right next to the counts and opens the
+   create panel above the list (same pattern as the tasks page). */
+.users-page .page-header .metric-strip {
+  margin-left: auto;
+}
+
+.users-page .page-header > .create-fab {
+  align-self: center;
+}
+
+.user-create-panel {
+  margin-bottom: 16px;
+}
+
 .device-create-form {
   align-self: start;
 }
@@ -7856,6 +7870,52 @@ a.task-card2:hover .task-card2-title {
   display: grid;
   gap: 10px;
   margin: 0;
+}
+
+/* "მომხმარებლის მონაცემები": reporter and garden contacts above the garden. */
+.people-section {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.detail-subhead {
+  margin: 6px 0 0;
+  color: var(--ink-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.people-section .detail-subhead:first-child {
+  margin-top: 0;
+}
+
+.person-contact {
+  display: grid;
+  gap: 4px;
+}
+
+.person-contact-lines {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding-left: 42px;
+  font-size: 12.5px;
+}
+
+.person-contact-lines a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--brand-dark);
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.person-contact-lines a:hover {
+  text-decoration: underline;
 }
 
 .detail-list > div {
