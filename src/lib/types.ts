@@ -49,7 +49,8 @@ export type PermissionAction =
   | "refresh"
   | "location_edit"
   | "task_create"
-  | "export";
+  | "export"
+  | "all_gardens";
 export type PermissionKey = `${PageKey}.${PermissionAction}`;
 
 export type AppUser = {
@@ -61,6 +62,8 @@ export type AppUser = {
   color: string;
   permissions: PermissionKey[];
   deviceGroupCode?: string;
+  /** Gardens this user is linked to (user_gardens); see garden-scope.ts. */
+  gardenCodes?: string[];
   phone?: string;
   passwordHash?: string;
   mustChangePassword?: boolean;

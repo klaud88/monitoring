@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { canAccessGarden, getGardenScope } from "@/lib/garden-scope";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { filterRegisteredTaskTags } from "@/lib/catalog";
@@ -8,7 +9,6 @@ import {
   getTaskTagNames,
   getTasks,
   getUsers,
-  normalizeDeviceGroupCode,
   updateProblemReport,
 } from "@/lib/repositories";
 import { filterAssignableTaskUserIds } from "@/lib/task-assignees";
@@ -35,7 +35,7 @@ export async function PATCH(
 
   const { id } = await context.params;
   const existing = await getProblemReportById(id);
-  if (!existing || !canAccessReport(user, existing.deviceGroupCode)) {
+  if (!existing || !canAccessGarden(getGardenScope(user, "problem_reports"), existing.deviceGroupCode)) {
     return NextResponse.json({ message: "Problem report not found" }, { status: 404 });
   }
 
@@ -104,7 +104,7 @@ export async function PATCH(
       dueDate,
       createdBy: existing.createdBy,
     },
-    { allowedDeviceGroupCode: getScopedDeviceGroupCode(user) },
+    { allowedGardenCodes: getGardenScope(user, "problem_reports") },
   );
 
   if (!report) {
@@ -163,7 +163,7 @@ export async function DELETE(
 
   const { id } = await context.params;
   const existing = await getProblemReportById(id);
-  if (!existing || !canAccessReport(user, existing.deviceGroupCode)) {
+  if (!existing || !canAccessGarden(getGardenScope(user, "problem_reports"), existing.deviceGroupCode)) {
     return NextResponse.json({ message: "Problem report not found" }, { status: 404 });
   }
 
@@ -182,21 +182,4 @@ export async function DELETE(
   });
 
   return NextResponse.json({ ok: true });
-}
-
-function getScopedDeviceGroupCode(user: Awaited<ReturnType<typeof verifySessionToken>>) {
-  return user?.role === "garden"
-    ? normalizeDeviceGroupCode(user.deviceGroupCode)
-    : undefined;
-}
-
-function canAccessReport(
-  user: Awaited<ReturnType<typeof verifySessionToken>>,
-  reportDeviceGroupCode: string,
-) {
-  const scopedDeviceGroupCode = getScopedDeviceGroupCode(user);
-  return (
-    !scopedDeviceGroupCode ||
-    normalizeDeviceGroupCode(reportDeviceGroupCode) === scopedDeviceGroupCode
-  );
 }

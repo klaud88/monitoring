@@ -2,8 +2,11 @@
 
 import { useMemo, useState } from "react";
 import {
+  ChevronDown,
+  ChevronUp,
   Edit3,
   Mail,
+  MapPin,
   Phone,
   Plus,
   Save,
@@ -47,6 +50,7 @@ type UserDraft = {
   initials: string;
   color: string;
   password: string;
+  gardenCodes: string[];
 };
 
 function buildEmptyDraft(role: string): UserDraft {
@@ -58,16 +62,20 @@ function buildEmptyDraft(role: string): UserDraft {
     initials: "",
     color: "#2563eb",
     password: "",
+    gardenCodes: [],
   };
 }
 
 export function UsersManager({
   initialUsers,
   roles,
+  gardens,
   permissions,
 }: {
   initialUsers: SessionUser[];
   roles: AppRole[];
+  /** Every garden code, for linking users to gardens (garden-scope.ts). */
+  gardens: string[];
   permissions: UserPermissions;
 }) {
   const roleOptions = roles.length ? roles : fallbackRoleOptions;
@@ -103,7 +111,8 @@ export function UsersManager({
         user.name.toLowerCase().includes(normalized) ||
         user.email.toLowerCase().includes(normalized) ||
         (user.phone ?? "").includes(normalized) ||
-        user.role.toLowerCase().includes(normalized),
+        user.role.toLowerCase().includes(normalized) ||
+        (user.gardenCodes ?? []).includes(normalized),
     );
   }, [query, users]);
 
@@ -149,6 +158,7 @@ export function UsersManager({
       initials: user.initials,
       color: user.color,
       password: "",
+      gardenCodes: user.gardenCodes ?? [],
     });
     setError("");
   }
@@ -326,6 +336,13 @@ export function UsersManager({
                 />
               </label>
             </div>
+            <GardenPicker
+              gardens={gardens}
+              value={draft.gardenCodes}
+              onChange={(gardenCodes) =>
+                setDraft((current) => ({ ...current, gardenCodes }))
+              }
+            />
             <button className="primary-button" type="submit" disabled={saving}>
               <Plus size={18} />
               <span>მომხმარებლის დამატება</span>
@@ -421,6 +438,13 @@ export function UsersManager({
                         }))
                       }
                     />
+                    <GardenPicker
+                      gardens={gardens}
+                      value={editDraft.gardenCodes}
+                      onChange={(gardenCodes) =>
+                        setEditDraft((current) => ({ ...current, gardenCodes }))
+                      }
+                    />
                   </div>
                   <div className="row-actions">
                     <button
@@ -457,6 +481,12 @@ export function UsersManager({
                       <span>
                         <Phone size={14} />
                         {user.phone}
+                      </span>
+                    ) : null}
+                    {user.gardenCodes?.length ? (
+                      <span title={user.gardenCodes.map((code) => `ბაღი ${code}`).join(", ")}>
+                        <MapPin size={14} />
+                        {formatGardens(user.gardenCodes)}
                       </span>
                     ) : null}
                   </div>
@@ -533,7 +563,98 @@ function normalizeDraft(draft: UserDraft) {
     initials: (draft.initials.trim() || buildInitials(draft.name)).toUpperCase(),
     color: draft.color,
     password: draft.password,
+    gardenCodes: draft.gardenCodes,
   };
+}
+
+const GARDENS_SHOWN = 5;
+
+function formatGardens(codes: string[]) {
+  const shown = codes.slice(0, GARDENS_SHOWN).join(", ");
+  const more = codes.length - GARDENS_SHOWN;
+  return `ბაღი ${shown}${more > 0 ? ` +${more}` : ""}`;
+}
+
+/** Links a user to any number of gardens; with none linked, the role decides (garden-scope.ts). */
+function GardenPicker({
+  gardens,
+  value,
+  onChange,
+}: {
+  gardens: string[];
+  value: string[];
+  onChange: (gardenCodes: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const selected = new Set(value);
+  // A link kept from before stays listed even if its devices are gone.
+  const options = [...new Set([...gardens, ...value])];
+  const normalized = query.trim().toLowerCase();
+  const visible = normalized
+    ? options.filter((code) => code.toLowerCase().includes(normalized))
+    : options;
+
+  function toggle(code: string) {
+    onChange(
+      selected.has(code)
+        ? value.filter((item) => item !== code)
+        : [...value, code].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+    );
+  }
+
+  return (
+    <div className="garden-picker">
+      <button
+        className="garden-picker-toggle"
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        aria-expanded={open}
+      >
+        <MapPin size={15} />
+        <span>
+          ბაღები:{" "}
+          {value.length ? `არჩეულია ${value.length} (${formatGardens(value)})` : "არცერთი"}
+        </span>
+        {open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+      </button>
+      {open ? (
+        <div className="garden-picker-panel">
+          <div className="garden-picker-tools">
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="ბაღის ნომერი"
+              inputMode="numeric"
+            />
+            {value.length ? (
+              <button className="ghost-button" type="button" onClick={() => onChange([])}>
+                <X size={14} />
+                <span>გასუფთავება</span>
+              </button>
+            ) : null}
+          </div>
+          <div className="garden-picker-list">
+            {visible.map((code) => (
+              <button
+                key={code}
+                type="button"
+                className={`tag-toggle compact ${selected.has(code) ? "active" : ""}`}
+                onClick={() => toggle(code)}
+                aria-pressed={selected.has(code)}
+              >
+                {code}
+              </button>
+            ))}
+            {visible.length ? null : <span className="garden-picker-empty">ვერ მოიძებნა</span>}
+          </div>
+          <p className="garden-picker-hint">
+            მიბმული მომხმარებელი პრობლემებში და ფორმა ერთში მხოლოდ ამ ბაღებს ხედავს.
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function buildInitials(name: string) {

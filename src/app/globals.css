@@ -4017,6 +4017,88 @@ select.garden-region-pill {
   margin-left: 12px;
 }
 
+/* Users page: link a user to gardens (create form and inline edit). */
+.garden-picker {
+  grid-column: 1 / -1;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.garden-picker-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 750;
+  text-align: left;
+}
+
+.garden-picker-toggle > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.garden-picker-panel {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  padding: 10px;
+}
+
+.garden-picker-tools {
+  display: flex;
+  gap: 8px;
+}
+
+.garden-picker-tools input {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+.garden-picker-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.garden-picker-list .tag-toggle {
+  min-width: 44px;
+  justify-content: center;
+}
+
+.garden-picker-hint,
+.garden-picker-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* The row's info spans are inline chips; inside the picker they are not. */
+.user-row .garden-picker span {
+  display: inline;
+  margin: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
+.user-row .garden-picker span + span {
+  margin-left: 0;
+}
+
 .role-pill {
   display: inline-flex;
   align-items: center;

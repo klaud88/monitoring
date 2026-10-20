@@ -2,7 +2,14 @@ import bcrypt from "bcryptjs";
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, hasPermission, isAdmin, verifySessionToken, clearSessionPermissionCache } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
-import { deleteUser, getRoles, getUserById, updateUser } from "@/lib/repositories";
+import { parseGardenCodes } from "@/lib/garden-scope";
+import {
+  deleteUser,
+  getGardenCodes,
+  getRoles,
+  getUserById,
+  updateUser,
+} from "@/lib/repositories";
 
 export async function PATCH(
   request: NextRequest,
@@ -27,6 +34,7 @@ export async function PATCH(
     .toUpperCase()
     .slice(0, 3);
   const color = String(body?.color || "#2563eb");
+  const gardenCodes = parseGardenCodes(body?.gardenCodes);
   const roleNames = new Set((await getRoles()).map((item) => item.name));
 
   if (!name || !email || !roleNames.has(role)) {
@@ -59,6 +67,21 @@ export async function PATCH(
     return NextResponse.json({ message: "ფერის ფორმატი არასწორია." }, { status: 400 });
   }
 
+  if (gardenCodes?.length) {
+    // A garden kept from before stays valid even if its devices are gone.
+    const known = new Set([
+      ...(await getGardenCodes()),
+      ...((await getUserById(id))?.gardenCodes ?? []),
+    ]);
+    const unknown = gardenCodes.filter((code) => !known.has(code));
+    if (unknown.length) {
+      return NextResponse.json(
+        { message: `ასეთი ბაღი არ არსებობს: ${unknown.join(", ")}` },
+        { status: 400 },
+      );
+    }
+  }
+
   const updatedUser = await updateUser(id, {
     name,
     email,
@@ -67,6 +90,7 @@ export async function PATCH(
     color,
     phone,
     passwordHash: password ? await bcrypt.hash(password, 10) : undefined,
+    gardenCodes,
   });
   clearSessionPermissionCache();
 
@@ -79,7 +103,7 @@ export async function PATCH(
     action: "user.update",
     entityType: "user",
     entityId: id,
-    metadata: { email, role },
+    metadata: { email, role, gardenCodes },
     ipAddress: request.headers.get("x-forwarded-for") ?? undefined,
     userAgent: request.headers.get("user-agent") ?? undefined,
   });

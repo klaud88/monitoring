@@ -1,14 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { canAccessGarden, getGardenScope } from "@/lib/garden-scope";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { filterRegisteredTaskTags } from "@/lib/catalog";
 import {
   createProblemReport,
   getActiveProblemCategory,
+  getDeviceGroupCode,
+  getDevices,
   getTaskTagNames,
   getProblemReports,
   getUsers,
-  normalizeDeviceGroupCode,
 } from "@/lib/repositories";
 import { filterAssignableTaskUserIds } from "@/lib/task-assignees";
 import { canChooseDueDate, workingDayDueDate } from "@/lib/working-days";
@@ -25,7 +27,7 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     reports: await getProblemReports({
-      deviceGroupCode: getScopedDeviceGroupCode(user),
+      gardenCodes: getGardenScope(user, "problem_reports"),
     }),
   });
 }
@@ -87,6 +89,18 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Only a device of one of the user's gardens. Checked here because the
+  // repository answers a refused insert like a database outage (a fallback
+  // report), which would look like success.
+  const gardenScope = getGardenScope(user, "problem_reports");
+  const device = (await getDevices()).find((item) => item.id === deviceId);
+  if (!device || !canAccessGarden(gardenScope, getDeviceGroupCode(device))) {
+    return NextResponse.json(
+      { message: "ამ ბაღზე წვდომა არ გაქვთ." },
+      { status: 403 },
+    );
+  }
+
   const report = await createProblemReport(
     {
       title,
@@ -103,7 +117,7 @@ export async function POST(request: NextRequest) {
     },
     {
       createdBy: user?.id,
-      allowedDeviceGroupCode: getScopedDeviceGroupCode(user),
+      allowedGardenCodes: gardenScope,
     },
   );
 
@@ -118,10 +132,4 @@ export async function POST(request: NextRequest) {
   });
 
   return NextResponse.json({ report }, { status: 201 });
-}
-
-function getScopedDeviceGroupCode(user: Awaited<ReturnType<typeof verifySessionToken>>) {
-  return user?.role === "garden"
-    ? normalizeDeviceGroupCode(user.deviceGroupCode)
-    : undefined;
 }

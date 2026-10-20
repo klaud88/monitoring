@@ -60,6 +60,7 @@ type UserRow = {
   twofa_enabled?: boolean | number;
   twofa_secret?: string | null;
   permissions: string | null;
+  garden_codes?: string | null;
 };
 
 type RoleRow = {
@@ -519,6 +520,14 @@ export const getDeviceGroupCode = (device: Pick<Device, "code" | "name">) => {
   const name = String(device.name || "").trim();
   return normalizeDeviceGroupCode(name) || normalizeDeviceGroupCode(device.code);
 };
+
+/** Garden scope check: null/undefined = every garden (see garden-scope.ts). */
+function isGardenAllowed(
+  allowed: readonly string[] | null | undefined,
+  gardenCode: string | null | undefined,
+) {
+  return !allowed || allowed.includes(String(gardenCode ?? ""));
+}
 
 const toDateTimeString = (value: DatabaseDate) =>
   value instanceof Date ? value.toISOString() : value;
@@ -1312,6 +1321,7 @@ async function ensureOperationalSchema() {
       }
       await ensureTaskTagCatalog(connection);
       await ensureProblemReportAccess(connection);
+      await ensureUserGardens(connection);
       await ensureGardenUsersForDevices(connection);
     })
       .then(() => undefined)
@@ -1786,6 +1796,54 @@ async function ensureTaskTagCatalog(connection: PoolConnection) {
   }
 }
 
+/*
+ * A user's gardens (garden code = getDeviceGroupCode of the garden's
+ * devices). Problem reports and form one show a linked user only those
+ * gardens; see garden-scope.ts.
+ */
+async function ensureUserGardens(connection: PoolConnection) {
+  await connection.query(`
+    create table if not exists user_gardens (
+      user_id varchar(64) not null,
+      garden_code varchar(80) not null,
+      primary key (user_id, garden_code),
+      key idx_user_gardens_code (garden_code)
+    )
+  `);
+
+  // One-time: each garden account keeps its own garden as a link, and every
+  // existing role except "garden" keeps seeing all gardens when its users
+  // have none linked. New roles start without it (only linked gardens).
+  const [rows] = await connection.query<RowDataPacket[]>(
+    `select 1 from app_migrations where id = 'user_gardens_v1' limit 1`,
+  );
+  if (rows.length) {
+    return;
+  }
+  await connection.query(
+    `insert ignore into user_gardens (user_id, garden_code)
+     select id, device_group_code from users
+     where is_active = true and device_group_code is not null and device_group_code <> ''`,
+  );
+  for (const key of ["problem_reports.all_gardens", "form_one.all_gardens"]) {
+    const [pageKey, actionKey] = key.split(".");
+    await connection.query(
+      `insert ignore into permissions (id, code, label, page_key, action_key)
+       values (?, ?, ?, ?, ?)`,
+      [makeStableId("perm", key), key, key, pageKey, actionKey],
+    );
+    await connection.query(
+      `insert ignore into role_permissions (role_id, permission_id)
+       select r.id, p.id from roles r, permissions p
+       where r.name <> ? and p.code = ?`,
+      [GARDEN_ROLE_NAME, key],
+    );
+  }
+  await connection.query(
+    `insert ignore into app_migrations (id) values ('user_gardens_v1')`,
+  );
+}
+
 async function ensureGardenUsersForDevices(connection: PoolConnection) {
   const [roleRows] = await connection.query<RoleIdRow[]>(
     "select id from roles where name = ? limit 1",
@@ -1868,6 +1926,11 @@ async function ensureGardenUsersForDevices(connection: PoolConnection) {
         groupCode,
       ],
     );
+    await connection.query(
+      `insert ignore into user_gardens (user_id, garden_code)
+       select id, ? from users where email = ?`,
+      [groupCode, email],
+    );
 
     void deviceName;
   }
@@ -1890,6 +1953,11 @@ export async function getUserByEmail(email: string): Promise<AppUser | null> {
         u.must_change_password,
         u.twofa_enabled,
         u.twofa_secret,
+        (
+          select group_concat(ug.garden_code order by length(ug.garden_code), ug.garden_code separator ',')
+          from user_gardens ug
+          where ug.user_id = u.id
+        ) as garden_codes,
         group_concat(distinct p.code order by p.code separator ',') as permissions
       from users u
       join roles r on r.id = u.role_id
@@ -1936,6 +2004,7 @@ export async function getUserByEmail(email: string): Promise<AppUser | null> {
     mustChangePassword: Boolean(row.must_change_password),
     twoFactorEnabled: Boolean(row.twofa_enabled),
     twoFactorSecret: row.twofa_secret ?? undefined,
+    gardenCodes: csv(row.garden_codes),
     permissions: csv(row.permissions) as PermissionKey[],
   };
 }
@@ -2001,6 +2070,11 @@ export async function getUsers(): Promise<SessionUser[]> {
         u.device_group_code,
         u.phone,
         u.must_change_password,
+        (
+          select group_concat(ug.garden_code order by length(ug.garden_code), ug.garden_code separator ',')
+          from user_gardens ug
+          where ug.user_id = u.id
+        ) as garden_codes,
         group_concat(distinct p.code order by p.code separator ',') as permissions
       from users u
       join roles r on r.id = u.role_id
@@ -2026,6 +2100,7 @@ export async function getUsers(): Promise<SessionUser[]> {
     deviceGroupCode: row.device_group_code ?? undefined,
     phone: row.phone ?? undefined,
     mustChangePassword: Boolean(row.must_change_password),
+    gardenCodes: csv(row.garden_codes),
     permissions: csv(row.permissions) as PermissionKey[],
   }));
 }
@@ -2043,6 +2118,7 @@ export async function createUser(input: {
   color: string;
   phone?: string;
   passwordHash: string;
+  gardenCodes?: string[];
 }): Promise<SessionUser> {
   const id = makeId("u");
   const inserted = await withConnection(async (connection) => {
@@ -2071,6 +2147,7 @@ export async function createUser(input: {
         input.color,
       ],
     );
+    await replaceUserGardens(connection, id, input.gardenCodes ?? []);
 
     return getUserById(id);
   });
@@ -2099,6 +2176,8 @@ export async function updateUser(
     color: string;
     phone?: string;
     passwordHash?: string;
+    /** Replaces the user's gardens; undefined leaves them as they are. */
+    gardenCodes?: string[];
   },
 ): Promise<SessionUser | null> {
   const updated = await withConnection(async (connection) => {
@@ -2139,11 +2218,36 @@ export async function updateUser(
         [roleId, input.name, input.email, input.phone || null, input.initials, input.color, id],
       );
     }
+    if (input.gardenCodes) {
+      await replaceUserGardens(connection, id, input.gardenCodes);
+    }
 
     return getUserById(id);
   });
 
   return updated ?? null;
+}
+
+/** The gardens a user is linked to (user_gardens), replaced as a set. */
+async function replaceUserGardens(
+  connection: PoolConnection,
+  userId: string,
+  gardenCodes: string[],
+) {
+  await connection.query("delete from user_gardens where user_id = ?", [userId]);
+  const codes = [...new Set(gardenCodes.map((code) => code.trim()).filter(Boolean))];
+  if (codes.length) {
+    await connection.query(
+      "insert into user_gardens (user_id, garden_code) values ?",
+      [codes.map((code) => [userId, code])],
+    );
+  }
+}
+
+/** Every garden code that has at least one device, for validating links. */
+export async function getGardenCodes(): Promise<string[]> {
+  const devices = await getDevices();
+  return [...new Set(devices.map((device) => getDeviceGroupCode(device)).filter(Boolean))];
 }
 
 export async function deleteUser(id: string) {
@@ -4541,20 +4645,23 @@ export async function deleteTask(id: string) {
 }
 
 export async function getProblemReports({
-  deviceGroupCode,
+  gardenCodes,
 }: {
-  deviceGroupCode?: string;
+  /** Limit to these gardens; null/undefined = every garden (garden-scope.ts). */
+  gardenCodes?: string[] | null;
 } = {}): Promise<ProblemReport[]> {
   await ensureOperationalSchema();
   await completeExpiredInfoTasks();
 
   const filters: string[] = [];
-  const params: string[] = [];
-  const normalizedGroup = normalizeDeviceGroupCode(deviceGroupCode);
+  const params: unknown[] = [];
 
-  if (normalizedGroup) {
-    filters.push("pr.device_group_code = ?");
-    params.push(normalizedGroup);
+  if (gardenCodes) {
+    if (!gardenCodes.length) {
+      return [];
+    }
+    filters.push("pr.device_group_code in (?)");
+    params.push(gardenCodes);
   }
 
   const rows = await queryRows<ProblemReportRow>(
@@ -4602,7 +4709,7 @@ export async function createProblemReport(
     ProblemReport,
     "id" | "taskId" | "deviceGroupCode" | "createdAt" | "updatedAt"
   >,
-  options: { createdBy?: string; allowedDeviceGroupCode?: string } = {},
+  options: { createdBy?: string; allowedGardenCodes?: string[] | null } = {},
 ): Promise<ProblemReport> {
   await ensureOperationalSchema();
 
@@ -4620,7 +4727,7 @@ export async function createProblemReport(
     tags,
     assigneeIds,
     dueDate,
-    deviceGroupCode: normalizeDeviceGroupCode(options.allowedDeviceGroupCode),
+    deviceGroupCode: normalizeDeviceGroupCode(options.allowedGardenCodes?.[0]),
     createdBy: options.createdBy,
     createdAt,
     updatedAt: createdAt,
@@ -4636,8 +4743,8 @@ export async function createProblemReport(
       }
 
       const deviceGroupCode = getDeviceGroupCode(device);
-      const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
-      if (allowedGroup && deviceGroupCode !== allowedGroup) {
+      const allowedGardens = options.allowedGardenCodes;
+      if (!isGardenAllowed(allowedGardens, deviceGroupCode)) {
         await connection.rollback();
         return null;
       }
@@ -4704,7 +4811,7 @@ export async function updateProblemReport(
     ProblemReport,
     "id" | "taskId" | "deviceGroupCode" | "createdAt" | "updatedAt"
   >,
-  options: { allowedDeviceGroupCode?: string } = {},
+  options: { allowedGardenCodes?: string[] | null } = {},
 ): Promise<ProblemReport | null> {
   await ensureOperationalSchema();
 
@@ -4726,8 +4833,8 @@ export async function updateProblemReport(
         return null;
       }
 
-      const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
-      if (allowedGroup && existing.device_group_code !== allowedGroup) {
+      const allowedGardens = options.allowedGardenCodes;
+      if (!isGardenAllowed(allowedGardens, existing.device_group_code)) {
         await connection.rollback();
         return null;
       }
@@ -4739,7 +4846,7 @@ export async function updateProblemReport(
       }
 
       const deviceGroupCode = getDeviceGroupCode(device);
-      if (allowedGroup && deviceGroupCode !== allowedGroup) {
+      if (!isGardenAllowed(allowedGardens, deviceGroupCode)) {
         await connection.rollback();
         return null;
       }
@@ -4851,20 +4958,20 @@ export async function deleteProblemReport(id: string) {
 }
 
 export async function getFormOneRecords({
-  deviceGroupCode,
+  gardenCodes,
 }: {
-  deviceGroupCode?: string;
+  /** Limit to these gardens; null/undefined = every garden (garden-scope.ts). */
+  gardenCodes?: string[] | null;
 } = {}): Promise<FormOneRecord[]> {
-  if (isBuildTime()) {
+  if (isBuildTime() || gardenCodes?.length === 0) {
     return [];
   }
 
   await ensureOperationalSchema();
 
-  const normalizedGroup = normalizeDeviceGroupCode(deviceGroupCode);
   const rows = await prisma.form_one_records.findMany({
     orderBy: { created_at: "desc" },
-    where: normalizedGroup ? { device_group_code: normalizedGroup } : undefined,
+    where: gardenCodes ? { device_group_code: { in: gardenCodes } } : undefined,
   });
 
   return rows.map(mapPrismaFormOneRecord);
@@ -4892,7 +4999,7 @@ export async function createFormOneRecord(
     dueDate?: string;
     items: FormOneRecordItem[];
   },
-  options: { createdBy?: string; allowedDeviceGroupCode?: string } = {},
+  options: { createdBy?: string; allowedGardenCodes?: string[] | null } = {},
 ): Promise<FormOneRecord | null> {
   if (isBuildTime()) {
     return null;
@@ -4929,8 +5036,8 @@ export async function createFormOneRecord(
     }
 
     const deviceGroupCode = getDeviceGroupCode(device);
-    const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
-    if (allowedGroup && deviceGroupCode !== allowedGroup) {
+    const allowedGardens = options.allowedGardenCodes;
+    if (!isGardenAllowed(allowedGardens, deviceGroupCode)) {
       return null;
     }
 
@@ -4977,7 +5084,7 @@ export async function updateFormOneRecord(
     dueDate?: string;
     items: FormOneRecordItem[];
   },
-  options: { allowedDeviceGroupCode?: string; updatedBy?: string } = {},
+  options: { allowedGardenCodes?: string[] | null; updatedBy?: string } = {},
 ): Promise<FormOneRecord | null> {
   if (isBuildTime()) {
     return null;
@@ -5006,8 +5113,8 @@ export async function updateFormOneRecord(
       return null;
     }
 
-    const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
-    if (allowedGroup && existing.device_group_code !== allowedGroup) {
+    const allowedGardens = options.allowedGardenCodes;
+    if (!isGardenAllowed(allowedGardens, existing.device_group_code)) {
       return null;
     }
 
@@ -5020,7 +5127,7 @@ export async function updateFormOneRecord(
     }
 
     const deviceGroupCode = getDeviceGroupCode(device);
-    if (allowedGroup && deviceGroupCode !== allowedGroup) {
+    if (!isGardenAllowed(allowedGardens, deviceGroupCode)) {
       return null;
     }
 
@@ -5093,7 +5200,7 @@ export async function requestFormOneEditReview(
   options: {
     requestedBy?: string;
     requestedByName?: string;
-    allowedDeviceGroupCode?: string;
+    allowedGardenCodes?: string[] | null;
   } = {},
 ): Promise<FormOneRecord | null> {
   if (isBuildTime()) {
@@ -5117,8 +5224,8 @@ export async function requestFormOneEditReview(
       return null;
     }
 
-    const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
-    if (allowedGroup && existing.device_group_code !== allowedGroup) {
+    const allowedGardens = options.allowedGardenCodes;
+    if (!isGardenAllowed(allowedGardens, existing.device_group_code)) {
       return null;
     }
     if (
@@ -5136,7 +5243,7 @@ export async function requestFormOneEditReview(
     }
 
     const deviceGroupCode = getDeviceGroupCode(device);
-    if (allowedGroup && deviceGroupCode !== allowedGroup) {
+    if (!isGardenAllowed(allowedGardens, deviceGroupCode)) {
       return null;
     }
 
@@ -5178,7 +5285,7 @@ export async function requestFormOneEditReview(
 export async function respondToFormOneEditReview(
   id: string,
   input: { action: "approve" | "reject"; comment?: string },
-  options: { userId?: string; allowedDeviceGroupCode?: string } = {},
+  options: { userId?: string; allowedGardenCodes?: string[] | null } = {},
 ): Promise<FormOneRecord | null> {
   if (isBuildTime()) {
     return null;
@@ -5199,8 +5306,8 @@ export async function respondToFormOneEditReview(
       return null;
     }
 
-    const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
-    if (allowedGroup && existing.device_group_code !== allowedGroup) {
+    const allowedGardens = options.allowedGardenCodes;
+    if (!isGardenAllowed(allowedGardens, existing.device_group_code)) {
       return null;
     }
     if (
@@ -5328,7 +5435,7 @@ export async function resendFormOneEditReview(
   options: {
     requestedBy?: string;
     requestedByName?: string;
-    allowedDeviceGroupCode?: string;
+    allowedGardenCodes?: string[] | null;
   } = {},
 ): Promise<FormOneRecord | null> {
   if (isBuildTime()) {
@@ -5345,8 +5452,8 @@ export async function resendFormOneEditReview(
       return null;
     }
 
-    const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
-    if (allowedGroup && existing.device_group_code !== allowedGroup) {
+    const allowedGardens = options.allowedGardenCodes;
+    if (!isGardenAllowed(allowedGardens, existing.device_group_code)) {
       return null;
     }
     if (
@@ -5393,7 +5500,7 @@ export async function resendFormOneEditReview(
 
 export async function cancelFormOneEditReview(
   id: string,
-  options: { allowedDeviceGroupCode?: string } = {},
+  options: { allowedGardenCodes?: string[] | null } = {},
 ): Promise<FormOneRecord | null> {
   if (isBuildTime()) {
     return null;
@@ -5409,8 +5516,8 @@ export async function cancelFormOneEditReview(
       return null;
     }
 
-    const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
-    if (allowedGroup && existing.device_group_code !== allowedGroup) {
+    const allowedGardens = options.allowedGardenCodes;
+    if (!isGardenAllowed(allowedGardens, existing.device_group_code)) {
       return null;
     }
     if (
@@ -5447,7 +5554,7 @@ export async function cancelFormOneEditReview(
 
 export async function deleteFormOneRecord(
   id: string,
-  options: { allowedDeviceGroupCode?: string } = {},
+  options: { allowedGardenCodes?: string[] | null } = {},
 ) {
   if (isBuildTime()) {
     return false;
@@ -5464,8 +5571,8 @@ export async function deleteFormOneRecord(
       return false;
     }
 
-    const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
-    if (allowedGroup && existing.device_group_code !== allowedGroup) {
+    const allowedGardens = options.allowedGardenCodes;
+    if (!isGardenAllowed(allowedGardens, existing.device_group_code)) {
       return false;
     }
 
@@ -5477,7 +5584,7 @@ export async function deleteFormOneRecord(
 export async function requestFormOneCompletion(
   id: string,
   input: { completedItems: FormOneRecordItem[] },
-  options: { requestedBy?: string; allowedDeviceGroupCode?: string } = {},
+  options: { requestedBy?: string; allowedGardenCodes?: string[] | null } = {},
 ): Promise<FormOneRecord | null> {
   if (isBuildTime()) {
     return null;
@@ -5498,8 +5605,8 @@ export async function requestFormOneCompletion(
       return null;
     }
 
-    const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
-    if (allowedGroup && existing.device_group_code !== allowedGroup) {
+    const allowedGardens = options.allowedGardenCodes;
+    if (!isGardenAllowed(allowedGardens, existing.device_group_code)) {
       return null;
     }
     if (normalizeFormOneStatus(existing.status) === "completed") {
@@ -5548,7 +5655,7 @@ export async function respondToFormOneCompletion(
     action: "approve" | "reject";
     comment?: string;
   },
-  options: { userId?: string; allowedDeviceGroupCode?: string } = {},
+  options: { userId?: string; allowedGardenCodes?: string[] | null } = {},
 ): Promise<FormOneRecord | null> {
   if (isBuildTime()) {
     return null;
@@ -5568,8 +5675,8 @@ export async function respondToFormOneCompletion(
       return null;
     }
 
-    const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
-    if (allowedGroup && existing.device_group_code !== allowedGroup) {
+    const allowedGardens = options.allowedGardenCodes;
+    if (!isGardenAllowed(allowedGardens, existing.device_group_code)) {
       return null;
     }
 
@@ -5654,7 +5761,7 @@ export async function flagFormOneRecord(
   options: {
     userId?: string;
     userName?: string;
-    allowedDeviceGroupCode?: string;
+    allowedGardenCodes?: string[] | null;
   } = {},
 ): Promise<FormOneRecord | null> {
   if (isBuildTime()) {
@@ -5676,8 +5783,8 @@ export async function flagFormOneRecord(
       return null;
     }
 
-    const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
-    if (allowedGroup && existing.device_group_code !== allowedGroup) {
+    const allowedGardens = options.allowedGardenCodes;
+    if (!isGardenAllowed(allowedGardens, existing.device_group_code)) {
       return null;
     }
 
@@ -5698,7 +5805,7 @@ export async function flagFormOneRecord(
 
 export async function unflagFormOneRecord(
   id: string,
-  options: { allowedDeviceGroupCode?: string } = {},
+  options: { allowedGardenCodes?: string[] | null } = {},
 ): Promise<FormOneRecord | null> {
   if (isBuildTime()) {
     return null;
@@ -5714,8 +5821,8 @@ export async function unflagFormOneRecord(
       return null;
     }
 
-    const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
-    if (allowedGroup && existing.device_group_code !== allowedGroup) {
+    const allowedGardens = options.allowedGardenCodes;
+    if (!isGardenAllowed(allowedGardens, existing.device_group_code)) {
       return null;
     }
 
@@ -5738,7 +5845,7 @@ export async function updateFormOneRejectionComment(
   recordId: string,
   commentId: string,
   comment: string,
-  options: { allowedDeviceGroupCode?: string } = {},
+  options: { allowedGardenCodes?: string[] | null } = {},
 ): Promise<FormOneRecord | null> {
   if (isBuildTime()) {
     return null;
@@ -5759,8 +5866,8 @@ export async function updateFormOneRejectionComment(
       return null;
     }
 
-    const allowedGroup = normalizeDeviceGroupCode(options.allowedDeviceGroupCode);
-    if (allowedGroup && existing.device_group_code !== allowedGroup) {
+    const allowedGardens = options.allowedGardenCodes;
+    if (!isGardenAllowed(allowedGardens, existing.device_group_code)) {
       return null;
     }
 
@@ -5793,17 +5900,18 @@ export async function updateFormOneRejectionComment(
 }
 
 export async function getFormOneNotifications(
-  user: Pick<SessionUser, "id" | "role" | "deviceGroupCode"> | null,
+  user: Pick<SessionUser, "id" | "role" | "gardenCodes"> | null,
 ): Promise<FormOneNotification[]> {
   if (!user || isBuildTime()) {
     return [];
   }
 
   await ensureOperationalSchema();
-  const scopedGroup =
-    user.role === GARDEN_ROLE_NAME
-      ? normalizeDeviceGroupCode(user.deviceGroupCode)
-      : "";
+  // Garden accounts also get the notifications addressed to their gardens.
+  const scopedGardens =
+    user.role === GARDEN_ROLE_NAME && user.gardenCodes?.length
+      ? user.gardenCodes
+      : [""];
   const rows = await queryRows<FormOneNotificationRow>(
     `
       select
@@ -5850,12 +5958,12 @@ export async function getFormOneNotifications(
         and (
           n.recipient_user_id = ?
           or n.recipient_role = ?
-          or (? <> '' and n.recipient_device_group_code = ?)
+          or (n.recipient_device_group_code <> '' and n.recipient_device_group_code in (?))
         )
       order by n.created_at desc
       limit 50
     `,
-    [user.id, user.role, scopedGroup, scopedGroup],
+    [user.id, user.role, scopedGardens],
   );
 
   return (rows ?? []).map((row) => ({
@@ -5873,17 +5981,18 @@ export async function getFormOneNotifications(
 
 export async function markFormOneNotificationRead(
   notificationId: string,
-  user: Pick<SessionUser, "id" | "role" | "deviceGroupCode"> | null,
+  user: Pick<SessionUser, "id" | "role" | "gardenCodes"> | null,
 ) {
   if (!user || isBuildTime()) {
     return false;
   }
 
   await ensureOperationalSchema();
-  const scopedGroup =
-    user.role === GARDEN_ROLE_NAME
-      ? normalizeDeviceGroupCode(user.deviceGroupCode)
-      : "";
+  // Garden accounts also get the notifications addressed to their gardens.
+  const scopedGardens =
+    user.role === GARDEN_ROLE_NAME && user.gardenCodes?.length
+      ? user.gardenCodes
+      : [""];
   const updated = await withConnection(async (connection) => {
     const [result] = await connection.query<ResultSetHeader>(
       `
@@ -5894,10 +6003,10 @@ export async function markFormOneNotificationRead(
           and (
             recipient_user_id = ?
             or recipient_role = ?
-            or (? <> '' and recipient_device_group_code = ?)
+            or (recipient_device_group_code <> '' and recipient_device_group_code in (?))
           )
       `,
-      [toSqlDateTime(new Date()), notificationId, user.id, user.role, scopedGroup, scopedGroup],
+      [toSqlDateTime(new Date()), notificationId, user.id, user.role, scopedGardens],
     );
     return result.affectedRows > 0;
   });

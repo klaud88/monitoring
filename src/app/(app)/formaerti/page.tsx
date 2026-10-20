@@ -7,8 +7,8 @@ import {
   getDeviceGroupCode,
   getDevices,
   getFormOneRecords,
-  normalizeDeviceGroupCode,
 } from "@/lib/repositories";
+import { canAccessGarden, getGardenScope } from "@/lib/garden-scope";
 
 const TBILISI_TIME_ZONE = "Asia/Tbilisi";
 
@@ -19,19 +19,21 @@ export default async function FormOnePage() {
     redirect(getFirstAllowedPath(user));
   }
 
-  const deviceGroupCode =
-    user?.role === "garden" ? normalizeDeviceGroupCode(user.deviceGroupCode) : "";
+  // Linked gardens only, or every garden (see garden-scope.ts).
+  const gardenScope = getGardenScope(user, "form_one");
   const [devices, initialRecords] = await Promise.all([
     getDevices(),
-    getFormOneRecords({ deviceGroupCode: deviceGroupCode || undefined }),
+    getFormOneRecords({ gardenCodes: gardenScope }),
   ]);
-  const visibleDevices = deviceGroupCode
-    ? devices.filter((device) => getDeviceGroupCode(device) === deviceGroupCode)
-    : devices;
+  const visibleDevices = devices.filter((device) =>
+    canAccessGarden(gardenScope, getDeviceGroupCode(device)),
+  );
+  // A single garden is preselected and fixed, as for a garden account.
+  const gardenCount = new Set(visibleDevices.map(getDeviceGroupCode)).size;
 
   return (
     <FormOneManager
-      canSelectGarden={user?.role !== "garden"}
+      canSelectGarden={gardenCount > 1}
       devices={visibleDevices}
       initialRecords={initialRecords}
       permissions={{

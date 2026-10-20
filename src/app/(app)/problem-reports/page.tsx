@@ -10,8 +10,8 @@ import {
   getProblemReports,
   getTaskTagNames,
   getUsers,
-  normalizeDeviceGroupCode,
 } from "@/lib/repositories";
+import { canAccessGarden, getGardenScope } from "@/lib/garden-scope";
 import { canChooseDueDate } from "@/lib/working-days";
 
 export default async function ProblemReportsPage({
@@ -28,21 +28,19 @@ export default async function ProblemReportsPage({
     redirect(getFirstAllowedPath(user));
   }
 
-  const deviceGroupCode =
-    user?.role === "garden" ? normalizeDeviceGroupCode(user.deviceGroupCode) : "";
+  // Linked gardens only, or every garden (see garden-scope.ts).
+  const gardenScope = getGardenScope(user, "problem_reports");
   const canAssignUsers = hasPermission(user, "problem_reports.assign");
   const [devices, reports, users, taskTags, categories] = await Promise.all([
     getDevices(),
-    getProblemReports({ deviceGroupCode }),
+    getProblemReports({ gardenCodes: gardenScope }),
     canAssignUsers ? getUsers() : Promise.resolve([]),
     getTaskTagNames(),
     getProblemCategories({ activeOnly: true }),
   ]);
-  const visibleDevices = deviceGroupCode
-    ? devices.filter(
-        (device) => getDeviceGroupCode(device) === deviceGroupCode,
-      )
-    : devices;
+  const visibleDevices = devices.filter((device) =>
+    canAccessGarden(gardenScope, getDeviceGroupCode(device)),
+  );
 
   return (
     <ProblemReportsManager

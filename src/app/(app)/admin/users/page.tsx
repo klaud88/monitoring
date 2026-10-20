@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { UsersManager } from "@/components/users/users-manager";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { getFirstAllowedPath } from "@/lib/navigation";
-import { getRoles, getUsers } from "@/lib/repositories";
+import { getGardenCodes, getRoles, getUsers } from "@/lib/repositories";
 
 export default async function UsersPage() {
   const cookieStore = await cookies();
@@ -13,15 +13,17 @@ export default async function UsersPage() {
     redirect(getFirstAllowedPath(user));
   }
 
-  const [users, roles] = await Promise.all([
+  const [users, roles, gardens] = await Promise.all([
     getUsers(),
     getRoles(),
+    getGardenCodes(),
   ]);
 
   return (
     <UsersManager
       initialUsers={users}
       roles={roles}
+      gardens={gardens.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))}
       permissions={{
         create: hasPermission(user, "users.create"),
         edit: hasPermission(user, "users.edit"),

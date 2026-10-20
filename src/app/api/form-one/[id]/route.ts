@@ -1,10 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { logAudit } from "@/lib/audit";
+import { canAccessGarden, getGardenScope } from "@/lib/garden-scope";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import {
   deleteFormOneRecord,
   getFormOneRecordById,
-  normalizeDeviceGroupCode,
   requestFormOneEditReview,
   updateFormOneRecord,
 } from "@/lib/repositories";
@@ -21,7 +21,7 @@ export async function PATCH(
 
   const { id } = await context.params;
   const existing = await getFormOneRecordById(id);
-  if (!existing || !canAccessRecord(user, existing.deviceGroupCode)) {
+  if (!existing || !canAccessGarden(getGardenScope(user, "form_one"), existing.deviceGroupCode)) {
     return NextResponse.json({ message: "Form one record not found" }, { status: 404 });
   }
   if (existing.isFlagged) {
@@ -71,14 +71,14 @@ export async function PATCH(
         {
           requestedBy: user?.id,
           requestedByName: user?.name,
-          allowedDeviceGroupCode: getScopedDeviceGroupCode(user),
+          allowedGardenCodes: getGardenScope(user, "form_one"),
         },
       )
     : await updateFormOneRecord(
         id,
         { deviceId, gardenLabel, phone, submittedDate, dueDate, items },
         {
-          allowedDeviceGroupCode: getScopedDeviceGroupCode(user),
+          allowedGardenCodes: getGardenScope(user, "form_one"),
           updatedBy: user?.id,
         },
       );
@@ -111,12 +111,12 @@ export async function DELETE(
 
   const { id } = await context.params;
   const existing = await getFormOneRecordById(id);
-  if (!existing || !canAccessRecord(user, existing.deviceGroupCode)) {
+  if (!existing || !canAccessGarden(getGardenScope(user, "form_one"), existing.deviceGroupCode)) {
     return NextResponse.json({ message: "Form one record not found" }, { status: 404 });
   }
 
   const deleted = await deleteFormOneRecord(id, {
-    allowedDeviceGroupCode: getScopedDeviceGroupCode(user),
+    allowedGardenCodes: getGardenScope(user, "form_one"),
   });
   if (!deleted) {
     return NextResponse.json({ message: "Form one record not found" }, { status: 404 });
@@ -134,22 +134,7 @@ export async function DELETE(
   return NextResponse.json({ ok: true });
 }
 
-function getScopedDeviceGroupCode(user: Awaited<ReturnType<typeof verifySessionToken>>) {
-  return user?.role === "garden"
-    ? normalizeDeviceGroupCode(user.deviceGroupCode)
-    : undefined;
-}
 
-function canAccessRecord(
-  user: Awaited<ReturnType<typeof verifySessionToken>>,
-  recordDeviceGroupCode: string,
-) {
-  const scopedDeviceGroupCode = getScopedDeviceGroupCode(user);
-  return (
-    !scopedDeviceGroupCode ||
-    normalizeDeviceGroupCode(recordDeviceGroupCode) === scopedDeviceGroupCode
-  );
-}
 
 function normalizeApiItems(value: unknown): FormOneRecordItem[] {
   if (!Array.isArray(value)) {

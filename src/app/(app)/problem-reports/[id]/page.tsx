@@ -17,13 +17,13 @@ import {
 } from "lucide-react";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { getGardenDisplayName } from "@/lib/device-options";
+import { getGardenScope } from "@/lib/garden-scope";
 import { getFirstAllowedPath } from "@/lib/navigation";
 import {
   getDevices,
   getEntityAuditTrail,
   getProblemReports,
   getUsers,
-  normalizeDeviceGroupCode,
 } from "@/lib/repositories";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
 
@@ -53,11 +53,9 @@ export default async function ProblemReportDetailsPage({
     redirect(getFirstAllowedPath(user));
   }
 
-  /* Same scope as the list: a garden user only sees its own group. */
-  const deviceGroupCode =
-    user?.role === "garden" ? normalizeDeviceGroupCode(user.deviceGroupCode) : "";
+  /* Same scope as the list: linked gardens only, or every garden. */
   const [reports, devices, users, auditTrail] = await Promise.all([
-    getProblemReports({ deviceGroupCode }),
+    getProblemReports({ gardenCodes: getGardenScope(user, "problem_reports") }),
     getDevices(),
     getUsers(),
     getEntityAuditTrail("problem_report", id),

@@ -1,10 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { logAudit } from "@/lib/audit";
+import { getGardenScope } from "@/lib/garden-scope";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import {
   createFormOneRecord,
   getFormOneRecords,
-  normalizeDeviceGroupCode,
 } from "@/lib/repositories";
 import type { FormOneRecordItem } from "@/lib/types";
 
@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     records: await getFormOneRecords({
-      deviceGroupCode: getScopedDeviceGroupCode(user),
+      gardenCodes: getGardenScope(user, "form_one"),
     }),
   });
 }
@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
     },
     {
       createdBy: user?.id,
-      allowedDeviceGroupCode: getScopedDeviceGroupCode(user),
+      allowedGardenCodes: getGardenScope(user, "form_one"),
     },
   );
 
@@ -81,11 +81,6 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({ record }, { status: 201 });
 }
 
-function getScopedDeviceGroupCode(user: Awaited<ReturnType<typeof verifySessionToken>>) {
-  return user?.role === "garden"
-    ? normalizeDeviceGroupCode(user.deviceGroupCode)
-    : undefined;
-}
 
 function normalizeApiItems(value: unknown): FormOneRecordItem[] {
   if (!Array.isArray(value)) {

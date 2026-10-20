@@ -19,8 +19,13 @@ export type FeaturePage = {
 const lockedPages = new Set(["users", "permissions"]);
 
 /* Role traits rather than functions: tasks.assignable marks who can be picked
-   as an assignee, so switching it off would only empty the assignee list. */
-const hiddenActions = new Set(["tasks.assignable"]);
+   as an assignee, and *.all_gardens sets which gardens a role sees, so
+   switching them off would only empty a list. */
+const hiddenActions = new Set([
+  "tasks.assignable",
+  "problem_reports.all_gardens",
+  "form_one.all_gardens",
+]);
 
 export const featurePages: FeaturePage[] = [
   ...permissionPages.map((page) => ({

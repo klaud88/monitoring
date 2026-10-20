@@ -1,9 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { logAudit } from "@/lib/audit";
+import { canAccessGarden, getGardenScope } from "@/lib/garden-scope";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import {
   getFormOneRecordById,
-  normalizeDeviceGroupCode,
   requestFormOneCompletion,
 } from "@/lib/repositories";
 import type { FormOneRecordItem } from "@/lib/types";
@@ -19,7 +19,7 @@ export async function POST(
 
   const { id } = await context.params;
   const existing = await getFormOneRecordById(id);
-  if (!existing || !canAccessRecord(user, existing.deviceGroupCode)) {
+  if (!existing || !canAccessGarden(getGardenScope(user, "form_one"), existing.deviceGroupCode)) {
     return NextResponse.json({ message: "Form one record not found" }, { status: 404 });
   }
   if (existing.isFlagged) {
@@ -40,7 +40,7 @@ export async function POST(
     { completedItems },
     {
       requestedBy: user?.id,
-      allowedDeviceGroupCode: getScopedDeviceGroupCode(user),
+      allowedGardenCodes: getGardenScope(user, "form_one"),
     },
   );
 
@@ -61,22 +61,7 @@ export async function POST(
   return NextResponse.json({ record });
 }
 
-function getScopedDeviceGroupCode(user: Awaited<ReturnType<typeof verifySessionToken>>) {
-  return user?.role === "garden"
-    ? normalizeDeviceGroupCode(user.deviceGroupCode)
-    : undefined;
-}
 
-function canAccessRecord(
-  user: Awaited<ReturnType<typeof verifySessionToken>>,
-  recordDeviceGroupCode: string,
-) {
-  const scopedDeviceGroupCode = getScopedDeviceGroupCode(user);
-  return (
-    !scopedDeviceGroupCode ||
-    normalizeDeviceGroupCode(recordDeviceGroupCode) === scopedDeviceGroupCode
-  );
-}
 
 function normalizeApiItems(value: unknown): FormOneRecordItem[] {
   if (!Array.isArray(value)) {

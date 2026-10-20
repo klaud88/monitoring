@@ -2,7 +2,8 @@ import bcrypt from "bcryptjs";
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, hasPermission, isAdmin, verifySessionToken } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
-import { createUser, getRoles, getUsers } from "@/lib/repositories";
+import { parseGardenCodes } from "@/lib/garden-scope";
+import { createUser, getGardenCodes, getRoles, getUsers } from "@/lib/repositories";
 
 const hashPassword = (password: string) => bcrypt.hash(password, 10);
 
@@ -36,6 +37,7 @@ export async function POST(request: NextRequest) {
     .toUpperCase()
     .slice(0, 3);
   const color = String(body?.color || "#2563eb");
+  const gardenCodes = parseGardenCodes(body?.gardenCodes);
   const roleNames = new Set((await getRoles()).map((item) => item.name));
 
   if (!name || !email || !password || !roleNames.has(role)) {
@@ -67,6 +69,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ message: "ფერის ფორმატი არასწორია." }, { status: 400 });
   }
 
+  if (gardenCodes?.length) {
+    const known = new Set(await getGardenCodes());
+    const unknown = gardenCodes.filter((code) => !known.has(code));
+    if (unknown.length) {
+      return NextResponse.json(
+        { message: `ასეთი ბაღი არ არსებობს: ${unknown.join(", ")}` },
+        { status: 400 },
+      );
+    }
+  }
+
   const createdUser = await createUser({
     name,
     email,
@@ -75,6 +88,7 @@ export async function POST(request: NextRequest) {
     color,
     phone,
     passwordHash: await hashPassword(password),
+    gardenCodes,
   });
 
   await logAudit({
@@ -82,7 +96,7 @@ export async function POST(request: NextRequest) {
     action: "user.create",
     entityType: "user",
     entityId: createdUser.id,
-    metadata: { email, role },
+    metadata: { email, role, gardenCodes },
     ipAddress: request.headers.get("x-forwarded-for") ?? undefined,
     userAgent: request.headers.get("user-agent") ?? undefined,
   });

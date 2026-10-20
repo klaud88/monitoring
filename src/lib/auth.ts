@@ -86,6 +86,7 @@ type LiveAccess = {
   role: string;
   permissions: PermissionKey[];
   mustChangePassword: boolean;
+  gardenCodes: string[];
 };
 
 const LIVE_ACCESS_TTL_MS = 10_000;
@@ -112,12 +113,18 @@ async function getLiveAccess(userId: string): Promise<LiveAccess | null | undefi
     must_change_password: number | boolean;
     role_name: string;
     permissions: string | null;
+    garden_codes: string | null;
   }>(
     `
       select
         u.is_active,
         u.must_change_password,
         r.name as role_name,
+        (
+          select group_concat(ug.garden_code separator ',')
+          from user_gardens ug
+          where ug.user_id = u.id
+        ) as garden_codes,
         group_concat(distinct p.code order by p.code separator ',') as permissions
       from users u
       join roles r on r.id = u.role_id
@@ -143,6 +150,7 @@ async function getLiveAccess(userId: string): Promise<LiveAccess | null | undefi
           .split(",")
           .filter(Boolean) as PermissionKey[],
         mustChangePassword: Boolean(Number(row.must_change_password)),
+        gardenCodes: (row.garden_codes ?? "").split(",").filter(Boolean),
       }
     : null;
   liveAccessCache.set(userId, { at: Date.now(), value });
@@ -189,6 +197,9 @@ export async function verifySessionToken(token?: string): Promise<SessionUser | 
       deviceGroupCode: payload.deviceGroupCode
         ? String(payload.deviceGroupCode)
         : undefined,
+      // Live, so linking a garden on the users page applies without a new
+      // login. Unknown (database down) means no links: see garden-scope.ts.
+      gardenCodes: live?.gardenCodes ?? [],
       // Live too, so an admin password reset forces a change in open sessions.
       mustChangePassword:
         live?.mustChangePassword ?? Boolean(payload.mustChangePassword),

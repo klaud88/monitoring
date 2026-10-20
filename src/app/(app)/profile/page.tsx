@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
+import { getGardenScope } from "@/lib/garden-scope";
 import { getRoleLabel } from "@/lib/repositories";
 import { ChangePasswordForm } from "@/components/auth/change-password-form";
 import { TwoFactorSettings } from "@/components/profile/two-factor-settings";
@@ -8,6 +9,13 @@ export default async function ProfilePage() {
   const cookieStore = await cookies();
   const user = await verifySessionToken(cookieStore.get(SESSION_COOKIE)?.value);
   const roleLabel = user ? await getRoleLabel(user.role) : "";
+  const gardenScope = getGardenScope(user, "problem_reports");
+  const gardensLabel =
+    gardenScope === null
+      ? "ყველა ბაღი"
+      : gardenScope.length
+        ? gardenScope.map((code) => `ბაღი ${code}`).join(", ")
+        : "არცერთი";
 
   return (
     <>
@@ -30,6 +38,10 @@ export default async function ProfilePage() {
             <div>
               <dt>როლი</dt>
               <dd>{roleLabel}</dd>
+            </div>
+            <div>
+              <dt>ბაღები</dt>
+              <dd>{gardensLabel}</dd>
             </div>
             <div>
               <dt>ინიციალები</dt>

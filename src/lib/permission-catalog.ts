@@ -31,8 +31,16 @@ const taskActions: ActionDef[] = [
   ...tagRegistryActions,
 ];
 
+/* Off = the user sees only the gardens linked to them (garden-scope.ts). */
+const allGardensAction: ActionDef = {
+  key: "all_gardens",
+  label: "ყველა ბაღი",
+  dependsOn: "view",
+};
+
 const problemReportActions: ActionDef[] = [
   ...defaultActions,
+  allGardensAction,
   { key: "assign", label: "მომხმარებლები" },
   { key: "tag", label: "ტეგები" },
   { key: "status", label: "სტატუსები" },
@@ -41,6 +49,7 @@ const problemReportActions: ActionDef[] = [
 
 const formOneActions: ActionDef[] = [
   { key: "view", label: "ნახვა" },
+  allGardensAction,
   { key: "create", label: "ახალი ფორმის დამატება" },
   { key: "edit", label: "არჩეული ფორმის რედაქტირება" },
   { key: "garden_edit", label: "ბაღის ველი", dependsOn: "edit" },

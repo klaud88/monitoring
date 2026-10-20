@@ -1,10 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { logAudit } from "@/lib/audit";
+import { canAccessGarden, getGardenScope } from "@/lib/garden-scope";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import {
   cancelFormOneEditReview,
   getFormOneRecordById,
-  normalizeDeviceGroupCode,
 } from "@/lib/repositories";
 
 export async function DELETE(
@@ -18,12 +18,12 @@ export async function DELETE(
 
   const { id } = await context.params;
   const existing = await getFormOneRecordById(id);
-  if (!existing || !canAccessRecord(user, existing.deviceGroupCode)) {
+  if (!existing || !canAccessGarden(getGardenScope(user, "form_one"), existing.deviceGroupCode)) {
     return NextResponse.json({ message: "Form one record not found" }, { status: 404 });
   }
 
   const record = await cancelFormOneEditReview(id, {
-    allowedDeviceGroupCode: getScopedDeviceGroupCode(user),
+    allowedGardenCodes: getGardenScope(user, "form_one"),
   });
 
   if (!record) {
@@ -40,21 +40,4 @@ export async function DELETE(
   });
 
   return NextResponse.json({ record });
-}
-
-function getScopedDeviceGroupCode(user: Awaited<ReturnType<typeof verifySessionToken>>) {
-  return user?.role === "garden"
-    ? normalizeDeviceGroupCode(user.deviceGroupCode)
-    : undefined;
-}
-
-function canAccessRecord(
-  user: Awaited<ReturnType<typeof verifySessionToken>>,
-  recordDeviceGroupCode: string,
-) {
-  const scopedDeviceGroupCode = getScopedDeviceGroupCode(user);
-  return (
-    !scopedDeviceGroupCode ||
-    normalizeDeviceGroupCode(recordDeviceGroupCode) === scopedDeviceGroupCode
-  );
 }
