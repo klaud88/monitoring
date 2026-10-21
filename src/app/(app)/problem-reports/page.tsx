@@ -32,9 +32,11 @@ export default async function ProblemReportsPage({
   // Linked gardens only, or every garden (see garden-scope.ts).
   const gardenScope = getGardenScope(user, "problem_reports");
   const canAssignUsers = hasPermission(user, "problem_reports.assign");
+  const canDelete = hasPermission(user, "problem_reports.delete");
   const [devices, reports, users, taskTags, categories] = await Promise.all([
     getDevices(),
-    getProblemReports({ gardenCodes: gardenScope }),
+    // Deleted reports are loaded only for those who may restore them.
+    getProblemReports({ gardenCodes: gardenScope, includeDeleted: canDelete }),
     canAssignUsers ? getUsers() : Promise.resolve([]),
     getTaskTagNames(),
     getProblemCategories({ activeOnly: true }),
@@ -60,7 +62,7 @@ export default async function ProblemReportsPage({
       permissions={{
         create: hasPermission(user, "problem_reports.create"),
         edit: hasPermission(user, "problem_reports.edit"),
-        delete: hasPermission(user, "problem_reports.delete"),
+        delete: canDelete,
         assignUsers: canAssignUsers,
         manageTags: hasPermission(user, "problem_reports.tag"),
         createTags: hasPermission(user, "problem_reports.tag_create"),

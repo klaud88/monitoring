@@ -6075,6 +6075,26 @@ button.monitor-count-pill {
   opacity: 0.72;
 }
 
+/* Soft-deleted records (shown under the "deleted" / "all" record filter). */
+.task-row.deleted,
+.task-card2.deleted {
+  opacity: 0.55;
+  border-style: dashed;
+}
+
+.task-row.deleted .task-row-title,
+.task-card2.deleted .task-card2-title {
+  text-decoration: line-through;
+}
+
+.reports-page .task-row.deleted:hover {
+  opacity: 0.8;
+}
+
+.icon-button.restore {
+  color: var(--brand);
+}
+
 .task-card2-title {
   display: block;
   font-size: 13.5px;

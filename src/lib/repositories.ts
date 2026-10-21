@@ -398,6 +398,7 @@ type TaskRow = {
   created_at: DatabaseDate;
   problem_report_id: string | null;
   assignee_ids: string | null;
+  deleted_at: DatabaseDate | null;
 };
 
 type ProblemReportRow = {
@@ -419,6 +420,7 @@ type ProblemReportRow = {
   category_id: string | null;
   task_comment?: string | null;
   task_tags?: unknown;
+  deleted_at: DatabaseDate | null;
 };
 
 type FormOneRecordRow = {
@@ -926,6 +928,14 @@ async function ensureOperationalSchema() {
         "tasks",
         "info_auto_done_at",
         "info_auto_done_at datetime null after info_auto_done_days",
+      );
+      // Soft delete: a deleted task (and its linked report) can be restored.
+      await addColumnIfMissing(
+        connection,
+        taskColumns,
+        "tasks",
+        "deleted_at",
+        "deleted_at timestamp null",
       );
       const userColumns = await getTableColumns(connection, "users");
       await addColumnIfMissing(
@@ -1534,6 +1544,13 @@ async function ensureProblemCategorySchema(connection: PoolConnection) {
     "problem_reports",
     "category_id",
     "category_id varchar(64) null after task_id",
+  );
+  await addColumnIfMissing(
+    connection,
+    reportColumns,
+    "problem_reports",
+    "deleted_at",
+    "deleted_at timestamp null",
   );
 
   // One-time starter list, marker-gated so a category an admin deletes
@@ -4532,7 +4549,13 @@ export async function getTasks(
   {
     assigneeUserId,
     includeInfoTasks = false,
-  }: { assigneeUserId?: string; includeInfoTasks?: boolean } = {},
+    includeDeleted = false,
+  }: {
+    assigneeUserId?: string;
+    includeInfoTasks?: boolean;
+    /** Soft-deleted tasks too (the tasks page's "deleted" filter). */
+    includeDeleted?: boolean;
+  } = {},
 ): Promise<Task[]> {
   await ensureOperationalSchema();
   await completeExpiredInfoTasks();
@@ -4572,6 +4595,7 @@ export async function getTasks(
         t.starts_at,
         t.due_date,
         t.created_at,
+        t.deleted_at,
         pr.id as problem_report_id,
         group_concat(ta.user_id order by ta.user_id separator ',') as assignee_ids
       from tasks t
@@ -4586,6 +4610,7 @@ export async function getTasks(
             limit 1
           )
         )
+        ${includeDeleted ? "" : "and t.deleted_at is null"}
         ${scopeFilter}
       group by t.id
       order by t.created_at desc
@@ -4623,6 +4648,7 @@ export async function getTasks(
     createdAt: toDateTimeString(row.created_at),
     problemReportId: row.problem_report_id ?? undefined,
     assigneeIds: csv(row.assignee_ids),
+    deletedAt: row.deleted_at ? toDateTimeString(row.deleted_at) : undefined,
   }));
 }
 
@@ -4816,32 +4842,114 @@ export async function updateTask(
   return task ? { ...task, ...input, tags } : null;
 }
 
+/* Soft delete. A task and the problem report it was made from are one
+   record, so deleting either side hides both, and restoring brings both back. */
 export async function deleteTask(id: string) {
-  const deleted = await withConnection(async (connection) => {
-    const [result] = await connection.query<ResultSetHeader>(
-      "delete from tasks where id = ?",
-      [id],
-    );
-    return result.affectedRows > 0;
+  return setTaskPairDeleted({ taskId: id }, true);
+}
+
+export async function restoreTask(id: string) {
+  return setTaskPairDeleted({ taskId: id }, false);
+}
+
+export async function deleteProblemReport(id: string) {
+  return setTaskPairDeleted({ reportId: id }, true);
+}
+
+export async function restoreProblemReport(id: string) {
+  return setTaskPairDeleted({ reportId: id }, false);
+}
+
+type TaskPairResult = {
+  ok: boolean;
+  taskId?: string;
+  problemReportId?: string;
+};
+
+async function setTaskPairDeleted(
+  target: { taskId: string } | { reportId: string },
+  deleted: boolean,
+): Promise<TaskPairResult> {
+  await ensureOperationalSchema();
+
+  const result = await withConnection(async (connection) => {
+    await connection.beginTransaction();
+    try {
+      let taskId: string | undefined;
+      let reportId: string | undefined;
+      if ("taskId" in target) {
+        const [taskRows] = await connection.query<RowDataPacket[]>(
+          "select id from tasks where id = ? limit 1 for update",
+          [target.taskId],
+        );
+        taskId = taskRows[0]?.id as string | undefined;
+        const [reportRows] = await connection.query<RowDataPacket[]>(
+          "select id from problem_reports where task_id = ? limit 1 for update",
+          [target.taskId],
+        );
+        reportId = reportRows[0]?.id as string | undefined;
+      } else {
+        const [reportRows] = await connection.query<RowDataPacket[]>(
+          "select id, task_id from problem_reports where id = ? limit 1 for update",
+          [target.reportId],
+        );
+        reportId = reportRows[0]?.id as string | undefined;
+        taskId = (reportRows[0]?.task_id as string | null) || undefined;
+      }
+
+      const primaryId = "taskId" in target ? taskId : reportId;
+      if (!primaryId) {
+        await connection.rollback();
+        return { ok: false };
+      }
+
+      const value = deleted ? "current_timestamp" : "null";
+      const stateFilter = deleted
+        ? "deleted_at is null"
+        : "deleted_at is not null";
+      if (taskId) {
+        await connection.query(
+          `update tasks set deleted_at = ${value} where id = ? and ${stateFilter}`,
+          [taskId],
+        );
+      }
+      if (reportId) {
+        await connection.query(
+          `update problem_reports set deleted_at = ${value} where id = ? and ${stateFilter}`,
+          [reportId],
+        );
+      }
+
+      await connection.commit();
+      return { ok: true, taskId, problemReportId: reportId };
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    }
   });
 
-  if (deleted !== null) {
-    return deleted;
+  if (result !== null) {
+    return result;
   }
 
-  return mockTasks.some((task) => task.id === id);
+  return "taskId" in target
+    ? { ok: mockTasks.some((task) => task.id === target.taskId), taskId: target.taskId }
+    : { ok: false };
 }
 
 export async function getProblemReports({
   gardenCodes,
+  includeDeleted = false,
 }: {
   /** Limit to these gardens; null/undefined = every garden (garden-scope.ts). */
   gardenCodes?: string[] | null;
+  /** Soft-deleted reports too (the reports page's "deleted" filter). */
+  includeDeleted?: boolean;
 } = {}): Promise<ProblemReport[]> {
   await ensureOperationalSchema();
   await completeExpiredInfoTasks();
 
-  const filters: string[] = [];
+  const filters: string[] = includeDeleted ? [] : ["pr.deleted_at is null"];
   const params: unknown[] = [];
 
   if (gardenCodes) {
@@ -4870,6 +4978,7 @@ export async function getProblemReports({
         pr.created_by,
         pr.created_at,
         pr.updated_at,
+        pr.deleted_at,
         -- What the technician wrote on the linked task (problem-report-view.ts
         -- decides who may see it).
         (select t.comment_text from tasks t where t.id = pr.task_id) as task_comment,
@@ -4891,8 +5000,11 @@ export async function getProblemReports({
   return rows.map(mapProblemReportRow);
 }
 
-export async function getProblemReportById(id: string) {
-  const reports = await getProblemReports();
+export async function getProblemReportById(
+  id: string,
+  { includeDeleted = false }: { includeDeleted?: boolean } = {},
+) {
+  const reports = await getProblemReports({ includeDeleted });
   return reports.find((report) => report.id === id) ?? null;
 }
 
@@ -5119,40 +5231,6 @@ export async function updateProblemReport(
   }
 
   return getProblemReportById(updatedId);
-}
-
-export async function deleteProblemReport(id: string) {
-  await ensureOperationalSchema();
-
-  const deleted = await withConnection(async (connection) => {
-    await connection.beginTransaction();
-    try {
-      const [existingRows] = await connection.query<RowDataPacket[]>(
-        "select task_id from problem_reports where id = ? limit 1 for update",
-        [id],
-      );
-      const taskId = String(existingRows[0]?.task_id || "");
-      const [result] = await connection.query<ResultSetHeader>(
-        "delete from problem_reports where id = ?",
-        [id],
-      );
-
-      if (taskId) {
-        await connection.query<ResultSetHeader>(
-          "delete from tasks where id = ?",
-          [taskId],
-        );
-      }
-
-      await connection.commit();
-      return result.affectedRows > 0;
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    }
-  });
-
-  return deleted ?? false;
 }
 
 export async function getFormOneRecords({
@@ -6232,6 +6310,7 @@ function mapProblemReportRow(row: ProblemReportRow): ProblemReport {
     updatedAt: toDateTimeString(row.updated_at),
     taskComment: row.task_comment?.trim() || undefined,
     taskTags: row.task_id ? normalizeTaskTags(row.task_tags) : undefined,
+    deletedAt: row.deleted_at ? toDateTimeString(row.deleted_at) : undefined,
   };
 }
 

@@ -131,7 +131,8 @@ export type Task = {
   /** INFO tasks only: close automatically this many days after it was set. */
   infoAutoDoneDays?: number;
   /** When that automatic completion happens (server-computed). */
-  infoAutoDoneAt?: string;
+  infoAutoDoneAt?: string;  /** Set when soft-deleted; restoring clears it (with the linked report). */
+  deletedAt?: string;
 };
 
 export type ProblemReport = {
@@ -154,7 +155,8 @@ export type ProblemReport = {
   /** The linked task's comment and tags, set by whoever works the task.
    *  Stripped for viewers without problem_reports.task_comment / task_tags. */
   taskComment?: string;
-  taskTags?: string[];
+  taskTags?: string[];  /** Set when soft-deleted; restoring clears it (with the linked task). */
+  deletedAt?: string;
 };
 
 export type ProblemCategory = {

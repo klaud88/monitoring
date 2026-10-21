@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
-import { logAudit } from "@/lib/audit";
+import { logAudit, logTaskPairAudit } from "@/lib/audit";
 import { filterRegisteredTaskTags } from "@/lib/catalog";
 import {
   deleteTask,
@@ -12,26 +12,11 @@ import {
 } from "@/lib/repositories";
 import { filterAssignableTaskUserIds } from "@/lib/task-assignees";
 import { diffTrackedTaskFields } from "@/lib/task-history";
-import { resolveTaskVisibilityScope } from "@/lib/task-visibility";
-import type { SessionUser, Task, TaskPriority, TaskStatus } from "@/lib/types";
+import { canAccessTask } from "@/lib/task-visibility";
+import type { TaskPriority, TaskStatus } from "@/lib/types";
 
 const taskStatuses: TaskStatus[] = ["planned", "in_progress", "blocked", "done"];
 const priorities: TaskPriority[] = ["low", "normal", "high", "urgent"];
-
-// A role with plain tasks.edit/tasks.delete (no tasks.view_all) is meant to
-// act only on tasks it can actually see — mirrors the GET list's own
-// resolveTaskVisibilityScope so PATCH/DELETE can't reach a task outside
-// that scope just because the id is guessable.
-function canAccessTask(user: SessionUser | null, task: Task): boolean {
-  const scope = resolveTaskVisibilityScope(user);
-  if (!scope.assigneeUserId) {
-    return true;
-  }
-  if (task.assigneeIds.includes(scope.assigneeUserId)) {
-    return true;
-  }
-  return scope.includeInfoTasks && Boolean(task.info);
-}
 
 export async function PATCH(
   request: NextRequest,
@@ -161,18 +146,11 @@ export async function DELETE(
   }
 
   const deleted = await deleteTask(id);
-  if (!deleted) {
+  if (!deleted.ok) {
     return NextResponse.json({ message: "Task not found" }, { status: 404 });
   }
 
-  await logAudit({
-    userId: user!.id,
-    action: "task.delete",
-    entityType: "task",
-    entityId: id,
-    ipAddress: request.headers.get("x-forwarded-for") ?? undefined,
-    userAgent: request.headers.get("user-agent") ?? undefined
-  });
+  await logTaskPairAudit(request, user!.id, "delete", deleted);
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, problemReportId: deleted.problemReportId });
 }

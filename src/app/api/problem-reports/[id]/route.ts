@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { canAccessGarden, getGardenScope } from "@/lib/garden-scope";
 import { redactTaskFields } from "@/lib/problem-report-view";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
-import { logAudit } from "@/lib/audit";
+import { logAudit, logTaskPairAudit } from "@/lib/audit";
 import { filterRegisteredTaskTags } from "@/lib/catalog";
 import {
   deleteProblemReport,
@@ -173,20 +173,13 @@ export async function DELETE(
   }
 
   const deleted = await deleteProblemReport(id);
-  if (!deleted) {
+  if (!deleted.ok) {
     return NextResponse.json({ message: "Problem report not found" }, { status: 404 });
   }
 
-  await logAudit({
-    userId: user!.id,
-    action: "problem_report.delete",
-    entityType: "problem_report",
-    entityId: id,
-    ipAddress: request.headers.get("x-forwarded-for") ?? undefined,
-    userAgent: request.headers.get("user-agent") ?? undefined,
-  });
+  await logTaskPairAudit(request, user!.id, "delete", deleted);
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, taskId: deleted.taskId });
 }
 
 /* An empty comment is "", so writing the first one counts as a change. */

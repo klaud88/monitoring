@@ -24,9 +24,11 @@ export default async function TasksPage({
   }
 
   const scope = resolveTaskVisibilityScope(user);
+  const canDelete = hasPermission(user, "tasks.delete");
   const [devices, tasks, users, taskTags] = await Promise.all([
     getDevices(),
-    getTasks(scope),
+    // Deleted tasks are loaded only for those who may restore them.
+    getTasks({ ...scope, includeDeleted: canDelete }),
     getUsers(),
     getTaskTagNames(),
   ]);
@@ -44,7 +46,7 @@ export default async function TasksPage({
       permissions={{
         create: hasPermission(user, "tasks.create"),
         edit: hasPermission(user, "tasks.edit"),
-        delete: hasPermission(user, "tasks.delete"),
+        delete: canDelete,
         createTags: hasPermission(user, "tasks.tag_create"),
         renameTags: hasPermission(user, "tasks.tag_edit"),
         deleteTags: hasPermission(user, "tasks.tag_delete"),

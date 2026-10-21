@@ -1,5 +1,5 @@
 import { hasPermission } from "./permissions";
-import type { SessionUser } from "./types";
+import type { SessionUser, Task } from "./types";
 
 export type TaskVisibilityScope = {
   /** undefined = unrestricted (tasks.view_all). Set = only this user's tasks
@@ -22,4 +22,19 @@ export function resolveTaskVisibilityScope(
     assigneeUserId: hasPermission(user, "tasks.view_all") ? undefined : user?.id,
     includeInfoTasks: hasPermission(user, "tasks.info"),
   };
+}
+
+/** A role with plain tasks.edit/tasks.delete (no tasks.view_all) is meant to
+ *  act only on tasks it can actually see — mirrors the GET list's own scope
+ *  so PATCH/DELETE/restore can't reach a task outside it just because the id
+ *  is guessable. */
+export function canAccessTask(user: SessionUser | null, task: Task): boolean {
+  const scope = resolveTaskVisibilityScope(user);
+  if (!scope.assigneeUserId) {
+    return true;
+  }
+  if (task.assigneeIds.includes(scope.assigneeUserId)) {
+    return true;
+  }
+  return scope.includeInfoTasks && Boolean(task.info);
 }

@@ -14,6 +14,7 @@ import {
   List,
   MapPin,
   Plus,
+  RotateCcw,
   Save,
   Search,
   Tag,
@@ -26,6 +27,11 @@ import { AssigneeToggle } from "@/components/common/assignee-toggle";
 import { TagChipControl } from "@/components/common/tag-chip-control";
 import { useConfirmDialog } from "@/components/common/confirm-dialog";
 import { FiltersToggle } from "@/components/common/filters-toggle";
+import {
+  RecordStateSelect,
+  matchesRecordState,
+  type RecordState,
+} from "@/components/common/record-state-select";
 import { TaskTagPicker } from "@/components/tasks/task-tag-picker";
 import {
   buildGardenOptions,
@@ -133,6 +139,7 @@ export function TasksManager({
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all");
   const [userFilter, setUserFilter] = useState("all");
+  const [recordState, setRecordState] = useState<RecordState>("active");
   const [managingTags, setManagingTags] = useState(false);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [query, setQuery] = useState("");
@@ -186,10 +193,16 @@ export function TasksManager({
     [users],
   );
 
+  /** Active / deleted / all — every count on the page follows this. */
+  const recordTasks = useMemo(
+    () => tasks.filter((task) => matchesRecordState(task, recordState)),
+    [recordState, tasks],
+  );
+
   /** Everything except the status filter, so the status chips can show counts. */
   const scopedTasks = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    return tasks.filter((task) => {
+    return recordTasks.filter((task) => {
       const device = deviceMap.get(task.deviceId);
       const displayTitle = withoutDeviceCodes(task.title, [device?.code]);
       const displayIssue = withoutDeviceCodes(task.issue, [device?.code]);
@@ -205,7 +218,7 @@ export function TasksManager({
         device?.name.toLowerCase().includes(normalized);
       return matchesUser && matchesTags && matchesQuery;
     });
-  }, [deviceMap, query, selectedTags, tasks, userFilter]);
+  }, [deviceMap, query, recordTasks, selectedTags, userFilter]);
 
   const statusCounts = useMemo(() => {
     const counts: Record<TaskStatus, number> = {
@@ -232,6 +245,7 @@ export function TasksManager({
   const activeFilterCount =
     (statusFilter === "all" ? 0 : 1) +
     (userFilter === "all" ? 0 : 1) +
+    (recordState === "active" ? 0 : 1) +
     selectedTags.length;
 
   const groupedTasks = useMemo(() => {
@@ -247,11 +261,13 @@ export function TasksManager({
     return groups;
   }, [filteredTasks]);
 
-  const doneCount = tasks.filter((task) => task.status === "done").length;
-  const activeCount = tasks.filter(
+  const doneCount = recordTasks.filter((task) => task.status === "done").length;
+  const activeCount = recordTasks.filter(
     (task) => task.status === "planned" || task.status === "in_progress",
   ).length;
-  const blockedCount = tasks.filter((task) => task.status === "blocked").length;
+  const blockedCount = recordTasks.filter(
+    (task) => task.status === "blocked",
+  ).length;
 
   const editorMode: "create" | "edit" | null = createOpen
     ? "create"
@@ -316,7 +332,7 @@ export function TasksManager({
     }
 
     const task = tasks.find((item) => item.id === initialEditTaskId);
-    if (!task) {
+    if (!task || task.deletedAt) {
       return;
     }
 
@@ -675,7 +691,12 @@ export function TasksManager({
       return;
     }
 
-    const confirmed = await confirm();
+    const linked = tasks.find((task) => task.id === taskId)?.problemReportId;
+    const confirmed = await confirm({
+      message: linked
+        ? "ნამდვილად გსურთ დავალების წაშლა? დაკავშირებული პრობლემაც წაიშლება."
+        : "ნამდვილად გსურთ დავალების წაშლა?",
+    });
     if (!confirmed) {
       return;
     }
@@ -692,7 +713,52 @@ export function TasksManager({
       return;
     }
 
-    setTasks((current) => current.filter((task) => task.id !== taskId));
+    // Kept in the list as deleted, so the "deleted" filter can restore it.
+    const deletedAt = new Date().toISOString();
+    setTasks((current) =>
+      current.map((task) => (task.id === taskId ? { ...task, deletedAt } : task)),
+    );
+    if (editingTaskId === taskId) {
+      setEditingTaskId(null);
+      setEditDraft(null);
+    }
+  }
+
+  async function restoreTask(taskId: string) {
+    if (!permissions.delete) {
+      return;
+    }
+
+    const linked = tasks.find((task) => task.id === taskId)?.problemReportId;
+    const confirmed = await confirm({
+      title: "აღდგენის დადასტურება",
+      message: linked
+        ? "ნამდვილად გსურთ დავალების აღდგენა? დაკავშირებული პრობლემაც აღდგება."
+        : "ნამდვილად გსურთ დავალების აღდგენა?",
+      confirmLabel: "აღდგენა",
+      tone: "primary",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    setSavingTaskId(taskId);
+    setError("");
+    const response = await fetch(`/api/tasks/${taskId}/restore`, {
+      method: "POST",
+    }).catch(() => null);
+    setSavingTaskId(null);
+
+    if (!response?.ok) {
+      setError("დავალების აღდგენა ვერ მოხერხდა.");
+      return;
+    }
+
+    setTasks((current) =>
+      current.map((task) =>
+        task.id === taskId ? { ...task, deletedAt: undefined } : task,
+      ),
+    );
   }
 
   const visibleStatuses = statusOrder.filter(
@@ -709,6 +775,7 @@ export function TasksManager({
     onChangeStatus: changeStatus,
     onEdit: startEditTask,
     onDelete: removeTask,
+    onRestore: restoreTask,
   };
 
   return (
@@ -719,7 +786,7 @@ export function TasksManager({
         <div>
           <h1>დავალებები და ვიზიტები</h1>
           <p className="tasks-stat-line">
-            <strong>{tasks.length}</strong> დავალება
+            <strong>{recordTasks.length}</strong> დავალება
             <span className="tasks-stat active">{activeCount} აქტიური</span>
             <span className="tasks-stat blocked">{blockedCount} შეჩერებული</span>
             <span className="tasks-stat done">{doneCount} დასრულებული</span>
@@ -822,6 +889,9 @@ export function TasksManager({
             ))}
           </select>
         </label>
+        {permissions.delete ? (
+          <RecordStateSelect value={recordState} onChange={setRecordState} />
+        ) : null}
         {availableTags.length ? (
           <>
             <span className="tasks-toolbar-divider" />
@@ -1380,6 +1450,7 @@ type RowProps = {
   onChangeStatus: (taskId: string, status: TaskStatus) => void;
   onEdit: (task: Task) => void;
   onDelete: (taskId: string) => void;
+  onRestore: (taskId: string) => void;
 };
 
 function TaskRow({
@@ -1391,6 +1462,7 @@ function TaskRow({
   onChangeStatus,
   onEdit,
   onDelete,
+  onRestore,
 }: RowProps) {
   const device = deviceMap.get(task.deviceId);
   const displayTitle = withoutDeviceCodes(task.title, [device?.code]);
@@ -1400,7 +1472,7 @@ function TaskRow({
   return (
     <article
       id={`task-${task.id}`}
-      className={`task-grid task-row${overdue ? " urgent" : ""}${task.status === "done" ? " muted" : ""}`}
+      className={`task-grid task-row${overdue ? " urgent" : ""}${task.status === "done" ? " muted" : ""}${task.deletedAt ? " deleted" : ""}`}
     >
       <span
         className={
@@ -1461,7 +1533,7 @@ function TaskRow({
       </span>
       <StatusPill
         task={task}
-        canEdit={permissions.edit}
+        canEdit={permissions.edit && !task.deletedAt}
         onChangeStatus={onChangeStatus}
       />
       <span className={`task-row-due${overdue ? " overdue" : ""}`}>
@@ -1472,29 +1544,14 @@ function TaskRow({
         </span>
       </span>
       <div className="task-row-actions">
-        {permissions.edit ? (
-          <button
-            className="icon-button"
-            type="button"
-            onClick={() => onEdit(task)}
-            aria-label="დავალების რედაქტირება"
-            title="დავალების რედაქტირება"
-          >
-            <Edit3 size={15} />
-          </button>
-        ) : null}
-        {permissions.delete ? (
-          <button
-            className="icon-button danger"
-            type="button"
-            onClick={() => onDelete(task.id)}
-            disabled={savingTaskId === task.id}
-            aria-label="დავალების წაშლა"
-            title="დავალების წაშლა"
-          >
-            <Trash2 size={15} />
-          </button>
-        ) : null}
+        <TaskActions
+          task={task}
+          permissions={permissions}
+          savingTaskId={savingTaskId}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          onRestore={onRestore}
+        />
       </div>
     </article>
   );
@@ -1509,6 +1566,7 @@ function TaskCard({
   onChangeStatus,
   onEdit,
   onDelete,
+  onRestore,
 }: RowProps) {
   const device = deviceMap.get(task.deviceId);
   const displayTitle = withoutDeviceCodes(task.title, [device?.code]);
@@ -1518,7 +1576,7 @@ function TaskCard({
   return (
     <article
       id={`task-${task.id}`}
-      className={`task-card2${overdue ? " urgent" : ""}${task.status === "done" ? " muted" : ""}`}
+      className={`task-card2${overdue ? " urgent" : ""}${task.status === "done" ? " muted" : ""}${task.deletedAt ? " deleted" : ""}`}
     >
       <TaskChips task={task} />
       <Link className="task-card2-title" href={`/tasks/${task.id}`}>
@@ -1558,36 +1616,77 @@ function TaskCard({
       <div className="task-card2-foot">
         <StatusPill
           task={task}
-          canEdit={permissions.edit}
+          canEdit={permissions.edit && !task.deletedAt}
           onChangeStatus={onChangeStatus}
         />
         <div className="task-row-actions" style={{ marginLeft: "auto" }}>
-          {permissions.edit ? (
-            <button
-              className="icon-button"
-              type="button"
-              onClick={() => onEdit(task)}
-              aria-label="დავალების რედაქტირება"
-              title="დავალების რედაქტირება"
-            >
-              <Edit3 size={15} />
-            </button>
-          ) : null}
-          {permissions.delete ? (
-            <button
-              className="icon-button danger"
-              type="button"
-              onClick={() => onDelete(task.id)}
-              disabled={savingTaskId === task.id}
-              aria-label="დავალების წაშლა"
-              title="დავალების წაშლა"
-            >
-              <Trash2 size={15} />
-            </button>
-          ) : null}
+          <TaskActions
+            task={task}
+            permissions={permissions}
+            savingTaskId={savingTaskId}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            onRestore={onRestore}
+          />
         </div>
       </div>
     </article>
+  );
+}
+
+/** Edit + delete, or — on a deleted task — a single restore button. */
+function TaskActions({
+  task,
+  permissions,
+  savingTaskId,
+  onEdit,
+  onDelete,
+  onRestore,
+}: Pick<
+  RowProps,
+  "task" | "permissions" | "savingTaskId" | "onEdit" | "onDelete" | "onRestore"
+>) {
+  if (task.deletedAt) {
+    return permissions.delete ? (
+      <button
+        className="icon-button restore"
+        type="button"
+        onClick={() => onRestore(task.id)}
+        disabled={savingTaskId === task.id}
+        aria-label="დავალების აღდგენა"
+        title="დავალების აღდგენა"
+      >
+        <RotateCcw size={15} />
+      </button>
+    ) : null;
+  }
+
+  return (
+    <>
+      {permissions.edit ? (
+        <button
+          className="icon-button"
+          type="button"
+          onClick={() => onEdit(task)}
+          aria-label="დავალების რედაქტირება"
+          title="დავალების რედაქტირება"
+        >
+          <Edit3 size={15} />
+        </button>
+      ) : null}
+      {permissions.delete ? (
+        <button
+          className="icon-button danger"
+          type="button"
+          onClick={() => onDelete(task.id)}
+          disabled={savingTaskId === task.id}
+          aria-label="დავალების წაშლა"
+          title="დავალების წაშლა"
+        >
+          <Trash2 size={15} />
+        </button>
+      ) : null}
+    </>
   );
 }
 

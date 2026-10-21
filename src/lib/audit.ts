@@ -39,3 +39,39 @@ export async function logAudit(input: AuditInput) {
     });
   }
 }
+
+/* A task and its problem report are deleted and restored together, so each
+   side that was touched gets its own audit entry. */
+export async function logTaskPairAudit(
+  request: Request,
+  userId: string,
+  action: "delete" | "restore",
+  pair: { taskId?: string; problemReportId?: string },
+) {
+  const ipAddress = request.headers.get("x-forwarded-for") ?? undefined;
+  const userAgent = request.headers.get("user-agent") ?? undefined;
+  if (pair.taskId) {
+    await logAudit({
+      userId,
+      action: `task.${action}`,
+      entityType: "task",
+      entityId: pair.taskId,
+      metadata: pair.problemReportId
+        ? { problemReportId: pair.problemReportId }
+        : undefined,
+      ipAddress,
+      userAgent,
+    });
+  }
+  if (pair.problemReportId) {
+    await logAudit({
+      userId,
+      action: `problem_report.${action}`,
+      entityType: "problem_report",
+      entityId: pair.problemReportId,
+      metadata: pair.taskId ? { taskId: pair.taskId } : undefined,
+      ipAddress,
+      userAgent,
+    });
+  }
+}

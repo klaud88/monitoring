@@ -9,6 +9,7 @@ import {
   Filter,
   MapPin,
   Plus,
+  RotateCcw,
   Save,
   Search,
   Trash2,
@@ -17,6 +18,11 @@ import {
 import { AssigneeToggle } from "@/components/common/assignee-toggle";
 import { useConfirmDialog } from "@/components/common/confirm-dialog";
 import { FiltersToggle } from "@/components/common/filters-toggle";
+import {
+  RecordStateSelect,
+  matchesRecordState,
+  type RecordState,
+} from "@/components/common/record-state-select";
 import { TaskTagPicker } from "@/components/tasks/task-tag-picker";
 import { formatShortDate } from "@/lib/display";
 import { mergeTags, renameTagInList } from "@/lib/tags";
@@ -137,6 +143,7 @@ export function ProblemReportsManager({
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all");
   const [deviceFilter, setDeviceFilter] = useState("all");
+  const [recordState, setRecordState] = useState<RecordState>("active");
   const [editingReportId, setEditingReportId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<ReportDraft | null>(null);
   const [saving, setSaving] = useState(false);
@@ -167,10 +174,16 @@ export function ProblemReportsManager({
     () => new Map(users.map((user) => [user.id, user])),
     [users],
   );
+  /** Active / deleted / all — every count on the page follows this. */
+  const recordReports = useMemo(
+    () => reports.filter((report) => matchesRecordState(report, recordState)),
+    [recordState, reports],
+  );
+
   /** Everything except the status filter, so the status chips can show counts. */
   const scopedReports = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    return reports.filter((report) => {
+    return recordReports.filter((report) => {
       const device = deviceMap.get(report.deviceId);
       const matchesDevice =
         deviceFilter === "all" ||
@@ -190,7 +203,7 @@ export function ProblemReportsManager({
 
       return matchesDevice && matchesQuery;
     });
-  }, [deviceFilter, deviceMap, query, reports]);
+  }, [deviceFilter, deviceMap, query, recordReports]);
 
   const statusCounts = useMemo(() => {
     const counts: Record<TaskStatus, number> = {
@@ -220,8 +233,10 @@ export function ProblemReportsManager({
     [scopedReports, statusFilter],
   );
 
-  const doneCount = reports.filter((report) => report.status === "done").length;
-  const overdueCount = reports.filter(isOverdueReport).length;
+  const doneCount = recordReports.filter(
+    (report) => report.status === "done",
+  ).length;
+  const overdueCount = recordReports.filter(isOverdueReport).length;
 
   const editorMode: "create" | "edit" | null = createOpen
     ? "create"
@@ -293,7 +308,7 @@ export function ProblemReportsManager({
     }
 
     const report = reports.find((item) => item.id === initialEditReportId);
-    if (!report) {
+    if (!report || report.deletedAt) {
       return;
     }
 
@@ -375,7 +390,12 @@ export function ProblemReportsManager({
       return;
     }
 
-    const confirmed = await confirm();
+    const linked = reports.find((report) => report.id === reportId)?.taskId;
+    const confirmed = await confirm({
+      message: linked
+        ? "ნამდვილად გსურთ პრობლემის წაშლა? დაკავშირებული დავალებაც წაიშლება."
+        : "ნამდვილად გსურთ პრობლემის წაშლა?",
+    });
     if (!confirmed) {
       return;
     }
@@ -392,12 +412,56 @@ export function ProblemReportsManager({
       return;
     }
 
-    setReports((current) => current.filter((report) => report.id !== reportId));
+    // Kept in the list as deleted, so the "deleted" filter can restore it.
+    const deletedAt = new Date().toISOString();
+    setReports((current) =>
+      current.map((report) =>
+        report.id === reportId ? { ...report, deletedAt } : report,
+      ),
+    );
     if (editingReportId === reportId) {
       setEditingReportId(null);
       setEditDraft(null);
     }
   }
+
+  async function restoreReport(reportId: string) {
+    if (!permissions.delete) {
+      return;
+    }
+
+    const linked = reports.find((report) => report.id === reportId)?.taskId;
+    const confirmed = await confirm({
+      title: "აღდგენის დადასტურება",
+      message: linked
+        ? "ნამდვილად გსურთ პრობლემის აღდგენა? დაკავშირებული დავალებაც აღდგება."
+        : "ნამდვილად გსურთ პრობლემის აღდგენა?",
+      confirmLabel: "აღდგენა",
+      tone: "primary",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    const response = await fetch(`/api/problem-reports/${reportId}/restore`, {
+      method: "POST",
+    }).catch(() => null);
+    setSaving(false);
+
+    if (!response?.ok) {
+      setError("პრობლემის აღდგენა ვერ მოხერხდა.");
+      return;
+    }
+
+    setReports((current) =>
+      current.map((report) =>
+        report.id === reportId ? { ...report, deletedAt: undefined } : report,
+      ),
+    );
+  }
+
 
   function toggleDraftTag(tagName: string) {
     setDraft((current) => ({
@@ -546,7 +610,7 @@ export function ProblemReportsManager({
         <div>
           <h1>პრობლემის დაფიქსირება</h1>
           <p>
-            {reports.length} დაფიქსირებული · {doneCount} დასრულებული ·{" "}
+            {recordReports.length} დაფიქსირებული · {doneCount} დასრულებული ·{" "}
             {overdueCount} ვადაგასული
           </p>
         </div>
@@ -587,7 +651,9 @@ export function ProblemReportsManager({
         <FiltersToggle
           open={filtersOpen}
           count={
-            (statusFilter === "all" ? 0 : 1) + (deviceFilter === "all" ? 0 : 1)
+            (statusFilter === "all" ? 0 : 1) +
+            (deviceFilter === "all" ? 0 : 1) +
+            (recordState === "active" ? 0 : 1)
           }
           onToggle={() => setFiltersOpen((current) => !current)}
         />
@@ -621,6 +687,9 @@ export function ProblemReportsManager({
             ))}
           </select>
         </label>
+        {permissions.delete ? (
+          <RecordStateSelect value={recordState} onChange={setRecordState} />
+        ) : null}
       </section>
 
       {/* Phone-width status switch — the same filter the toolbar select drives. */}
@@ -783,7 +852,7 @@ export function ProblemReportsManager({
                     <article
                       key={report.id}
                       id={`report-${report.id}`}
-                      className={`report-grid task-row${overdue ? " urgent" : ""}${report.status === "done" ? " muted" : ""}`}
+                      className={`report-grid task-row${overdue ? " urgent" : ""}${report.status === "done" ? " muted" : ""}${report.deletedAt ? " deleted" : ""}`}
                     >
                       <span
                         className={`issue-indicator ${getIssueIndicatorState(report)}`}
@@ -854,7 +923,21 @@ export function ProblemReportsManager({
                         </span>
                       </span>
                       <div className="task-row-actions">
-                        {canUpdate ? (
+                        {report.deletedAt ? (
+                          permissions.delete ? (
+                            <button
+                              className="icon-button restore"
+                              type="button"
+                              aria-label="აღდგენა"
+                              title="აღდგენა"
+                              disabled={saving}
+                              onClick={() => restoreReport(report.id)}
+                            >
+                              <RotateCcw size={15} />
+                            </button>
+                          ) : null
+                        ) : null}
+                        {canUpdate && !report.deletedAt ? (
                           <button
                             className="icon-button"
                             type="button"
@@ -865,7 +948,7 @@ export function ProblemReportsManager({
                             <Edit3 size={15} />
                           </button>
                         ) : null}
-                        {permissions.delete ? (
+                        {permissions.delete && !report.deletedAt ? (
                           <button
                             className="icon-button danger"
                             type="button"

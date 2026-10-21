@@ -7,6 +7,8 @@ type ConfirmDialogOptions = {
   message?: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  /** "danger" (red, default) for deletes; "primary" for e.g. restoring. */
+  tone?: "danger" | "primary";
 };
 
 type ConfirmDialogRequest = Required<ConfirmDialogOptions> & {
@@ -18,6 +20,7 @@ const defaultConfirmOptions: Required<ConfirmDialogOptions> = {
   message: "ნამდვილად გსურთ აღნიშნულის წაშლა?",
   confirmLabel: "კი",
   cancelLabel: "არა",
+  tone: "danger",
 };
 
 export function useConfirmDialog() {
@@ -57,7 +60,7 @@ export function useConfirmDialog() {
             {request.cancelLabel}
           </button>
           <button
-            className="primary-button danger"
+            className={`primary-button${request.tone === "danger" ? " danger" : ""}`}
             type="button"
             onClick={() => close(true)}
           >
