@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarDays,
+  ChevronDown,
   ChevronUp,
   Edit3,
   Filter,
@@ -108,6 +109,7 @@ const OTHER_CATEGORY = "__other__";
 /* List order: active work first, finished last. */
 const listStatusOrder: TaskStatus[] = ["in_progress", "planned", "blocked", "done"];
 const today = new Date().toISOString().slice(0, 10);
+const phoneMediaQuery = "(max-width: 760px)";
 
 function emptyDraft(deviceId: string): ReportDraft {
   return {
@@ -153,6 +155,7 @@ export function ProblemReportsManager({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [isPhone, setIsPhone] = useState(false);
   const { confirm, confirmationDialog } = useConfirmDialog();
   const editorRef = useRef<HTMLElement>(null);
   const [draft, setDraft] = useState<ReportDraft>(() =>
@@ -242,6 +245,18 @@ export function ProblemReportsManager({
   ).length;
   const overdueCount = recordReports.filter(isOverdueReport).length;
 
+  const rowProps = {
+    deviceMap,
+    userMap,
+    permissions,
+    canUpdate,
+    saving,
+    onChangeStatus: changeStatus,
+    onEdit: startEdit,
+    onDelete: removeReport,
+    onRestore: restoreReport,
+  };
+
   const editorMode: "create" | "edit" | null = createOpen
     ? "create"
     : editingReportId && editDraft
@@ -252,6 +267,14 @@ export function ProblemReportsManager({
     setCreateOpen(false);
     setEditingReportId(null);
     setEditDraft(null);
+  }, []);
+
+  useEffect(() => {
+    const media = window.matchMedia(phoneMediaQuery);
+    const sync = () => setIsPhone(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
   }, []);
 
   useEffect(() => {
@@ -387,6 +410,44 @@ export function ProblemReportsManager({
     );
     setEditingReportId(null);
     setEditDraft(null);
+  }
+
+  async function changeStatus(reportId: string, status: TaskStatus) {
+    if (!permissions.manageStatus) {
+      return;
+    }
+
+    const previousStatus = reports.find((report) => report.id === reportId)?.status;
+    setError("");
+    setReports((current) =>
+      current.map((report) =>
+        report.id === reportId ? { ...report, status } : report,
+      ),
+    );
+
+    /* Only the status is sent; the server keeps every other field as is. */
+    const response = await fetch(`/api/problem-reports/${reportId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    }).catch(() => null);
+
+    if (!response?.ok) {
+      if (previousStatus) {
+        setReports((current) =>
+          current.map((report) =>
+            report.id === reportId ? { ...report, status: previousStatus } : report,
+          ),
+        );
+      }
+      setError("სტატუსის შეცვლა ვერ მოხერხდა.");
+      return;
+    }
+
+    const data = (await response.json()) as { report: ProblemReport };
+    setReports((current) =>
+      current.map((report) => (report.id === reportId ? data.report : report)),
+    );
   }
 
   async function removeReport(reportId: string) {
@@ -644,7 +705,7 @@ export function ProblemReportsManager({
         {permissions.create ? (
           <div className="tasks-head-actions">
             <button
-              className="primary-button create-fab wide"
+              className="primary-button create-fab"
               type="button"
               onClick={() => {
                 setEditingReportId(null);
@@ -858,154 +919,324 @@ export function ProblemReportsManager({
         </section>
       ) : null}
 
-      <div className="task-scroll">
-        <div className="task-scroll-inner report-scroll-inner">
-          <div className="report-grid task-grid-head" aria-hidden="true">
-            <span />
-            <span>ბაღი</span>
-            <span>პრიორიტეტი</span>
-            <span>პრობლემა</span>
-            <span>კომენტარი</span>
-            <span>ტელ.</span>
-            <span>შემსრ.</span>
-            <span>სტატუსი</span>
-            <span>ვადა</span>
-            <span />
-          </div>
-
-          <section className="task-module" aria-label="დაფიქსირებული პრობლემები">
-            <div className="task-module-body">
-              {visibleReports.length ? (
-                visibleReports.map((report) => {
-                  const device = deviceMap.get(report.deviceId);
-                  const overdue = isOverdueReport(report);
-                  return (
-                    <article
-                      key={report.id}
-                      id={`report-${report.id}`}
-                      className={`report-grid task-row${overdue ? " urgent" : ""}${report.status === "done" ? " muted" : ""}${report.deletedAt ? " deleted" : ""}`}
-                    >
-                      <span
-                        className={`issue-indicator ${getIssueIndicatorState(report)}`}
-                        aria-label="პრობლემის ინდიკატორი"
-                      />
-                      <Link
-                        className="task-row-device"
-                        href={`/devices/${device?.id ?? report.deviceId}`}
-                      >
-                        <MapPin size={14} />
-                        {device
-                          ? getGardenDisplayName(device)
-                          : report.deviceGroupCode || "ბაღი ვერ მოიძებნა"}
-                      </Link>
-                      <span className="task-row-priority">
-                        <span className={`mini-pill p-${report.priority}`}>
-                          {priorityLabels[report.priority]}
-                        </span>
-                      </span>
-                      <Link
-                        className="task-row-summary"
-                        href={`/problem-reports/${report.id}`}
-                      >
-                        <span className="task-row-title" title={report.title}>
-                          {report.title}
-                        </span>
-                        <span className="task-row-sub" title={report.issue}>
-                          {report.issue}
-                        </span>
-                      </Link>
-                      {/* The linked task's comment; absent when the role may not see it. */}
-                      <span
-                        className={`task-row-comment${report.taskComment ? "" : " empty"}`}
-                        title={report.taskComment || undefined}
-                      >
-                        {report.taskComment || "—"}
-                      </span>
-                      <span className="task-row-phone">
-                        {report.phone || "—"}
-                      </span>
-                      <span className="avatar-stack">
-                        {report.assigneeIds.map((userId) => {
-                          const assignee = userMap.get(userId);
-                          return assignee ? (
-                            <span
-                              key={assignee.id}
-                              className="avatar small"
-                              style={{ backgroundColor: assignee.color }}
-                              title={assignee.name}
-                            >
-                              {assignee.initials}
-                            </span>
-                          ) : null;
-                        })}
-                      </span>
-                      <span className={`status-pill ${report.status}`}>
-                        {statusLabels[report.status]}
-                      </span>
-                      <span
-                        className={`task-row-due${overdue ? " overdue" : ""}`}
-                      >
-                        <CalendarDays size={13} />
-                        <span className="task-row-due-full">
-                          {report.dueDate}
-                        </span>
-                        <span className="task-row-due-short">
-                          {formatShortDate(report.dueDate)}
-                        </span>
-                      </span>
-                      <div className="task-row-actions">
-                        {report.deletedAt ? (
-                          permissions.delete ? (
-                            <button
-                              className="icon-button restore"
-                              type="button"
-                              aria-label="აღდგენა"
-                              title="აღდგენა"
-                              disabled={saving}
-                              onClick={() => restoreReport(report.id)}
-                            >
-                              <RotateCcw size={15} />
-                            </button>
-                          ) : null
-                        ) : null}
-                        {canUpdate && !report.deletedAt ? (
-                          <button
-                            className="icon-button"
-                            type="button"
-                            aria-label="რედაქტირება"
-                            title="რედაქტირება"
-                            onClick={() => startEdit(report)}
-                          >
-                            <Edit3 size={15} />
-                          </button>
-                        ) : null}
-                        {permissions.delete && !report.deletedAt ? (
-                          <button
-                            className="icon-button danger"
-                            type="button"
-                            aria-label="წაშლა"
-                            title="წაშლა"
-                            disabled={saving}
-                            onClick={() => removeReport(report.id)}
-                          >
-                            <Trash2 size={15} />
-                          </button>
-                        ) : null}
-                      </div>
-                    </article>
-                  );
-                })
-              ) : (
-                <p className="task-module-empty">პრობლემა ვერ მოიძებნა.</p>
+      {isPhone ? (
+        /* Phone: the task cards, in one column ordered by status. */
+        <div className="task-columns">
+          <div className="task-column">
+            <div className="task-column-head">
+              {statusFilter === "all" ? null : (
+                <span className={`status-dot ${statusFilter}`} />
               )}
+              <h2>
+                {statusFilter === "all"
+                  ? "ყველა პრობლემა"
+                  : statusLabels[statusFilter]}
+              </h2>
+              <span
+                className={`task-module-count${statusFilter === "all" ? "" : ` ${statusFilter}`}`}
+              >
+                {visibleReports.length}
+              </span>
             </div>
-          </section>
+            {visibleReports.length ? (
+              visibleReports.map((report) => (
+                <ReportCard key={report.id} report={report} {...rowProps} />
+              ))
+            ) : (
+              <p className="task-module-empty">პრობლემა ვერ მოიძებნა.</p>
+            )}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="task-scroll">
+          <div className="task-scroll-inner report-scroll-inner">
+            <div className="report-grid task-grid-head" aria-hidden="true">
+              <span />
+              <span>ბაღი</span>
+              <span>პრიორიტეტი</span>
+              <span>პრობლემა</span>
+              <span>კომენტარი</span>
+              <span>ტელ.</span>
+              <span>შემსრ.</span>
+              <span>სტატუსი</span>
+              <span>ვადა</span>
+              <span />
+            </div>
+
+            <section className="task-module" aria-label="დაფიქსირებული პრობლემები">
+              <div className="task-module-body task-list-panel-body">
+                {visibleReports.length ? (
+                  visibleReports.map((report) => (
+                    <ReportRow key={report.id} report={report} {...rowProps} />
+                  ))
+                ) : (
+                  <p className="task-module-empty">პრობლემა ვერ მოიძებნა.</p>
+                )}
+              </div>
+            </section>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
+type RowProps = {
+  report: ProblemReport;
+  deviceMap: Map<string, Device>;
+  userMap: Map<string, AppUser>;
+  permissions: ProblemReportPermissions;
+  canUpdate: boolean;
+  saving: boolean;
+  onChangeStatus: (reportId: string, status: TaskStatus) => void;
+  onEdit: (report: ProblemReport) => void;
+  onDelete: (reportId: string) => void;
+  onRestore: (reportId: string) => void;
+};
+
+function ReportRow({ report, deviceMap, userMap, ...props }: RowProps) {
+  const device = deviceMap.get(report.deviceId);
+  const overdue = isOverdueReport(report);
+
+  return (
+    <article
+      id={`report-${report.id}`}
+      className={`report-grid task-row${overdue ? " urgent" : ""}${report.status === "done" ? " muted" : ""}${report.deletedAt ? " deleted" : ""}`}
+    >
+      <span
+        className={`issue-indicator ${getIssueIndicatorState(report)}`}
+        aria-label="პრობლემის ინდიკატორი"
+      />
+      <Link
+        className="task-row-device"
+        href={`/devices/${device?.id ?? report.deviceId}`}
+      >
+        <MapPin size={14} />
+        {getReportGardenName(report, device)}
+      </Link>
+      <span className="task-row-priority">
+        <span className={`mini-pill p-${report.priority}`}>
+          {priorityLabels[report.priority]}
+        </span>
+      </span>
+      <Link className="task-row-summary" href={`/problem-reports/${report.id}`}>
+        <span className="task-row-title" title={report.title}>
+          {report.title}
+        </span>
+        <span className="task-row-sub" title={report.issue}>
+          {report.issue}
+        </span>
+      </Link>
+      {/* The linked task's comment; absent when the role may not see it. */}
+      <span
+        className={`task-row-comment${report.taskComment ? "" : " empty"}`}
+        title={report.taskComment || undefined}
+      >
+        {report.taskComment || "—"}
+      </span>
+      <span className="task-row-phone">{report.phone || "—"}</span>
+      <AssigneeAvatars report={report} userMap={userMap} />
+      <ReportStatusPill
+        report={report}
+        canEdit={props.permissions.manageStatus && !report.deletedAt}
+        onChangeStatus={props.onChangeStatus}
+      />
+      <span className={`task-row-due${overdue ? " overdue" : ""}`}>
+        <CalendarDays size={13} />
+        <span className="task-row-due-full">{report.dueDate}</span>
+        <span className="task-row-due-short">
+          {formatShortDate(report.dueDate)}
+        </span>
+      </span>
+      <div className="task-row-actions">
+        <ReportActions report={report} {...props} />
+      </div>
+    </article>
+  );
+}
+
+function ReportCard({ report, deviceMap, userMap, ...props }: RowProps) {
+  const device = deviceMap.get(report.deviceId);
+  const overdue = isOverdueReport(report);
+
+  return (
+    <article
+      id={`report-${report.id}`}
+      className={`task-card2${overdue ? " urgent" : ""}${report.status === "done" ? " muted" : ""}${report.deletedAt ? " deleted" : ""}`}
+    >
+      <span className="task-row-chips">
+        <span className={`mini-pill p-${report.priority}`}>
+          {priorityLabels[report.priority]}
+        </span>
+        {report.tags.map((tagName) => (
+          <span key={tagName} className="mini-pill tag">
+            {tagName}
+          </span>
+        ))}
+      </span>
+      <Link className="task-card2-title" href={`/problem-reports/${report.id}`}>
+        {report.title}
+      </Link>
+      <p className="task-card2-sub">
+        {/* Blinks before the garden number, as the desktop indicator column does. */}
+        <span
+          className={`issue-indicator inline ${getIssueIndicatorState(report)}`}
+          aria-label="პრობლემის ინდიკატორი"
+        />
+        {getReportGardenName(report, device)} · {report.issue}
+      </p>
+      {report.taskComment ? (
+        <p className="task-card2-comment">{report.taskComment}</p>
+      ) : null}
+      <div className="task-card2-meta">
+        <span className={overdue ? "task-row-due overdue" : undefined}>
+          <CalendarDays size={13} /> {report.dueDate}
+        </span>
+        {report.phone ? <span>{report.phone}</span> : null}
+        <AssigneeAvatars
+          report={report}
+          userMap={userMap}
+          style={{ marginLeft: "auto" }}
+        />
+      </div>
+      <div className="task-card2-foot">
+        <ReportStatusPill
+          report={report}
+          canEdit={props.permissions.manageStatus && !report.deletedAt}
+          onChangeStatus={props.onChangeStatus}
+        />
+        <div className="task-row-actions" style={{ marginLeft: "auto" }}>
+          <ReportActions report={report} {...props} />
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function AssigneeAvatars({
+  report,
+  userMap,
+  style,
+}: {
+  report: ProblemReport;
+  userMap: Map<string, AppUser>;
+  style?: React.CSSProperties;
+}) {
+  return (
+    <span className="avatar-stack" style={style}>
+      {report.assigneeIds.map((userId) => {
+        const assignee = userMap.get(userId);
+        return assignee ? (
+          <span
+            key={assignee.id}
+            className="avatar small"
+            style={{ backgroundColor: assignee.color }}
+            title={assignee.name}
+          >
+            {assignee.initials}
+          </span>
+        ) : null;
+      })}
+    </span>
+  );
+}
+
+/** Edit + delete, or — on a deleted report — a single restore button. */
+function ReportActions({
+  report,
+  permissions,
+  canUpdate,
+  saving,
+  onEdit,
+  onDelete,
+  onRestore,
+}: Omit<RowProps, "deviceMap" | "userMap" | "onChangeStatus">) {
+  if (report.deletedAt) {
+    return permissions.delete ? (
+      <button
+        className="icon-button restore"
+        type="button"
+        aria-label="აღდგენა"
+        title="აღდგენა"
+        disabled={saving}
+        onClick={() => onRestore(report.id)}
+      >
+        <RotateCcw size={15} />
+      </button>
+    ) : null;
+  }
+
+  return (
+    <>
+      {canUpdate ? (
+        <button
+          className="icon-button"
+          type="button"
+          aria-label="რედაქტირება"
+          title="რედაქტირება"
+          onClick={() => onEdit(report)}
+        >
+          <Edit3 size={15} />
+        </button>
+      ) : null}
+      {permissions.delete ? (
+        <button
+          className="icon-button danger"
+          type="button"
+          aria-label="წაშლა"
+          title="წაშლა"
+          disabled={saving}
+          onClick={() => onDelete(report.id)}
+        >
+          <Trash2 size={15} />
+        </button>
+      ) : null}
+    </>
+  );
+}
+
+/** The task page's status chip: tinted by status, a select for those who may change it. */
+function ReportStatusPill({
+  report,
+  canEdit,
+  onChangeStatus,
+}: {
+  report: ProblemReport;
+  canEdit: boolean;
+  onChangeStatus: (reportId: string, status: TaskStatus) => void;
+}) {
+  /* An urgent report's status blinks red until it is done. */
+  const urgentActive = report.priority === "urgent" && report.status !== "done";
+
+  return (
+    <label
+      className={`task-status-pill ${report.status}${canEdit ? " editable" : ""}${urgentActive ? " urgent-alert" : ""}`}
+      title={canEdit ? "დააჭირეთ სტატუსის შესაცვლელად" : undefined}
+    >
+      <span className="sr-only">სტატუსი</span>
+      <select
+        value={report.status}
+        onChange={(event) =>
+          onChangeStatus(report.id, event.target.value as TaskStatus)
+        }
+        disabled={!canEdit}
+      >
+        {statusOrder.map((value) => (
+          <option key={value} value={value}>
+            {statusLabels[value]}
+          </option>
+        ))}
+      </select>
+      {canEdit ? <ChevronDown size={12} strokeWidth={2.4} /> : null}
+    </label>
+  );
+}
+
+function getReportGardenName(report: ProblemReport, device?: Device) {
+  return device
+    ? getGardenDisplayName(device)
+    : report.deviceGroupCode || "ბაღი ვერ მოიძებნა";
+}
 
 function ReportFields({
   draft,

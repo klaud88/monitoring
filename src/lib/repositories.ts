@@ -541,6 +541,20 @@ function isGardenAllowed(
 const toDateTimeString = (value: DatabaseDate) =>
   value instanceof Date ? value.toISOString() : value;
 
+/*
+ * A datetime read back as ISO ("…T09:30:00.000Z") is rejected by a strict
+ * sql_mode, so it goes back as a Date: with the pool's timezone "Z" mysql2
+ * writes it as the same wall clock it was read from.
+ */
+const toDateTimeParam = (value?: string) => {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
 const toDateString = (value: DatabaseDate) => {
   if (!(value instanceof Date)) {
     return value.slice(0, 10);
@@ -4962,7 +4976,7 @@ export async function createTask(
           task.infoAutoDoneDays ?? null,
           task.infoAutoDoneDays ?? null,
           task.infoAutoDoneDays ?? 0,
-          task.startsAt ?? null,
+          toDateTimeParam(task.startsAt),
           task.dueDate,
         ],
       );
@@ -5048,7 +5062,7 @@ export async function updateTask(
           input.infoAutoDoneDays ?? null,
           input.infoAutoDoneDays ?? 0,
           input.infoAutoDoneDays ?? null,
-          input.startsAt ?? null,
+          toDateTimeParam(input.startsAt),
           input.dueDate,
           id,
         ],

@@ -3378,6 +3378,39 @@ button.section-title:hover {
   box-shadow: none;
 }
 
+/* A report card's dot, set before the garden number. */
+.issue-indicator.inline {
+  width: 9px;
+  height: 9px;
+  margin: 0 8px 0 4px;
+  vertical-align: middle;
+  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.14);
+}
+
+.issue-indicator.inline.active {
+  animation-name: issue-indicator-pulse-inline;
+}
+
+.issue-indicator.inline.overdue {
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.16);
+}
+
+.issue-indicator.inline.done {
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.12);
+}
+
+/* The same blink with a ring sized to the smaller dot. */
+@keyframes issue-indicator-pulse-inline {
+  0%,
+  100% {
+    box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.1);
+  }
+
+  50% {
+    box-shadow: 0 0 0 5px rgba(249, 115, 22, 0.3);
+  }
+}
+
 @keyframes issue-indicator-pulse {
   0%,
   100% {
@@ -6093,10 +6126,6 @@ button.monitor-count-pill {
   text-decoration: line-through;
 }
 
-.reports-page .task-row.deleted:hover {
-  opacity: 0.8;
-}
-
 .icon-button.restore {
   color: var(--brand);
 }
@@ -8268,48 +8297,6 @@ a.task-card2:hover .task-card2-title {
   gap: 5px;
 }
 
-.report-grid .status-pill {
-  justify-content: center;
-  width: 100%;
-  border-radius: 999px;
-  font-weight: 600;
-}
-
-/* One continuous list: striped rows, an accent bar on hover. */
-.reports-page .task-row {
-  min-height: 46px;
-  border-bottom-color: var(--panel-line);
-  transition:
-    background-color 0.16s ease,
-    box-shadow 0.16s ease,
-    opacity 0.16s ease;
-}
-
-.reports-page .task-row:nth-child(even) {
-  background: var(--surface-soft);
-}
-
-.reports-page .task-row.urgent {
-  background: var(--row-danger);
-}
-
-.reports-page .task-row:hover {
-  background: var(--brand-soft);
-  box-shadow: inset 3px 0 0 var(--brand);
-}
-
-.reports-page .task-row.urgent:hover {
-  box-shadow: inset 3px 0 0 var(--red);
-}
-
-.reports-page .task-row.muted:hover {
-  opacity: 1;
-}
-
-.reports-page .task-row:hover .task-row-title {
-  color: var(--brand);
-}
-
 .task-field-hint {
   color: var(--ink-subtle);
   font-size: 11.5px;
@@ -8716,7 +8703,8 @@ button.matrix-cell:hover {
   color: var(--line-strong);
 }
 
-/* Offline calendar colours (rules: deploy/logic.md). */
+/* Offline calendar colours (rules: deploy/logic.md). Fixed values, not theme
+   tokens: the calendar reads the same on the light and the dark theme. */
 .matrix-cell.missed,
 .matrix-cell.unstable {
   color: #fff;
@@ -8724,11 +8712,12 @@ button.matrix-cell:hover {
 
 .matrix-cell.ok,
 .matrix-cell.late {
-  color: var(--ink-muted);
+  color: #5c6b80;
 }
 
+/* rgba(22, 163, 74, 0.32) over white, made opaque */
 .matrix-cell.ok {
-  background: rgba(22, 163, 74, 0.32);
+  background: #b4e2c5;
 }
 
 .matrix-cell.unstable {
@@ -8740,12 +8729,12 @@ button.matrix-cell:hover {
 }
 
 .matrix-cell.missed {
-  background: var(--red);
+  background: #dc2626;
 }
 
 .matrix-cell.pending {
   background: transparent;
-  box-shadow: inset 0 0 0 1.5px var(--red);
+  box-shadow: inset 0 0 0 1.5px #dc2626;
   background-image: repeating-linear-gradient(
     135deg,
     rgba(220, 38, 38, 0.18) 0 3px,
@@ -8765,19 +8754,6 @@ button.matrix-cell:hover {
   color: var(--ink-subtle);
 }
 
-
-:root[data-theme="dark"] .matrix-cell.unstable {
-  background: #a78bfa;
-}
-
-:root[data-theme="dark"] .matrix-cell.late {
-  background: #db2777;
-  color: #fff;
-}
-
-:root[data-theme="dark"] .matrix-cell.ok {
-  background: rgba(74, 222, 128, 0.3);
-}
 
 .matrix-bell {
   display: inline-flex;
@@ -9281,17 +9257,6 @@ html.wheel-locked body {
 
   .create-fab span {
     display: none;
-  }
-
-  .create-fab.wide {
-    width: auto;
-    height: 54px;
-    padding: 0 20px;
-    gap: 9px;
-  }
-
-  .create-fab.wide span {
-    display: inline;
   }
 
   /* --- the status switch that replaces the stacked lanes --- */
