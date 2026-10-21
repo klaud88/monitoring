@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Plus } from "lucide-react";
 import { useConfirmDialog } from "@/components/common/confirm-dialog";
+import { DeletedTagList } from "@/components/common/deleted-tag-list";
 import { TagChipControl } from "@/components/common/tag-chip-control";
 
 type Props = {
@@ -17,6 +18,9 @@ type Props = {
   onDeleteTag: (tagName: string) => Promise<boolean> | boolean;
   /** Renames the tag everywhere; offered to those who may delete tags. */
   onRenameTag?: (tagName: string, newName: string) => Promise<boolean> | boolean;
+  /** Deleted tags, offered for restoring to those who may delete tags. */
+  deletedTags?: string[];
+  onRestoreTag?: (tagName: string) => Promise<boolean> | boolean;
 };
 
 export function TaskTagPicker({
@@ -30,6 +34,8 @@ export function TaskTagPicker({
   onCreateTag,
   onDeleteTag,
   onRenameTag,
+  deletedTags = [],
+  onRestoreTag,
 }: Props) {
   const [newTagName, setNewTagName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -80,7 +86,7 @@ export function TaskTagPicker({
     }
 
     const confirmed = await confirm({
-      message: `ნამდვილად გსურთ "${tagName}" ტეგის წაშლა? ტეგი ყველა დავალებიდან და პრობლემიდან მოიხსნება.`,
+      message: `ნამდვილად გსურთ "${tagName}" ტეგის წაშლა? ტეგი ყველა დავალებასა და პრობლემაზე დაიმალება; აღდგენისას დაბრუნდება.`,
     });
     if (!confirmed) {
       return;
@@ -130,6 +136,9 @@ export function TaskTagPicker({
           />
         ))}
       </div>
+      {canDeleteTags && onRestoreTag ? (
+        <DeletedTagList tags={deletedTags} onRestore={onRestoreTag} />
+      ) : null}
       {canCreateTags ? (
         <div className="task-tag-create">
           <input

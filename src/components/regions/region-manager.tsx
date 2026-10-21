@@ -6,6 +6,7 @@ import {
   MapPinned,
   Minus,
   Plus,
+  RotateCcw,
   Save,
   Search,
   Tags,
@@ -16,7 +17,13 @@ import {
   Pencil,
 } from "lucide-react";
 import { useConfirmDialog } from "@/components/common/confirm-dialog";
+import { DeletedTagList } from "@/components/common/deleted-tag-list";
 import { FiltersToggle } from "@/components/common/filters-toggle";
+import {
+  RecordStateSelect,
+  matchesRecordState,
+  type RecordState,
+} from "@/components/common/record-state-select";
 import { TagChipControl } from "@/components/common/tag-chip-control";
 import { getGardenKey } from "@/lib/device-associations";
 import { getGardenDisplayName } from "@/lib/device-options";
@@ -67,6 +74,7 @@ export function RegionManager({
   initialTags,
   initialGardenTags,
   initialGardenRegions,
+  initialDeletedTags = [],
   permissions,
 }: {
   initialDevices: Device[];
@@ -76,6 +84,8 @@ export function RegionManager({
   initialGardenTags: Record<string, string[]>;
   /** Garden key → the garden's region; its devices follow it. */
   initialGardenRegions: Record<string, string>;
+  /** Deleted device tags (only for those who may delete, i.e. restore, them). */
+  initialDeletedTags?: string[];
   permissions: RegionPermissions;
 }) {
   const [devices, setDevices] = useState(initialDevices);
@@ -88,6 +98,8 @@ export function RegionManager({
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [deviceSort, setDeviceSort] = useState<DeviceSortMode>("az");
   const [regionFilter, setRegionFilter] = useState("all");
+  const [deviceState, setDeviceState] = useState<RecordState>("active");
+  const [regionState, setRegionState] = useState<RecordState>("active");
   const [selectedFilterTags, setSelectedFilterTags] = useState<string[]>([]);
   const [managingTags, setManagingTags] = useState(false);
   const [availableTags, setAvailableTags] = useState<string[]>(() =>
@@ -97,9 +109,10 @@ export function RegionManager({
     ),
   );
   const [newTagName, setNewTagName] = useState("");
+  const [deletedTags, setDeletedTags] = useState(initialDeletedTags);
   const [draft, setDraft] = useState<DeviceDraft>({
     name: "",
-    region: initialRegions[0]?.name || "",
+    region: initialRegions.find((region) => !region.deletedAt)?.name || "",
     status: "online",
     isExcluded: false,
     lat: TBILISI_CENTER.lat,
@@ -123,17 +136,27 @@ export function RegionManager({
   const [deviceOpen, setDeviceOpen] = useState(false);
   const { confirm, confirmationDialog } = useConfirmDialog();
 
-  const regionNames = regions.map((region) => region.name);
-  const regionColorByName = new Map(regions.map((region) => [region.name, region.color]));
+  /** Only live regions can be picked; deleted ones are listed for restore. */
+  const activeRegions = regions.filter((region) => !region.deletedAt);
+  const regionNames = activeRegions.map((region) => region.name);
+  const regionColorByName = new Map(
+    activeRegions.map((region) => [region.name, region.color]),
+  );
   /** Tints a garden's region pill with that region's own colour. */
   function regionColorStyle(regionName?: string) {
     const color = regionName ? regionColorByName.get(regionName) : undefined;
     return color ? ({ "--region-color": color } as CSSProperties) : undefined;
   }
 
+  /** Active / deleted / all devices — the counts follow this. */
+  const recordDevices = useMemo(
+    () => devices.filter((device) => matchesRecordState(device, deviceState)),
+    [deviceState, devices],
+  );
+
   const filteredDevices = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    return devices
+    return recordDevices
       .filter(
         (device) => {
           const matchesRegion =
@@ -155,7 +178,7 @@ export function RegionManager({
         },
       )
       .sort((a, b) => compareDevices(a, b, deviceSort));
-  }, [devices, deviceSort, gardenTags, query, regionFilter, selectedFilterTags]);
+  }, [recordDevices, deviceSort, gardenTags, query, regionFilter, selectedFilterTags]);
 
   // Devices are named "<garden>-<n>"; the list shows one card per garden in
   // the order its first device sorts, with that garden's devices inside.
@@ -237,7 +260,7 @@ export function RegionManager({
     }
 
     const confirmed = await confirm({
-      message: `ნამდვილად გსურთ "${tagName}" ტეგის წაშლა? ტეგი ყველა მოწყობილობიდან და ბაღიდან მოიხსნება.`,
+      message: `ნამდვილად გსურთ "${tagName}" ტეგის წაშლა? ტეგი ყველა მოწყობილობასა და ბაღზე დაიმალება; აღდგენისას დაბრუნდება.`,
     });
     if (!confirmed) {
       return false;
@@ -288,6 +311,41 @@ export function RegionManager({
       ),
     );
     setGardenTagDraft((current) => current.filter((tag) => tag !== tagName));
+    setDeletedTags((current) => [...new Set([...current, tagName])].sort());
+    return true;
+  }
+
+  async function restoreAvailableTag(tagName: string) {
+    if (!permissions.deleteTags) {
+      return false;
+    }
+
+    setSaving(true);
+    setError("");
+    const response = await fetch("/api/device-tags/restore", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: tagName }),
+    }).catch(() => null);
+    setSaving(false);
+
+    if (!response?.ok) {
+      setError("ტეგის აღდგენა ვერ მოხერხდა.");
+      return false;
+    }
+
+    const data = (await response.json()) as {
+      tags?: string[];
+      deletedTags?: string[];
+      gardenTags?: Record<string, string[]>;
+    };
+    setAvailableTags((current) => data.tags ?? mergeTags(current, [tagName]));
+    setDeletedTags(
+      (current) => data.deletedTags ?? current.filter((tag) => tag !== tagName),
+    );
+    if (data.gardenTags) {
+      setGardenTags(data.gardenTags);
+    }
     return true;
   }
 
@@ -396,7 +454,11 @@ export function RegionManager({
     setSaving(false);
 
     if (!response.ok) {
-      setError("რაიონის დამატება ვერ მოხერხდა.");
+      setError(
+        response.status === 409
+          ? await readMessage(response, "რაიონის დამატება ვერ მოხერხდა.")
+          : "რაიონის დამატება ვერ მოხერხდა.",
+      );
       return;
     }
 
@@ -476,7 +538,7 @@ export function RegionManager({
 
     const confirmed = await confirm({
       message:
-        "ნამდვილად გსურთ აღნიშნულის წაშლა? ამ რაიონზე მიბმული მოწყობილობები დარჩებიან რაიონის გარეშე.",
+        "ნამდვილად გსურთ აღნიშნულის წაშლა? ამ რაიონზე მიბმული მოწყობილობები დარჩებიან რაიონის გარეშე. აღდგენისას რაიონს ისინი დაუბრუნდება.",
     });
     if (!confirmed) {
       return;
@@ -494,7 +556,11 @@ export function RegionManager({
       return;
     }
 
-    setRegions((current) => current.filter((item) => item.id !== region.id));
+    // Kept as deleted; its gardens show "no region" until it's restored.
+    const deletedAt = new Date().toISOString();
+    setRegions((current) =>
+      current.map((item) => (item.id === region.id ? { ...item, deletedAt } : item)),
+    );
     setDevices((current) =>
       current.map((device) =>
         device.region === region.name
@@ -510,6 +576,37 @@ export function RegionManager({
         Object.entries(current).filter(([, name]) => name !== region.name),
       ),
     );
+  }
+
+  async function restoreRegion(region: Region) {
+    if (!permissions.deleteRegion) {
+      return;
+    }
+
+    const confirmed = await confirm({
+      title: "აღდგენის დადასტურება",
+      message: `ნამდვილად გსურთ „${region.name}“ რაიონის აღდგენა? მას თავისი ბაღები დაუბრუნდება.`,
+      confirmLabel: "აღდგენა",
+      tone: "primary",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    const response = await fetch(`/api/regions/${region.id}/restore`, {
+      method: "POST",
+    }).catch(() => null);
+    setSaving(false);
+
+    if (!response?.ok) {
+      setError("რაიონის აღდგენა ვერ მოხერხდა.");
+      return;
+    }
+
+    // The gardens' regions come back from the server.
+    window.location.reload();
   }
 
   async function saveGardenRegion(gardenKey: string, regionName: string) {
@@ -572,7 +669,11 @@ export function RegionManager({
     setSaving(false);
 
     if (!response.ok) {
-      setError("მოწყობილობის დამატება ვერ მოხერხდა.");
+      setError(
+        response.status === 409
+          ? await readMessage(response, "მოწყობილობის დამატება ვერ მოხერხდა.")
+          : "მოწყობილობის დამატება ვერ მოხერხდა.",
+      );
       return;
     }
 
@@ -680,7 +781,10 @@ export function RegionManager({
       return;
     }
 
-    const confirmed = await confirm();
+    const confirmed = await confirm({
+      message:
+        "ნამდვილად გსურთ მოწყობილობის წაშლა? მისი დავალებები და პრობლემები ადგილზე დარჩება.",
+    });
     if (!confirmed) {
       return;
     }
@@ -697,12 +801,59 @@ export function RegionManager({
       return;
     }
 
-    setDevices((current) => current.filter((device) => device.id !== deviceId));
+    // Kept as deleted, so the "deleted" filter can restore it.
+    const deletedAt = new Date().toISOString();
+    setDevices((current) =>
+      current.map((device) =>
+        device.id === deviceId ? { ...device, deletedAt } : device,
+      ),
+    );
   }
 
-  const regionSummary = regions.map((region) => ({
+  async function restoreDevice(deviceId: string) {
+    if (!permissions.deleteDevice) {
+      return;
+    }
+
+    const confirmed = await confirm({
+      title: "აღდგენის დადასტურება",
+      message: "ნამდვილად გსურთ მოწყობილობის აღდგენა?",
+      confirmLabel: "აღდგენა",
+      tone: "primary",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    const response = await fetch(`/api/devices/${deviceId}/restore`, {
+      method: "POST",
+    }).catch(() => null);
+    setSaving(false);
+
+    if (!response?.ok) {
+      setError("მოწყობილობის აღდგენა ვერ მოხერხდა.");
+      return;
+    }
+
+    const data = (await response.json()) as { device: Device | null };
+    setDevices((current) =>
+      current.map((device) =>
+        device.id === deviceId
+          ? (data.device ?? { ...device, deletedAt: undefined })
+          : device,
+      ),
+    );
+  }
+
+  const regionSummary = regions
+    .filter((region) => matchesRecordState(region, regionState))
+    .map((region) => ({
     region,
-    count: devices.filter((device) => device.region === region.name).length,
+    count: devices.filter(
+      (device) => !device.deletedAt && device.region === region.name,
+    ).length,
   }));
 
   return (
@@ -717,12 +868,12 @@ export function RegionManager({
         <div className="metric-strip">
           <div className="metric">
             <MapPinned size={18} />
-            <span>{devices.length}</span>
+            <span>{recordDevices.length}</span>
             <small>მოწყობილობა</small>
           </div>
           <div className="metric">
             <Tags size={18} />
-            <span>{regions.length}</span>
+            <span>{regionSummary.length}</span>
             <small>რაიონი</small>
           </div>
         </div>
@@ -768,9 +919,16 @@ export function RegionManager({
             </form>
           ) : null}
 
+          {regionsOpen && permissions.deleteRegion ? (
+            <RecordStateSelect value={regionState} onChange={setRegionState} />
+          ) : null}
+
           {regionsOpen && <div className="region-admin-list">
             {regionSummary.map((item) => (
-              <div key={item.region.id} className="region-admin-row">
+              <div
+                key={item.region.id}
+                className={`region-admin-row${item.region.deletedAt ? " deleted" : ""}`}
+              >
                 {editingRegionId === item.region.id ? (
                   <>
                     <input
@@ -826,7 +984,21 @@ export function RegionManager({
                       <small>{item.count} მოწყობილობა</small>
                     </div>
                     <div className="row-actions">
-                      {permissions.editRegion ? (
+                      {item.region.deletedAt ? (
+                        permissions.deleteRegion ? (
+                          <button
+                            className="icon-button restore"
+                            type="button"
+                            onClick={() => restoreRegion(item.region)}
+                            disabled={saving}
+                            aria-label="რაიონის აღდგენა"
+                            title="რაიონის აღდგენა"
+                          >
+                            <RotateCcw size={16} />
+                          </button>
+                        ) : null
+                      ) : null}
+                      {permissions.editRegion && !item.region.deletedAt ? (
                         <button
                           className="icon-button"
                           type="button"
@@ -837,7 +1009,7 @@ export function RegionManager({
                           <Edit3 size={16} />
                         </button>
                       ) : null}
-                      {permissions.deleteRegion ? (
+                      {permissions.deleteRegion && !item.region.deletedAt ? (
                         <button
                           className="icon-button danger"
                           type="button"
@@ -900,7 +1072,9 @@ export function RegionManager({
             <FiltersToggle
               open={filtersOpen}
               count={
-                (regionFilter === "all" ? 0 : 1) + selectedFilterTags.length
+                (regionFilter === "all" ? 0 : 1) +
+                (deviceState === "active" ? 0 : 1) +
+                selectedFilterTags.length
               }
               onToggle={() => setFiltersOpen((current) => !current)}
             />
@@ -932,6 +1106,9 @@ export function RegionManager({
                 ))}
               </select>
             </label>
+            {permissions.deleteDevice ? (
+              <RecordStateSelect value={deviceState} onChange={setDeviceState} />
+            ) : null}
           </div>
 
           {availableTags.length ? (
@@ -981,6 +1158,9 @@ export function RegionManager({
                   <Pencil size={13} />
                   <span>{managingTags ? "მზადაა" : "ტეგების მართვა"}</span>
                 </button>
+              ) : null}
+              {managingTags && permissions.deleteTags ? (
+                <DeletedTagList tags={deletedTags} onRestore={restoreAvailableTag} />
               ) : null}
               {selectedFilterTags.length ? (
                 <button
@@ -1105,7 +1285,10 @@ export function RegionManager({
                         </div>
                       </div>
                     ) : (
-                      <div key={device.id} className="region-device-row">
+                      <div
+                        key={device.id}
+                        className={`region-device-row${device.deletedAt ? " deleted" : ""}`}
+                      >
                         <div>
                           <span
                             className={`garden-device-chip ${device.status}`}
@@ -1119,7 +1302,9 @@ export function RegionManager({
                             className={`device-exclusion-toggle ${device.isExcluded ? "active" : ""}`}
                             type="button"
                             onClick={() => toggleDeviceExclusion(device)}
-                            disabled={!permissions.editDevice || saving}
+                            disabled={
+                              !permissions.editDevice || saving || Boolean(device.deletedAt)
+                            }
                             aria-pressed={device.isExcluded}
                             title="ჩართვისას მოწყობილობა რუკაზე, ანალიტიკაში და Offline აღრიცხვაში აღარ გამოჩნდება"
                           >
@@ -1135,7 +1320,21 @@ export function RegionManager({
                           <small>რუკა/აღრიცხვა</small>
                         </div>
                         <div className="row-actions">
-                          {permissions.editDevice ? (
+                          {device.deletedAt ? (
+                            permissions.deleteDevice ? (
+                              <button
+                                className="icon-button restore"
+                                type="button"
+                                onClick={() => restoreDevice(device.id)}
+                                disabled={saving}
+                                aria-label="მოწყობილობის აღდგენა"
+                                title="მოწყობილობის აღდგენა"
+                              >
+                                <RotateCcw size={17} />
+                              </button>
+                            ) : null
+                          ) : null}
+                          {permissions.editDevice && !device.deletedAt ? (
                             <button
                               className="icon-button"
                               type="button"
@@ -1146,7 +1345,7 @@ export function RegionManager({
                               <Edit3 size={17} />
                             </button>
                           ) : null}
-                          {permissions.deleteDevice ? (
+                          {permissions.deleteDevice && !device.deletedAt ? (
                             <button
                               className="icon-button danger"
                               type="button"
@@ -1365,4 +1564,12 @@ function compareDevices(a: Device, b: Device, sortMode: DeviceSortMode) {
     a.name.localeCompare(b.name, undefined, { numeric: true }) ||
     a.id.localeCompare(b.id);
   return sortMode === "za" ? -result : result;
+}
+
+/** The server's own message (e.g. "a deleted one with this name exists"). */
+async function readMessage(response: Response, fallback: string) {
+  const data = (await response.json().catch(() => null)) as {
+    message?: string;
+  } | null;
+  return data?.message || fallback;
 }

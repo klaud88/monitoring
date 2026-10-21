@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { UsersManager } from "@/components/users/users-manager";
-import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
+import { SESSION_COOKIE, hasPermission, isAdmin, verifySessionToken } from "@/lib/auth";
 import { getFirstAllowedPath } from "@/lib/navigation";
 import { getGardenCodes, getRoles, getUsers } from "@/lib/repositories";
 
@@ -13,8 +13,10 @@ export default async function UsersPage() {
     redirect(getFirstAllowedPath(user));
   }
 
+  // Deleting (and so restoring) an account takes admin status (users API).
+  const canRestore = isAdmin(user);
   const [users, roles, gardens] = await Promise.all([
-    getUsers(),
+    getUsers({ includeDeleted: canRestore }),
     getRoles(),
     getGardenCodes(),
   ]);
@@ -28,6 +30,7 @@ export default async function UsersPage() {
         create: hasPermission(user, "users.create"),
         edit: hasPermission(user, "users.edit"),
         delete: hasPermission(user, "users.delete"),
+        restore: canRestore,
       }}
     />
   );

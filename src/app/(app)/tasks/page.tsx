@@ -4,6 +4,7 @@ import { TasksManager } from "@/components/tasks/tasks-manager";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { getFirstAllowedPath } from "@/lib/navigation";
 import {
+  getDeletedTaskTagNames,
   getDevices,
   getTaskTagNames,
   getTasks,
@@ -25,12 +26,15 @@ export default async function TasksPage({
 
   const scope = resolveTaskVisibilityScope(user);
   const canDelete = hasPermission(user, "tasks.delete");
-  const [devices, tasks, users, taskTags] = await Promise.all([
-    getDevices(),
+  const canDeleteTags = hasPermission(user, "tasks.tag_delete");
+  const [devices, tasks, users, taskTags, deletedTags] = await Promise.all([
+    // Deleted gardens too, so their tasks still show the garden's name.
+    getDevices({ includeDeleted: true }),
     // Deleted tasks are loaded only for those who may restore them.
     getTasks({ ...scope, includeDeleted: canDelete }),
     getUsers(),
     getTaskTagNames(),
+    canDeleteTags ? getDeletedTaskTagNames() : Promise.resolve([]),
   ]);
   const resolvedSearchParams = await searchParams;
   const editParam = resolvedSearchParams?.edit;
@@ -42,6 +46,7 @@ export default async function TasksPage({
       devices={devices}
       users={users}
       initialTags={taskTags}
+      initialDeletedTags={deletedTags}
       initialEditTaskId={initialEditTaskId}
       permissions={{
         create: hasPermission(user, "tasks.create"),
@@ -49,7 +54,7 @@ export default async function TasksPage({
         delete: canDelete,
         createTags: hasPermission(user, "tasks.tag_create"),
         renameTags: hasPermission(user, "tasks.tag_edit"),
-        deleteTags: hasPermission(user, "tasks.tag_delete"),
+        deleteTags: canDeleteTags,
       }}
     />
   );

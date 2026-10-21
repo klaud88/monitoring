@@ -62,6 +62,8 @@ type Props = {
   devices: Device[];
   users: AppUser[];
   initialTags: string[];
+  /** Deleted tags (only for those who may delete, i.e. restore, tags). */
+  initialDeletedTags?: string[];
   canChooseDueDate: boolean;
   permissions: ProblemReportPermissions;
   initialEditReportId?: string;
@@ -128,6 +130,7 @@ export function ProblemReportsManager({
   devices,
   users,
   initialTags,
+  initialDeletedTags = [],
   canChooseDueDate,
   permissions,
   initialEditReportId,
@@ -143,6 +146,7 @@ export function ProblemReportsManager({
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all");
   const [deviceFilter, setDeviceFilter] = useState("all");
+  const [deletedTags, setDeletedTags] = useState(initialDeletedTags);
   const [recordState, setRecordState] = useState<RecordState>("active");
   const [editingReportId, setEditingReportId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<ReportDraft | null>(null);
@@ -152,7 +156,7 @@ export function ProblemReportsManager({
   const { confirm, confirmationDialog } = useConfirmDialog();
   const editorRef = useRef<HTMLElement>(null);
   const [draft, setDraft] = useState<ReportDraft>(() =>
-    emptyDraft(devices[0]?.id || ""),
+    emptyDraft(devices.find((device) => !device.deletedAt)?.id || ""),
   );
   const initialEditHandledRef = useRef<string | null>(null);
 
@@ -566,6 +570,7 @@ export function ProblemReportsManager({
     setAvailableTags(
       (current) => data.tags ?? current.filter((tag) => tag !== tagName),
     );
+    setDeletedTags((current) => [...new Set([...current, tagName])].sort());
     setDraft((current) => ({
       ...current,
       tags: current.tags.filter((tag) => tag !== tagName),
@@ -589,6 +594,28 @@ export function ProblemReportsManager({
       ...current,
       assigneeIds: toggleListValue(current.assigneeIds, userId),
     }));
+  }
+
+  async function restoreAvailableTag(tagName: string) {
+    if (!permissions.deleteTags) {
+      return false;
+    }
+
+    setError("");
+    const response = await fetch("/api/tags/restore", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: tagName }),
+    }).catch(() => null);
+
+    if (!response?.ok) {
+      setError("ტეგის აღდგენა ვერ მოხერხდა.");
+      return false;
+    }
+
+    // The tag comes back on every record that had it, so reload them.
+    window.location.reload();
+    return true;
   }
 
   function toggleEditAssignee(userId: string) {
@@ -771,6 +798,8 @@ export function ProblemReportsManager({
                 onCreateTag={createAvailableTag}
                 onDeleteTag={removeAvailableTag}
                 onRenameTag={renameAvailableTag}
+                deletedTags={deletedTags}
+                onRestoreTag={restoreAvailableTag}
                 onToggleAssignee={toggleDraftAssignee}
                 categories={categories}
                 mode="create"
@@ -791,6 +820,8 @@ export function ProblemReportsManager({
                 onCreateTag={createAvailableTag}
                 onDeleteTag={removeAvailableTag}
                 onRenameTag={renameAvailableTag}
+                deletedTags={deletedTags}
+                onRestoreTag={restoreAvailableTag}
                 onToggleAssignee={toggleEditAssignee}
                 mode="edit"
               />
@@ -989,6 +1020,8 @@ function ReportFields({
   onCreateTag,
   onDeleteTag,
   onRenameTag,
+  deletedTags,
+  onRestoreTag,
   onToggleAssignee,
   categories = [],
   mode,
@@ -1007,6 +1040,8 @@ function ReportFields({
   onCreateTag: (tagName: string) => Promise<boolean> | boolean;
   onDeleteTag: (tagName: string) => Promise<boolean> | boolean;
   onRenameTag: (tagName: string, newName: string) => Promise<boolean> | boolean;
+  deletedTags: string[];
+  onRestoreTag: (tagName: string) => Promise<boolean> | boolean;
   onToggleAssignee: (userId: string) => void;
   categories?: ReportCategoryOption[];
   mode: "create" | "edit";
@@ -1183,6 +1218,8 @@ function ReportFields({
           onCreateTag={onCreateTag}
           onDeleteTag={onDeleteTag}
           onRenameTag={onRenameTag}
+          deletedTags={deletedTags}
+          onRestoreTag={onRestoreTag}
         />
       ) : null}
       {permissions.assignUsers ? (
@@ -1209,7 +1246,8 @@ function buildGardenOptions(devices: Device[]): GardenOption[] {
 
   devices.forEach((device) => {
     const code = getGardenCode(device);
-    if (!code || options.has(code)) {
+    // Deleted gardens keep their name on old records but can't be picked.
+    if (!code || options.has(code) || device.deletedAt) {
       return;
     }
 

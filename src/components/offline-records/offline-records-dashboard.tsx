@@ -12,6 +12,7 @@ import {
   Filter,
   GripVertical,
   RefreshCw,
+  RotateCcw,
   Search,
   Trash2,
   WifiOff,
@@ -20,6 +21,10 @@ import {
 } from "lucide-react";
 import { useConfirmDialog } from "@/components/common/confirm-dialog";
 import { FiltersToggle } from "@/components/common/filters-toggle";
+import {
+  RecordStateSelect,
+  type RecordState,
+} from "@/components/common/record-state-select";
 import { recordAudit } from "@/lib/client-audit";
 import type {
   DailyOfflineEntry,
@@ -37,12 +42,20 @@ import type {
   OfflineSnapshotDevice,
 } from "@/lib/types";
 
+type RemovedFrequencyDevice = {
+  deviceId: string;
+  deviceName: string;
+  removedAt: string;
+};
+
 type Props = {
   initialDevices: Device[];
   initialSnapshots: OfflineSnapshot[];
   initialMonitoredDevices: MonitoredDevice[];
   /** Graded device-days; days before the 5-minute poll started are absent. */
   dailyLevels: DailyOfflineReport;
+  /** Devices taken off the X-Station frequency (only for offline_records.delete). */
+  initialRemovedFrequencyDevices?: RemovedFrequencyDevice[];
   /** The saved row order is per person, so two people can order it differently. */
   userId: string;
   /** offline_records.* actions; the buttons each one gates are hidden without it. */
@@ -132,12 +145,17 @@ export function OfflineRecordsDashboard({
   initialSnapshots,
   initialMonitoredDevices,
   dailyLevels,
+  initialRemovedFrequencyDevices = [],
   userId,
   permissions,
 }: Props) {
   const canPollMonitoring = permissions.alerts;
   const [devices] = useState(initialDevices);
   const [snapshots, setSnapshots] = useState(initialSnapshots);
+  const [removedFrequencyDevices, setRemovedFrequencyDevices] = useState(
+    initialRemovedFrequencyDevices,
+  );
+  const [frequencyState, setFrequencyState] = useState<RecordState>("active");
   const [monitoredDevices, setMonitoredDevices] = useState(
     initialMonitoredDevices,
   );
@@ -644,7 +662,7 @@ export function OfflineRecordsDashboard({
   async function clearHistory(deviceId: string) {
     const name = deviceMap.get(deviceId)?.name ?? deviceId;
     const confirmed = await confirm({
-      message: `ნამდვილად გსურთ "${name}"-ის offline ისტორიის სრულად წაშლა?`,
+      message: `ნამდვილად გსურთ "${name}"-ის offline ისტორიის გასუფთავება? ისტორია დაიმალება და შემდეგ აღდგენა შეიძლება.`,
     });
     if (!confirmed) {
       return;
@@ -669,6 +687,38 @@ export function OfflineRecordsDashboard({
     recordAudit("offline_monitoring.history_clear", "device", deviceId);
   }
 
+  /** Brings back history hidden by clearHistory. */
+  async function restoreHistory(deviceId: string) {
+    const name = deviceMap.get(deviceId)?.name ?? deviceId;
+    const confirmed = await confirm({
+      title: "აღდგენის დადასტურება",
+      message: `ნამდვილად გსურთ "${name}"-ის offline ისტორიის აღდგენა?`,
+      confirmLabel: "აღდგენა",
+      tone: "primary",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    setBusyAction(`restore-${deviceId}`);
+    const response = await fetch("/api/offline-records/monitoring/restore", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deviceId }),
+    }).catch(() => null);
+    setBusyAction(null);
+
+    if (!response?.ok) {
+      return;
+    }
+
+    const payload = (await response.json()) as {
+      monitoredDevices: MonitoredDevice[];
+    };
+    setMonitoredDevices(payload.monitoredDevices);
+    recordAudit("offline_monitoring.history_restore", "device", deviceId);
+  }
+
   /** The switch flips one device, and asks first either way. */
   async function toggleMonitoring(deviceId: string) {
     const name = deviceMap.get(deviceId)?.name ?? deviceId;
@@ -689,7 +739,7 @@ export function OfflineRecordsDashboard({
   async function removeFrequencyDevice(deviceId: string) {
     const device = deviceMap.get(deviceId);
     const confirmed = await confirm({
-      message: `ნამდვილად გსურთ "${device?.name ?? deviceId}" X-Station-ის სიხშირიდან წაშლა?`,
+      message: `ნამდვილად გსურთ "${device?.name ?? deviceId}" X-Station-ის სიხშირიდან წაშლა? აღდგენა შემდეგაც შეიძლება.`,
     });
     if (!confirmed) {
       return;
@@ -710,11 +760,52 @@ export function OfflineRecordsDashboard({
 
     const payload = (await response.json()) as {
       snapshots?: OfflineSnapshot[];
+      removedDevices?: RemovedFrequencyDevice[];
     };
     if (payload.snapshots) {
       setSnapshots(payload.snapshots);
     }
+    if (payload.removedDevices) {
+      setRemovedFrequencyDevices(payload.removedDevices);
+    }
     recordAudit("offline_frequency.remove", "device", deviceId);
+  }
+
+  async function restoreFrequencyDevice(deviceId: string, deviceName: string) {
+    const confirmed = await confirm({
+      title: "აღდგენის დადასტურება",
+      message: `ნამდვილად გსურთ "${deviceName}"-ის X-Station-ის სიხშირეში აღდგენა?`,
+      confirmLabel: "აღდგენა",
+      tone: "primary",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    setBusyAction(`frequency-restore-${deviceId}`);
+    const response = await fetch("/api/offline-records/frequency", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deviceId, action: "restore" }),
+    }).catch(() => null);
+    setBusyAction(null);
+
+    if (!response?.ok) {
+      return;
+    }
+
+    const payload = (await response.json()) as {
+      snapshots?: OfflineSnapshot[];
+      removedDevices?: RemovedFrequencyDevice[];
+    };
+    if (payload.snapshots) {
+      setSnapshots(payload.snapshots);
+    }
+    setRemovedFrequencyDevices(
+      payload.removedDevices ??
+        removedFrequencyDevices.filter((item) => item.deviceId !== deviceId),
+    );
+    recordAudit("offline_frequency.restore", "device", deviceId);
   }
 
   return (
@@ -1032,8 +1123,11 @@ export function OfflineRecordsDashboard({
             <h2>სიხშირე</h2>
             <AlertTriangle size={20} />
           </div>
+          {permissions.delete ? (
+            <RecordStateSelect value={frequencyState} onChange={setFrequencyState} />
+          ) : null}
           <div className="rank-list">
-            {rankedDevices.length ? (
+            {frequencyState === "deleted" ? null : rankedDevices.length ? (
               rankedDevices.map((device) => (
                 <div
                   key={device.deviceId}
@@ -1074,6 +1168,42 @@ export function OfflineRecordsDashboard({
                 არჩეულ პერიოდში offline მოწყობილობა არ არის.
               </p>
             )}
+            {/* Taken off the frequency: hidden, not deleted, so restorable. */}
+            {permissions.delete && frequencyState !== "active"
+              ? removedFrequencyDevices.length
+                ? removedFrequencyDevices.map((device) => (
+                    <div key={`removed-${device.deviceId}`} className="rank-row deleted">
+                      <div className="rank-row-head">
+                        <div>
+                          <strong>{device.deviceName}</strong>
+                          <span>სიხშირიდან წაშლილი</span>
+                        </div>
+                        <div className="rank-row-actions">
+                          <button
+                            className="icon-button restore"
+                            type="button"
+                            onClick={() =>
+                              void restoreFrequencyDevice(
+                                device.deviceId,
+                                device.deviceName,
+                              )
+                            }
+                            disabled={
+                              busyAction === `frequency-restore-${device.deviceId}`
+                            }
+                            aria-label={`${device.deviceName} — სიხშირეში აღდგენა`}
+                            title="სიხშირეში აღდგენა"
+                          >
+                            <RotateCcw size={15} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                : frequencyState === "deleted"
+                  ? <p className="muted">წაშლილი ჩანაწერი არ არის.</p>
+                  : null
+              : null}
           </div>
         </aside>
         <section className="surface offline-snapshot-panel">
@@ -1233,9 +1363,15 @@ export function OfflineRecordsDashboard({
           deviceName={historyDevice?.name ?? historyMonitoringRecord.deviceName}
           record={historyMonitoringRecord}
           clearing={busyAction === `clear-${historyMonitoringRecord.deviceId}`}
+          restoring={busyAction === `restore-${historyMonitoringRecord.deviceId}`}
           onClear={
             permissions.delete
               ? () => void clearHistory(historyMonitoringRecord.deviceId)
+              : undefined
+          }
+          onRestore={
+            permissions.delete && historyMonitoringRecord.hasClearedHistory
+              ? () => void restoreHistory(historyMonitoringRecord.deviceId)
               : undefined
           }
           onClose={() => setHistoryDeviceId(null)}
@@ -1443,14 +1579,19 @@ function MonitoringHistoryModal({
   deviceName,
   record,
   clearing,
+  restoring,
   onClear,
+  onRestore,
   onClose,
 }: {
   deviceName: string;
   record: MonitoredDevice;
   clearing: boolean;
+  restoring: boolean;
   /** Absent when the viewer may not clear history (offline_records.delete). */
   onClear?: () => void;
+  /** Present when cleared history exists and the viewer may restore it. */
+  onRestore?: () => void;
   onClose: () => void;
 }) {
   return (
@@ -1473,13 +1614,25 @@ function MonitoringHistoryModal({
             <span>{record.offlineCount} offline შემთხვევა</span>
           </div>
           <div className="offline-history-actions">
+            {onRestore ? (
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={onRestore}
+                disabled={restoring}
+                title="გასუფთავებული ისტორიის აღდგენა"
+              >
+                <RotateCcw size={15} />
+                <span>{restoring ? "აღდგება..." : "ისტორიის აღდგენა"}</span>
+              </button>
+            ) : null}
             {onClear ? (
               <button
                 className="ghost-button danger"
                 type="button"
                 onClick={onClear}
                 disabled={clearing || !record.offlinePeriods.length}
-                title="ისტორიის სრულად წაშლა"
+                title="ისტორიის გასუფთავება (აღდგენა შესაძლებელია)"
               >
                 <Trash2 size={15} />
                 <span>{clearing ? "იშლება..." : "გასუფთავება"}</span>

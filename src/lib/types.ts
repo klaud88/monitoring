@@ -74,6 +74,8 @@ export type AppUser = {
   twoFactorSecret?: string;
   /** Features this organisation has switched off (feature-flags.ts); set on the session. */
   disabledFeatures?: string[];
+  /** Set when the account was deleted (deactivated); restoring clears it. */
+  deletedAt?: string;
 };
 
 export type ProblemRecord = {
@@ -108,6 +110,8 @@ export type Device = {
   associatedDevices: string[];
   problems: ProblemRecord[];
   statusEvents: StatusEvent[];
+  /** Set when soft-deleted; its tasks/reports still show its garden name. */
+  deletedAt?: string;
 };
 
 export type Task = {
@@ -241,6 +245,8 @@ export type FormOneRecord = {
   createdBy?: string;
   createdAt: string;
   updatedAt: string;
+  /** Set when soft-deleted; restoring clears it. */
+  deletedAt?: string;
 };
 
 export type FormOneNotificationType =
@@ -298,6 +304,8 @@ export type Region = {
   id: string;
   name: string;
   color: string;
+  /** Set when soft-deleted; its gardens read as "no region" meanwhile. */
+  deletedAt?: string;
 };
 
 export type OfflineSummary = {
@@ -330,6 +338,8 @@ export type MonitoredDevice = {
   lastOfflineAt?: string;
   lastNotificationAt?: string;
   offlinePeriods: MonitoredOfflinePeriod[];
+  /** History was cleared and can be restored. */
+  hasClearedHistory?: boolean;
 };
 
 export type MonitoredOfflinePeriod = {

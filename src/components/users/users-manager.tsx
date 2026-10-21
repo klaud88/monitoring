@@ -9,6 +9,7 @@ import {
   MapPin,
   Phone,
   Plus,
+  RotateCcw,
   Save,
   Search,
   ShieldCheck,
@@ -18,6 +19,11 @@ import {
   X,
 } from "lucide-react";
 import { useConfirmDialog } from "@/components/common/confirm-dialog";
+import {
+  RecordStateSelect,
+  matchesRecordState,
+  type RecordState,
+} from "@/components/common/record-state-select";
 import type { AppRole, SessionUser } from "@/lib/types";
 
 const fallbackRoleOptions: AppRole[] = [
@@ -40,6 +46,8 @@ type UserPermissions = {
   create: boolean;
   edit: boolean;
   delete: boolean;
+  /** Deleted accounts are loaded and restorable only with this (admin). */
+  restore?: boolean;
 };
 
 type UserDraft = {
@@ -96,6 +104,7 @@ export function UsersManager({
   }, [roleOptions]);
   const [users, setUsers] = useState(initialUsers);
   const [query, setQuery] = useState("");
+  const [recordState, setRecordState] = useState<RecordState>("active");
   const [draft, setDraft] = useState<UserDraft>(() => buildEmptyDraft(defaultRole));
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<UserDraft>(() => buildEmptyDraft(defaultRole));
@@ -104,9 +113,15 @@ export function UsersManager({
   const [createOpen, setCreateOpen] = useState(false);
   const { confirm, confirmationDialog } = useConfirmDialog();
 
+  /** Active / deleted / all — the counts follow this. */
+  const recordUsers = useMemo(
+    () => users.filter((user) => matchesRecordState(user, recordState)),
+    [recordState, users],
+  );
+
   const filteredUsers = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    return users.filter(
+    return recordUsers.filter(
       (user) =>
         !normalized ||
         user.name.toLowerCase().includes(normalized) ||
@@ -115,7 +130,7 @@ export function UsersManager({
         user.role.toLowerCase().includes(normalized) ||
         (user.gardenCodes ?? []).includes(normalized),
     );
-  }, [query, users]);
+  }, [query, recordUsers]);
 
   async function createUser(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -220,7 +235,48 @@ export function UsersManager({
       return;
     }
 
-    setUsers((current) => current.filter((user) => user.id !== userId));
+    // Kept as deleted, so the "deleted" filter can restore it.
+    const deletedAt = new Date().toISOString();
+    setUsers((current) =>
+      permissions.restore
+        ? current.map((user) => (user.id === userId ? { ...user, deletedAt } : user))
+        : current.filter((user) => user.id !== userId),
+    );
+  }
+
+  async function restoreUser(userId: string) {
+    if (!permissions.restore) {
+      return;
+    }
+
+    const confirmed = await confirm({
+      title: "აღდგენის დადასტურება",
+      message: "ნამდვილად გსურთ მომხმარებლის აღდგენა? ანგარიში დაბრუნდება იმავე როლით და პაროლით.",
+      confirmLabel: "აღდგენა",
+      tone: "primary",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    const response = await fetch(`/api/users/${userId}/restore`, {
+      method: "POST",
+    }).catch(() => null);
+    setSaving(false);
+
+    if (!response?.ok) {
+      setError("მომხმარებლის აღდგენა ვერ მოხერხდა.");
+      return;
+    }
+
+    const data = (await response.json()) as { user: SessionUser | null };
+    setUsers((current) =>
+      current.map((user) =>
+        user.id === userId ? (data.user ?? { ...user, deletedAt: undefined }) : user,
+      ),
+    );
   }
 
   return (
@@ -235,12 +291,12 @@ export function UsersManager({
         <div className="metric-strip">
           <div className="metric">
             <Users size={18} />
-            <span>{users.length}</span>
+            <span>{recordUsers.length}</span>
             <small>მომხმარებელი</small>
           </div>
           <div className="metric">
             <ShieldCheck size={18} />
-            <span>{users.filter((user) => user.role === "admin").length}</span>
+            <span>{recordUsers.filter((user) => user.role === "admin").length}</span>
             <small>ადმინი</small>
           </div>
         </div>
@@ -391,6 +447,9 @@ export function UsersManager({
                 placeholder="ძებნა სახელით, ელფოსტით ან როლით"
               />
             </div>
+            {permissions.restore ? (
+              <RecordStateSelect value={recordState} onChange={setRecordState} />
+            ) : null}
           </div>
 
           <div className="user-table">
@@ -498,7 +557,10 @@ export function UsersManager({
                   </div>
                 </article>
               ) : (
-                <article key={user.id} className="user-row">
+                <article
+                  key={user.id}
+                  className={`user-row${user.deletedAt ? " deleted" : ""}`}
+                >
                   <span className="avatar" style={{ backgroundColor: user.color }}>
                     {user.initials}
                   </span>
@@ -527,7 +589,21 @@ export function UsersManager({
                   </span>
                   <span className="count-pill">{user.permissions.length} უფლება</span>
                   <div className="row-actions">
-                    {permissions.edit ? (
+                    {user.deletedAt ? (
+                      permissions.restore ? (
+                        <button
+                          className="icon-button restore"
+                          type="button"
+                          aria-label="აღდგენა"
+                          title="აღდგენა"
+                          disabled={saving}
+                          onClick={() => restoreUser(user.id)}
+                        >
+                          <RotateCcw size={17} />
+                        </button>
+                      ) : null
+                    ) : null}
+                    {permissions.edit && !user.deletedAt ? (
                       <button
                         className="icon-button"
                         type="button"
@@ -538,7 +614,7 @@ export function UsersManager({
                         <Edit3 size={17} />
                       </button>
                     ) : null}
-                    {permissions.delete ? (
+                    {permissions.delete && !user.deletedAt ? (
                       <button
                         className="icon-button danger"
                         type="button"

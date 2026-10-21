@@ -61,6 +61,7 @@ type UserRow = {
   twofa_secret?: string | null;
   permissions: string | null;
   garden_codes?: string | null;
+  deleted_at?: DatabaseDate | null;
 };
 
 type RoleRow = {
@@ -87,6 +88,7 @@ type RegionRow = {
   id: string;
   name: string;
   color: string;
+  deleted_at?: DatabaseDate | null;
 };
 
 type DeviceRow = {
@@ -101,6 +103,7 @@ type DeviceRow = {
   last_seen_at: DatabaseDate;
   tags: string | null;
   associated_devices: string | null;
+  deleted_at: DatabaseDate | null;
 };
 
 type OfflineSnapshotRow = {
@@ -134,6 +137,7 @@ type MonitoredDeviceRow = {
   last_status: string | null;
   last_offline_at: DatabaseDate | null;
   last_notification_at: DatabaseDate | null;
+  has_cleared_history?: boolean | number | string;
 };
 
 type MonitoredOfflinePeriodRow = {
@@ -455,6 +459,7 @@ type FormOneRecordRow = {
   created_by: string | null;
   created_at: DatabaseDate;
   updated_at: DatabaseDate;
+  deleted_at?: DatabaseDate | null;
 };
 
 type FormOneNotificationRow = FormOneRecordRow & {
@@ -843,7 +848,30 @@ async function ensureOperationalSchema() {
       await connection.query(
         "alter table tasks modify priority enum('low', 'normal', 'high', 'urgent') not null default 'normal'",
       );
+      await addColumnIfMissing(
+        connection,
+        await getTableColumns(connection, "tags"),
+        "tags",
+        "deleted_at",
+        "deleted_at timestamp null",
+      );
+      const regionColumns = await getTableColumns(connection, "regions");
+      await addColumnIfMissing(
+        connection,
+        regionColumns,
+        "regions",
+        "deleted_at",
+        "deleted_at timestamp null",
+      );
       const deviceColumns = await getTableColumns(connection, "devices");
+      // Soft delete: nothing is ever removed from the database (logic.md §5).
+      await addColumnIfMissing(
+        connection,
+        deviceColumns,
+        "devices",
+        "deleted_at",
+        "deleted_at timestamp null",
+      );
       const addedLatitude = await addColumnIfMissing(
         connection,
         deviceColumns,
@@ -938,6 +966,14 @@ async function ensureOperationalSchema() {
         "deleted_at timestamp null",
       );
       const userColumns = await getTableColumns(connection, "users");
+      // A deleted user is is_active = false; this records when.
+      await addColumnIfMissing(
+        connection,
+        userColumns,
+        "users",
+        "deleted_at",
+        "deleted_at timestamp null",
+      );
       await addColumnIfMissing(
         connection,
         userColumns,
@@ -1049,6 +1085,37 @@ async function ensureOperationalSchema() {
         connection,
         "monitored_devices",
       );
+      // "Clear history" hides periods instead of deleting them; the counters
+      // it resets are kept here so "restore history" can add them back.
+      await addColumnIfMissing(
+        connection,
+        monitoredColumns,
+        "monitored_devices",
+        "cleared_offline_count",
+        "cleared_offline_count int not null default 0",
+      );
+      await addColumnIfMissing(
+        connection,
+        monitoredColumns,
+        "monitored_devices",
+        "cleared_last_offline_at",
+        "cleared_last_offline_at datetime null",
+      );
+      await addColumnIfMissing(
+        connection,
+        await getTableColumns(connection, "monitored_device_offline_periods"),
+        "monitored_device_offline_periods",
+        "cleared_at",
+        "cleared_at timestamp null",
+      );
+      // Removing a device from the X-Station frequency hides its rows.
+      await addColumnIfMissing(
+        connection,
+        await getTableColumns(connection, "offline_snapshot_devices"),
+        "offline_snapshot_devices",
+        "removed_at",
+        "removed_at timestamp null",
+      );
       await addColumnIfMissing(
         connection,
         monitoredColumns,
@@ -1146,6 +1213,14 @@ async function ensureOperationalSchema() {
         )
       `);
       const formOneColumns = await getTableColumns(connection, "form_one_records");
+      // Soft delete: a deleted Form 1 stays (with its notifications), hidden.
+      await addColumnIfMissing(
+        connection,
+        formOneColumns,
+        "form_one_records",
+        "deleted_at",
+        "deleted_at timestamp null",
+      );
       await addColumnIfMissing(
         connection,
         formOneColumns,
@@ -1379,7 +1454,12 @@ async function addColumnIfMissing(
     | "users"
     | "monitored_devices"
     | "form_one_records"
-    | "problem_reports",
+    | "problem_reports"
+    | "regions"
+    | "tags"
+    | "task_tags"
+    | "monitored_device_offline_periods"
+    | "offline_snapshot_devices",
   columnName: string,
   columnDefinition: string,
 ) {
@@ -1800,6 +1880,15 @@ async function ensureTaskTagCatalog(connection: PoolConnection) {
     )
   `);
 
+  // Soft delete: a deleted tag stays here (and on its tasks), only hidden.
+  await addColumnIfMissing(
+    connection,
+    await getTableColumns(connection, "task_tags"),
+    "task_tags",
+    "deleted_at",
+    "deleted_at timestamp null",
+  );
+
   const tagNames = new Set<string>(
     taskTagCatalog.map(normalizeTaskTagName).filter(Boolean),
   );
@@ -1928,7 +2017,7 @@ async function ensureGardenUsersForDevices(connection: PoolConnection) {
   }
 
   const [deviceRows] = await connection.query<RowDataPacket[]>(
-    "select code, name from devices where is_excluded = false order by code",
+    "select code, name from devices where is_excluded = false and deleted_at is null order by code",
   );
   const groups = new Map<string, string>();
   const invalidGeneratedGroups = new Set<string>();
@@ -2128,7 +2217,12 @@ function toPublicUser(user: AppUser): SessionUser {
   };
 }
 
-export async function getUsers(): Promise<SessionUser[]> {
+export async function getUsers({
+  includeDeleted = false,
+}: {
+  /** Deleted (deactivated) users too — the users page's "deleted" filter. */
+  includeDeleted?: boolean;
+} = {}): Promise<SessionUser[]> {
   await ensureOperationalSchema();
 
   const rows = await queryRows<UserRow>(
@@ -2148,12 +2242,14 @@ export async function getUsers(): Promise<SessionUser[]> {
           from user_gardens ug
           where ug.user_id = u.id
         ) as garden_codes,
-        group_concat(distinct p.code order by p.code separator ',') as permissions
+        group_concat(distinct p.code order by p.code separator ',') as permissions,
+        -- Users deleted before deleted_at existed fall back to updated_at.
+        if(u.is_active, null, coalesce(u.deleted_at, u.updated_at)) as deleted_at
       from users u
       join roles r on r.id = u.role_id
       left join role_permissions rp on rp.role_id = r.id
       left join permissions p on p.id = rp.permission_id
-      where u.is_active = true
+      ${includeDeleted ? "" : "where u.is_active = true"}
       group by u.id, r.name
       order by u.name
     `,
@@ -2175,11 +2271,15 @@ export async function getUsers(): Promise<SessionUser[]> {
     mustChangePassword: Boolean(row.must_change_password),
     gardenCodes: csv(row.garden_codes),
     permissions: csv(row.permissions) as PermissionKey[],
+    deletedAt: row.deleted_at ? toDateTimeString(row.deleted_at) : undefined,
   }));
 }
 
-export async function getUserById(id: string): Promise<SessionUser | null> {
-  const users = await getUsers();
+export async function getUserById(
+  id: string,
+  { includeDeleted = false }: { includeDeleted?: boolean } = {},
+): Promise<SessionUser | null> {
+  const users = await getUsers({ includeDeleted });
   return users.find((user) => user.id === id) ?? null;
 }
 
@@ -2326,13 +2426,35 @@ export async function getGardenCodes(): Promise<string[]> {
 export async function deleteUser(id: string) {
   const deleted = await withConnection(async (connection) => {
     const [result] = await connection.query<ResultSetHeader>(
-      "update users set is_active = false where id = ? and is_active = true",
+      "update users set is_active = false, deleted_at = current_timestamp where id = ? and is_active = true",
       [id],
     );
     return result.affectedRows > 0;
   });
 
   return deleted ?? false;
+}
+
+/* The account is kept (deactivated) on delete, so it can come back as it was. */
+export async function restoreUser(id: string) {
+  await ensureOperationalSchema();
+  const restored = await withConnection(async (connection) => {
+    const [result] = await connection.query<ResultSetHeader>(
+      "update users set is_active = true, deleted_at = null where id = ? and is_active = false",
+      [id],
+    );
+    return result.affectedRows > 0;
+  });
+
+  return restored ?? false;
+}
+
+export async function hasDeletedUserWithEmail(email: string) {
+  const rows = await queryRows<{ id: string }>(
+    "select id from users where email = ? and is_active = false limit 1",
+    [email],
+  );
+  return Boolean(rows?.length);
 }
 
 export async function changeUserPassword(
@@ -2787,7 +2909,12 @@ export async function updateRolePermissions(
   return updated ?? null;
 }
 
-export async function getDevices(): Promise<Device[]> {
+export async function getDevices({
+  includeDeleted = false,
+}: {
+  /** Deleted devices too — to show a deleted garden's name on its tasks. */
+  includeDeleted?: boolean;
+} = {}): Promise<Device[]> {
   if (isBuildTime()) {
     return mockDevices;
   }
@@ -2807,12 +2934,14 @@ export async function getDevices(): Promise<Device[]> {
         d.longitude,
         d.last_seen_at,
         group_concat(distinct t.name order by t.name separator ',') as tags,
-        group_concat(distinct ad.name order by ad.name separator ',') as associated_devices
+        group_concat(distinct ad.name order by ad.name separator ',') as associated_devices,
+        d.deleted_at
       from devices d
-      left join regions r on r.id = d.region_id
+      left join regions r on r.id = d.region_id and r.deleted_at is null
       left join device_tags dt on dt.device_id = d.id
-      left join tags t on t.id = dt.tag_id
+      left join tags t on t.id = dt.tag_id and t.deleted_at is null
       left join associated_devices ad on ad.device_id = d.id
+      ${includeDeleted ? "" : "where d.deleted_at is null"}
       group by d.id, r.name
       order by d.code
     `,
@@ -2824,7 +2953,7 @@ export async function getDevices(): Promise<Device[]> {
 
   // Tags live on gardens; each device shows its garden's tags.
   const gardenTagRows = await queryRows<{ garden_key: string; name: string }>(
-    "select gt.garden_key, t.name from garden_tags gt join tags t on t.id = gt.tag_id",
+    "select gt.garden_key, t.name from garden_tags gt join tags t on t.id = gt.tag_id and t.deleted_at is null",
   ).catch(() => null);
   const tagsByGarden = new Map<string, string[]>();
   for (const row of gardenTagRows ?? []) {
@@ -2876,12 +3005,18 @@ export async function getDevices(): Promise<Device[]> {
     associatedDevices: csv(row.associated_devices),
     problems: [],
     statusEvents: eventsByDevice.get(row.id) ?? [],
+    deletedAt: row.deleted_at ? toDateTimeString(row.deleted_at) : undefined,
   }));
 }
 
-export async function getRegions(): Promise<Region[]> {
+export async function getRegions({
+  includeDeleted = false,
+}: { includeDeleted?: boolean } = {}): Promise<Region[]> {
+  await ensureOperationalSchema();
   const rows = await queryRows<RegionRow>(
-    "select id, name, color from regions order by name",
+    `select id, name, color, deleted_at from regions
+     ${includeDeleted ? "" : "where deleted_at is null"}
+     order by name`,
   );
 
   if (!rows) {
@@ -2896,6 +3031,7 @@ export async function getRegions(): Promise<Region[]> {
     id: row.id,
     name: row.name,
     color: row.color,
+    deletedAt: row.deleted_at ? toDateTimeString(row.deleted_at) : undefined,
   }));
 }
 
@@ -2907,7 +3043,7 @@ export async function getTaskTagNames(): Promise<string[]> {
   await ensureOperationalSchema();
 
   const rows = await queryRows<TaskTagRow>(
-    "select name from task_tags order by name",
+    "select name from task_tags where deleted_at is null order by name",
   );
 
   if (!rows) {
@@ -2915,6 +3051,41 @@ export async function getTaskTagNames(): Promise<string[]> {
   }
 
   return rows.map((row) => row.name);
+}
+
+/** Deleted task tags — listed for restoring, hidden everywhere else. */
+export async function getDeletedTaskTagNames(): Promise<string[]> {
+  if (isBuildTime()) {
+    return [];
+  }
+  await ensureOperationalSchema();
+  const rows = await queryRows<TaskTagRow>(
+    "select name from task_tags where deleted_at is not null order by name",
+  );
+  return (rows ?? []).map((row) => row.name);
+}
+
+async function getDeletedTaskTagSet(connection?: PoolConnection) {
+  if (connection) {
+    const [rows] = await connection.query<RowDataPacket[]>(
+      "select name from task_tags where deleted_at is not null",
+    );
+    return new Set(rows.map((row) => String(row.name)));
+  }
+  return new Set(await getDeletedTaskTagNames());
+}
+
+/** A task/report keeps the deleted tags it carried (hidden while deleted),
+ *  so an edit doesn't drop them and restoring the tag brings them back. */
+function withKeptDeletedTags(
+  nextTags: string[],
+  storedTags: unknown,
+  deletedTags: Set<string>,
+) {
+  return normalizeTaskTags([
+    ...nextTags,
+    ...normalizeTaskTags(storedTags).filter((tag) => deletedTags.has(tag)),
+  ]);
 }
 
 export async function getDeviceTagNames(): Promise<string[]> {
@@ -2930,7 +3101,7 @@ export async function getDeviceTagNames(): Promise<string[]> {
   await ensureOperationalSchema();
 
   const rows = await queryRows<TaskTagRow>(
-    "select name from tags order by name",
+    "select name from tags where deleted_at is null order by name",
   );
 
   if (!rows) {
@@ -2943,6 +3114,18 @@ export async function getDeviceTagNames(): Promise<string[]> {
   }
 
   return rows.map((row) => row.name);
+}
+
+/** Deleted device tags — listed for restoring, hidden everywhere else. */
+export async function getDeletedDeviceTagNames(): Promise<string[]> {
+  if (isBuildTime()) {
+    return [];
+  }
+  await ensureOperationalSchema();
+  const rows = await queryRows<TaskTagRow>(
+    "select name from tags where deleted_at is not null order by name",
+  );
+  return (rows ?? []).map((row) => row.name);
 }
 
 export async function createDeviceTag(name: string) {
@@ -2976,50 +3159,22 @@ export async function createDeviceTag(name: string) {
   return tagName;
 }
 
+/* Soft delete: the tag's device and garden links stay, so restoring puts it
+   back everywhere; while deleted it is hidden from every list and garden. */
 export async function deleteDeviceTag(name: string) {
   const tagName = normalizeTaskTagName(name);
   if (!tagName) {
     return false;
   }
+  return setDeletedAt("tags", tagName, true, "name");
+}
 
-  await ensureOperationalSchema();
-
-  const deleted = await withConnection(async (connection) => {
-    await connection.beginTransaction();
-    try {
-      await connection.query<ResultSetHeader>(
-        `
-          delete dt
-          from device_tags dt
-          join tags t on t.id = dt.tag_id
-          where t.name = ?
-        `,
-        [tagName],
-      );
-      await connection.query<ResultSetHeader>(
-        "delete from tags where name = ?",
-        [tagName],
-      );
-
-      await connection.commit();
-      return true;
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    }
-  });
-
-  if (deleted !== null) {
-    return deleted;
+export async function restoreDeviceTag(name: string) {
+  const tagName = normalizeTaskTagName(name);
+  if (!tagName) {
+    return false;
   }
-
-  fallbackDeviceTagNames = fallbackDeviceTagNames.filter(
-    (tag) => tag !== tagName,
-  );
-  mockDevices.forEach((device) => {
-    device.tags = device.tags.filter((tag) => tag !== tagName);
-  });
-  return true;
+  return setDeletedAt("tags", tagName, false, "name");
 }
 
 /** Garden key → its tag names. Empty when the table isn't available. */
@@ -3029,7 +3184,7 @@ export async function getGardenTags(): Promise<Record<string, string[]>> {
     `
       select gt.garden_key, t.name
       from garden_tags gt
-      join tags t on t.id = gt.tag_id
+      join tags t on t.id = gt.tag_id and t.deleted_at is null
       order by t.name
     `,
   ).catch((error) => {
@@ -3056,19 +3211,25 @@ export async function setGardenTags(gardenKey: string, tagNames: string[]) {
   return withConnection(async (connection) => {
     await connection.beginTransaction();
     try {
-      await connection.query("delete from garden_tags where garden_key = ?", [key]);
+      // Links to deleted tags stay, so restoring the tag brings them back.
+      await connection.query(
+        `delete gt from garden_tags gt join tags t on t.id = gt.tag_id
+         where gt.garden_key = ? and t.deleted_at is null`,
+        [key],
+      );
       if (names.length) {
         await connection.query(
           `
             insert ignore into garden_tags (garden_key, tag_id)
-            select ?, id from tags where name in (?)
+            select ?, id from tags where name in (?) and deleted_at is null
           `,
           [key, names],
         );
       }
       const [rows] = await connection.query<RowDataPacket[]>(
         `
-          select t.name from garden_tags gt join tags t on t.id = gt.tag_id
+          select t.name from garden_tags gt
+          join tags t on t.id = gt.tag_id and t.deleted_at is null
           where gt.garden_key = ? order by t.name
         `,
         [key],
@@ -3103,7 +3264,7 @@ export async function renameDeviceTag(oldName: string, newName: string) {
     await connection.beginTransaction();
     try {
       const [oldRows] = await connection.query<RowDataPacket[]>(
-        "select id, color from tags where name = ? limit 1 for update",
+        "select id, color from tags where name = ? and deleted_at is null limit 1 for update",
         [from],
       );
       const oldTag = oldRows[0];
@@ -3117,6 +3278,10 @@ export async function renameDeviceTag(oldName: string, newName: string) {
         [to],
       );
       let newId = newRows[0]?.id ? String(newRows[0].id) : "";
+      if (newId) {
+        // Renaming onto a deleted tag merges into it, so it comes back.
+        await connection.query("update tags set deleted_at = null where id = ?", [newId]);
+      }
       if (!newId) {
         newId = makeStableId("tag", to);
         await connection.query(
@@ -3164,15 +3329,17 @@ export async function renameTaskTag(oldName: string, newName: string) {
     await connection.beginTransaction();
     try {
       const [result] = await connection.query<ResultSetHeader>(
-        "delete from task_tags where name = ?",
+        "delete from task_tags where name = ? and deleted_at is null",
         [from],
       );
       if (!result.affectedRows) {
         await connection.rollback();
         return null;
       }
+      // Renaming onto a deleted tag merges into it, so it comes back.
       await connection.query(
-        "insert ignore into task_tags (id, name) values (?, ?)",
+        `insert into task_tags (id, name) values (?, ?)
+         on duplicate key update deleted_at = null`,
         [makeStableId("tasktag", to), to],
       );
 
@@ -3209,7 +3376,7 @@ export async function getGardenRegions(): Promise<Record<string, string>> {
     `
       select gr.garden_key, r.name
       from garden_regions gr
-      join regions r on r.id = gr.region_id
+      join regions r on r.id = gr.region_id and r.deleted_at is null
     `,
   ).catch((error) => {
     console.error("[garden-regions] unavailable", error);
@@ -3289,38 +3456,25 @@ export async function createTaskTag(name: string) {
   return tagName;
 }
 
+/* Soft delete: tasks and reports keep the tag (hidden while it is deleted),
+   so restoring it puts it back on all of them. */
 export async function deleteTaskTag(name: string) {
   const tagName = normalizeTaskTagName(name);
   if (!tagName) {
     return false;
   }
 
-  await ensureOperationalSchema();
-
-  const deleted = await withConnection(async (connection) => {
-    await connection.beginTransaction();
-    try {
-      const [result] = await connection.query<ResultSetHeader>(
-        "delete from task_tags where name = ?",
-        [tagName],
-      );
-
-      await removeTaskTagReferences(connection, tagName);
-      await connection.commit();
-      return result.affectedRows > 0;
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    }
-  });
-
-  if (deleted !== null) {
-    return deleted;
-  }
-
-  const hadTag = fallbackTaskTagNames.includes(tagName);
+  const deleted = await setDeletedAt("task_tags", tagName, true, "name");
   fallbackTaskTagNames = fallbackTaskTagNames.filter((tag) => tag !== tagName);
-  return hadTag;
+  return deleted;
+}
+
+export async function restoreTaskTag(name: string) {
+  const tagName = normalizeTaskTagName(name);
+  if (!tagName) {
+    return false;
+  }
+  return setDeletedAt("task_tags", tagName, false, "name");
 }
 
 export async function createRegion(input: {
@@ -3345,7 +3499,7 @@ export async function updateRegion(
 ): Promise<Region | null> {
   const updated = await withConnection(async (connection) => {
     const [result] = await connection.query<ResultSetHeader>(
-      "update regions set name = ?, color = ? where id = ?",
+      "update regions set name = ?, color = ? where id = ? and deleted_at is null",
       [input.name, input.color, id],
     );
     if (!result.affectedRows) {
@@ -3358,30 +3512,22 @@ export async function updateRegion(
   return updated ?? null;
 }
 
+/* Soft delete. Devices and gardens keep pointing at the region, which is
+   simply hidden (they read as "no region"); restoring gives it back its
+   gardens. */
 export async function deleteRegion(id: string) {
-  const deleted = await withConnection(async (connection) => {
-    await connection.beginTransaction();
-    try {
-      await connection.query("update devices set region_id = null where region_id = ?", [
-        id,
-      ]);
-      const [result] = await connection.query<ResultSetHeader>(
-        "delete from regions where id = ?",
-        [id],
-      );
-      await connection.commit();
-      return result.affectedRows > 0;
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    }
-  });
-
-  return deleted ?? false;
+  return setDeletedAt("regions", id, true);
 }
 
-export async function getDeviceById(id: string): Promise<Device | null> {
-  const devices = await getDevices();
+export async function restoreRegion(id: string) {
+  return setDeletedAt("regions", id, false);
+}
+
+export async function getDeviceById(
+  id: string,
+  { includeDeleted = false }: { includeDeleted?: boolean } = {},
+): Promise<Device | null> {
+  const devices = await getDevices({ includeDeleted });
   return devices.find((device) => device.id === id) ?? null;
 }
 
@@ -3395,7 +3541,7 @@ async function getRegionIdByName(
   }
 
   const [rows] = await connection.query(
-    "select id from regions where name = ? limit 1",
+    "select id from regions where name = ? and deleted_at is null limit 1",
     [normalizedRegion],
   );
   return (rows as { id: string }[])[0]?.id ?? null;
@@ -3424,30 +3570,6 @@ async function replaceAssociatedDevices(
       `,
       [makeStableId("assoc", `${deviceId}:${name}`), deviceId, name],
     );
-  }
-}
-
-async function removeTaskTagReferences(
-  connection: PoolConnection,
-  tagName: string,
-) {
-  for (const tableName of ["tasks", "problem_reports"] as const) {
-    const [rows] = await connection.query<TaggedJsonRow[]>(
-      `select id, tags from ${tableName} where tags is not null`,
-    );
-
-    for (const row of rows) {
-      const tags = normalizeTaskTags(row.tags);
-      const nextTags = tags.filter((tag) => tag !== tagName);
-      if (nextTags.length === tags.length) {
-        continue;
-      }
-
-      await connection.query<ResultSetHeader>(
-        `update ${tableName} set tags = cast(? as json) where id = ?`,
-        [JSON.stringify(nextTags), row.id],
-      );
-    }
   }
 }
 
@@ -3631,16 +3753,55 @@ export async function updateDevicePosition(
   return updated ?? null;
 }
 
+/* Soft delete: the device's tasks, reports and forms stay as they are and
+   keep showing its garden name; restoring brings the device itself back. */
 export async function deleteDevice(id: string) {
-  const deleted = await withConnection(async (connection) => {
-    const [result] = await connection.query<ResultSetHeader>(
-      "delete from devices where id = ?",
+  return setDeletedAt("devices", id, true);
+}
+
+export async function restoreDevice(id: string) {
+  return setDeletedAt("devices", id, false);
+}
+
+/** Whether a deleted row already holds this unique value (code, name...),
+ *  so creating a new one would collide — the user should restore it. */
+export async function hasDeletedWith(
+  table: SoftDeleteTable,
+  column: string,
+  value: string,
+) {
+  const rows = await queryRows<{ id: string }>(
+    `select id from ${table} where ${column} = ? and deleted_at is not null limit 1`,
+    [value],
+  );
+  return Boolean(rows?.length);
+}
+
+type SoftDeleteTable =
+  | "devices"
+  | "regions"
+  | "tags"
+  | "task_tags"
+  | "form_one_records";
+
+/** Marks a row deleted (or restores it). Rows are never removed. */
+async function setDeletedAt(
+  table: SoftDeleteTable,
+  id: string,
+  deleted: boolean,
+  idColumn = "id",
+) {
+  await ensureOperationalSchema();
+  const result = await withConnection(async (connection) => {
+    const [update] = await connection.query<ResultSetHeader>(
+      deleted
+        ? `update ${table} set deleted_at = current_timestamp where ${idColumn} = ? and deleted_at is null`
+        : `update ${table} set deleted_at = null where ${idColumn} = ? and deleted_at is not null`,
       [id],
     );
-    return result.affectedRows > 0;
+    return update.affectedRows > 0;
   });
-
-  return deleted ?? false;
+  return result ?? false;
 }
 
 export async function ensureTodayOfflineSnapshot() {
@@ -3863,6 +4024,7 @@ export async function getDailyOfflineLevels({
         from monitored_device_offline_periods
         where offline_at < date_add(?, interval 1 day)
           and (online_at is null or online_at >= ?)
+          and cleared_at is null
         order by device_id, offline_at
       `,
       [toKey, fromKey],
@@ -3959,7 +4121,9 @@ const getOfflinePeriodRetentionDays = () => {
  * dropped, so the table never grows without bound. Open periods are never
  * touched, however old, because they are still the device's current state.
  */
-/** The only thing that erases a device's offline history, on explicit request. */
+/** Clears a device's offline history on explicit request. The periods are
+ *  hidden, not deleted, and the reset counters are kept, so
+ *  restoreDeviceOfflineHistory can bring everything back. */
 export async function clearDeviceOfflineHistory(deviceId: string) {
   await ensureOperationalSchema();
 
@@ -3967,12 +4131,64 @@ export async function clearDeviceOfflineHistory(deviceId: string) {
     await connection.beginTransaction();
     try {
       await connection.query<ResultSetHeader>(
-        "delete from monitored_device_offline_periods where device_id = ?",
+        `update monitored_device_offline_periods set cleared_at = current_timestamp
+         where device_id = ? and cleared_at is null`,
         [deviceId],
       );
       await connection.query<ResultSetHeader>(
         `update monitored_devices
-         set offline_count = 0, last_offline_at = null, updated_at = current_timestamp
+         set cleared_offline_count = cleared_offline_count + offline_count,
+             cleared_last_offline_at = greatest(
+               coalesce(cleared_last_offline_at, last_offline_at),
+               coalesce(last_offline_at, cleared_last_offline_at)
+             ),
+             offline_count = 0, last_offline_at = null, updated_at = current_timestamp
+         where device_id = ?`,
+        [deviceId],
+      );
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    }
+  });
+
+  return refreshMonitoredDeviceStatuses({ includeInactive: true });
+}
+
+/** Undoes clearDeviceOfflineHistory: the periods and counters come back. */
+export async function restoreDeviceOfflineHistory(deviceId: string) {
+  await ensureOperationalSchema();
+
+  await withConnection(async (connection) => {
+    await connection.beginTransaction();
+    try {
+      // A period still open when it was cleared ends where the live one
+      // (opened after the clear) begins, so the two don't overlap.
+      await connection.query(
+        `update monitored_device_offline_periods cleared
+         join monitored_device_offline_periods live
+           on live.device_id = cleared.device_id
+          and live.online_at is null and live.cleared_at is null
+         set cleared.online_at = live.offline_at
+         where cleared.device_id = ? and cleared.cleared_at is not null
+           and cleared.online_at is null`,
+        [deviceId],
+      );
+      await connection.query<ResultSetHeader>(
+        `update monitored_device_offline_periods set cleared_at = null
+         where device_id = ? and cleared_at is not null`,
+        [deviceId],
+      );
+      await connection.query<ResultSetHeader>(
+        `update monitored_devices
+         set offline_count = offline_count + cleared_offline_count,
+             last_offline_at = greatest(
+               coalesce(last_offline_at, cleared_last_offline_at),
+               coalesce(cleared_last_offline_at, last_offline_at)
+             ),
+             cleared_offline_count = 0, cleared_last_offline_at = null,
+             updated_at = current_timestamp
          where device_id = ?`,
         [deviceId],
       );
@@ -4046,7 +4262,7 @@ export async function captureDailyOfflineSnapshot(value = new Date()) {
         `
           select id, code, name, biostar_payload
           from devices
-          where status = 'offline' and is_excluded = false
+          where status = 'offline' and is_excluded = false and deleted_at is null
           order by code
         `,
       );
@@ -4138,8 +4354,8 @@ export async function getOfflineSnapshots(fromDate?: string, toDate?: string) {
         osd.device_code,
         osd.device_name
       from offline_snapshot_devices osd
-      join devices d on d.id = osd.device_id and d.is_excluded = false
-      where osd.snapshot_id in (?)
+      join devices d on d.id = osd.device_id and d.is_excluded = false and d.deleted_at is null
+      where osd.snapshot_id in (?) and osd.removed_at is null
       order by osd.device_name
     `,
     [rows.map((row) => row.id)],
@@ -4176,15 +4392,68 @@ export async function clearOfflineFrequencyForDevice(deviceId: string) {
 
   await ensureOperationalSchema();
 
+  // Hidden, not deleted: restoreOfflineFrequencyForDevice brings it back.
   const deleted = await withConnection(async (connection) => {
     const [result] = await connection.query<ResultSetHeader>(
-      "delete from offline_snapshot_devices where device_id = ?",
+      `update offline_snapshot_devices set removed_at = current_timestamp
+       where device_id = ? and removed_at is null`,
       [normalizedDeviceId],
     );
     return result.affectedRows > 0;
   });
 
   return deleted ?? false;
+}
+
+export async function restoreOfflineFrequencyForDevice(deviceId: string) {
+  if (isBuildTime()) {
+    return false;
+  }
+
+  const normalizedDeviceId = deviceId.trim();
+  if (!normalizedDeviceId) {
+    return false;
+  }
+
+  await ensureOperationalSchema();
+
+  const restored = await withConnection(async (connection) => {
+    const [result] = await connection.query<ResultSetHeader>(
+      `update offline_snapshot_devices set removed_at = null
+       where device_id = ? and removed_at is not null`,
+      [normalizedDeviceId],
+    );
+    return result.affectedRows > 0;
+  });
+
+  return restored ?? false;
+}
+
+/** Devices taken off the X-Station frequency (restorable), newest first. */
+export async function getRemovedOfflineFrequencyDevices(): Promise<
+  { deviceId: string; deviceName: string; removedAt: string }[]
+> {
+  if (isBuildTime()) {
+    return [];
+  }
+  await ensureOperationalSchema();
+  const rows = await queryRows<{
+    device_id: string;
+    device_name: string;
+    removed_at: DatabaseDate;
+  }>(
+    `select osd.device_id, max(osd.device_name) as device_name, max(osd.removed_at) as removed_at
+     from offline_snapshot_devices osd
+     join devices d on d.id = osd.device_id and d.deleted_at is null
+     where osd.removed_at is not null
+     group by osd.device_id
+     order by removed_at desc`,
+  );
+  return (rows ?? []).map((row) => ({
+    deviceId: row.device_id,
+    deviceName: row.device_name,
+    removedAt: toDateTimeString(row.removed_at),
+  }));
 }
 
 export async function getMonitoredDevices({
@@ -4209,9 +4478,13 @@ export async function getMonitoredDevices({
         md.offline_count,
         md.last_status,
         md.last_offline_at,
-        md.last_notification_at
+        md.last_notification_at,
+        exists (
+          select 1 from monitored_device_offline_periods p
+          where p.device_id = md.device_id and p.cleared_at is not null
+        ) as has_cleared_history
       from monitored_devices md
-      join devices d on d.id = md.device_id and d.is_excluded = false
+      join devices d on d.id = md.device_id and d.is_excluded = false and d.deleted_at is null
       ${includeInactive ? "" : "where md.is_active = true"}
       order by md.is_active desc, md.enabled_date desc, md.device_id
     `,
@@ -4222,13 +4495,13 @@ export async function getMonitoredDevices({
   }
 
   // The full history: switching monitoring off and on again must not hide it.
-  // Only the explicit "clear" action removes rows.
+  // Only the explicit "clear" action hides rows (and "restore" shows them).
   const periodRows = rows.length
     ? await queryRows<MonitoredOfflinePeriodRow>(
         `
           select id, device_id, offline_at, online_at
           from monitored_device_offline_periods
-          where device_id in (?)
+          where device_id in (?) and cleared_at is null
           order by offline_at desc
         `,
         [rows.map((row) => row.device_id)],
@@ -4257,7 +4530,7 @@ export async function refreshMonitoredDeviceStatuses({
     const [rows] = await connection.query<RowDataPacket[]>(
       `select md.device_id, d.status
        from monitored_devices md
-       join devices d on d.id = md.device_id and d.is_excluded = false
+       join devices d on d.id = md.device_id and d.is_excluded = false and d.deleted_at is null
        where md.is_active = true`,
     );
 
@@ -4295,7 +4568,7 @@ export async function setDeviceMonitoring(
   await withConnection(async (connection) => {
     if (enabled) {
       const [deviceRows] = await connection.query(
-        "select id, status from devices where id in (?) and is_excluded = false",
+        "select id, status from devices where id in (?) and is_excluded = false and deleted_at is null",
         [uniqueDeviceIds],
       );
       const activeDevices = deviceRows as { id: string; status: DeviceStatus }[];
@@ -4360,6 +4633,7 @@ function mapMonitoredDeviceRow(
       ? toDateTimeString(row.last_notification_at)
       : undefined,
     offlinePeriods,
+    hasClearedHistory: toBoolean(row.has_cleared_history ?? false),
   };
 }
 
@@ -4391,7 +4665,7 @@ async function recordDeviceOfflinePeriod(
   if (status === "offline") {
     const [openRows] = await connection.query<RowDataPacket[]>(
       `select id from monitored_device_offline_periods
-       where device_id = ? and online_at is null
+       where device_id = ? and online_at is null and cleared_at is null
        limit 1`,
       [deviceId],
     );
@@ -4628,6 +4902,7 @@ export async function getTasks(
       : mockTasks;
   }
 
+  const deletedTags = await getDeletedTaskTagSet();
   return rows.map((row) => ({
     id: row.id,
     title: row.title,
@@ -4637,7 +4912,7 @@ export async function getTasks(
     deviceId: row.device_id,
     status: row.status,
     priority: row.priority,
-    tags: normalizeTaskTags(row.tags),
+    tags: normalizeTaskTags(row.tags).filter((tag) => !deletedTags.has(tag)),
     info: Boolean(row.is_info),
     infoAutoDoneDays: row.info_auto_done_days ?? undefined,
     infoAutoDoneAt: row.info_auto_done_at
@@ -4723,6 +4998,15 @@ export async function updateTask(
   const updated = await withConnection(async (connection) => {
     await connection.beginTransaction();
     try {
+      const [storedRows] = await connection.query<RowDataPacket[]>(
+        "select tags from tasks where id = ? limit 1 for update",
+        [id],
+      );
+      const storedTags = withKeptDeletedTags(
+        tags,
+        storedRows[0]?.tags,
+        await getDeletedTaskTagSet(connection),
+      );
       const [result] = await connection.query<ResultSetHeader>(
         `
           update tasks
@@ -4758,7 +5042,7 @@ export async function updateTask(
           input.deviceId,
           input.status,
           input.priority,
-          JSON.stringify(tags),
+          JSON.stringify(storedTags),
           Boolean(input.info),
           input.infoAutoDoneDays ?? null,
           input.infoAutoDoneDays ?? null,
@@ -4997,7 +5281,15 @@ export async function getProblemReports({
     return [];
   }
 
-  return rows.map(mapProblemReportRow);
+  const deletedTags = await getDeletedTaskTagSet();
+  return rows.map((row) => {
+    const report = mapProblemReportRow(row);
+    return {
+      ...report,
+      tags: report.tags.filter((tag) => !deletedTags.has(tag)),
+      taskTags: report.taskTags?.filter((tag) => !deletedTags.has(tag)),
+    };
+  });
 }
 
 export async function getProblemReportById(
@@ -5162,6 +5454,11 @@ export async function updateProblemReport(
 
       const taskId = existing.task_id || makeId("task");
       const syncTask = shouldSyncProblemReportToTask(assigneeIds);
+      const storedReportTags = withKeptDeletedTags(
+        tags,
+        existing.tags,
+        await getDeletedTaskTagSet(connection),
+      );
       if (syncTask) {
         await upsertTaskForProblemReport(connection, {
           taskId,
@@ -5204,16 +5501,18 @@ export async function updateProblemReport(
           input.phone ?? null,
           input.status,
           input.priority,
-          JSON.stringify(tags),
+          JSON.stringify(storedReportTags),
           dueDate,
           id,
         ],
       );
 
       await replaceProblemReportAssignees(connection, id, assigneeIds);
+      // A report without assignees drops its task: kept as a deleted task
+      // (restorable from the tasks page), never removed from the database.
       if (!syncTask && existing.task_id) {
         await connection.query<ResultSetHeader>(
-          "delete from tasks where id = ?",
+          "update tasks set deleted_at = current_timestamp where id = ? and deleted_at is null",
           [existing.task_id],
         );
       }
@@ -5235,9 +5534,12 @@ export async function updateProblemReport(
 
 export async function getFormOneRecords({
   gardenCodes,
+  includeDeleted = false,
 }: {
   /** Limit to these gardens; null/undefined = every garden (garden-scope.ts). */
   gardenCodes?: string[] | null;
+  /** Soft-deleted records too (the Form 1 page's "deleted" filter). */
+  includeDeleted?: boolean;
 } = {}): Promise<FormOneRecord[]> {
   if (isBuildTime() || gardenCodes?.length === 0) {
     return [];
@@ -5247,13 +5549,19 @@ export async function getFormOneRecords({
 
   const rows = await prisma.form_one_records.findMany({
     orderBy: { created_at: "desc" },
-    where: gardenCodes ? { device_group_code: { in: gardenCodes } } : undefined,
+    where: {
+      ...(gardenCodes ? { device_group_code: { in: gardenCodes } } : {}),
+      ...(includeDeleted ? {} : { deleted_at: null }),
+    },
   });
 
   return rows.map(mapPrismaFormOneRecord);
 }
 
-export async function getFormOneRecordById(id: string) {
+export async function getFormOneRecordById(
+  id: string,
+  { includeDeleted = false }: { includeDeleted?: boolean } = {},
+) {
   if (isBuildTime()) {
     return null;
   }
@@ -5263,7 +5571,10 @@ export async function getFormOneRecordById(id: string) {
   const record = await prisma.form_one_records.findUnique({
     where: { id },
   });
-  return record ? mapPrismaFormOneRecord(record) : null;
+  if (!record || (record.deleted_at && !includeDeleted)) {
+    return null;
+  }
+  return mapPrismaFormOneRecord(record);
 }
 
 export async function createFormOneRecord(
@@ -5828,9 +6139,25 @@ export async function cancelFormOneEditReview(
   });
 }
 
+/* Soft delete: the record and its notifications stay, only hidden. */
 export async function deleteFormOneRecord(
   id: string,
   options: { allowedGardenCodes?: string[] | null } = {},
+) {
+  return setFormOneDeleted(id, true, options);
+}
+
+export async function restoreFormOneRecord(
+  id: string,
+  options: { allowedGardenCodes?: string[] | null } = {},
+) {
+  return setFormOneDeleted(id, false, options);
+}
+
+async function setFormOneDeleted(
+  id: string,
+  deleted: boolean,
+  options: { allowedGardenCodes?: string[] | null },
 ) {
   if (isBuildTime()) {
     return false;
@@ -5840,10 +6167,10 @@ export async function deleteFormOneRecord(
 
   return prisma.$transaction(async (transaction) => {
     const existing = await transaction.form_one_records.findUnique({
-      select: { device_group_code: true },
+      select: { device_group_code: true, deleted_at: true },
       where: { id },
     });
-    if (!existing) {
+    if (!existing || Boolean(existing.deleted_at) === deleted) {
       return false;
     }
 
@@ -5852,7 +6179,10 @@ export async function deleteFormOneRecord(
       return false;
     }
 
-    await transaction.form_one_records.delete({ where: { id } });
+    await transaction.form_one_records.update({
+      where: { id },
+      data: { deleted_at: deleted ? new Date() : null },
+    });
     return true;
   });
 }
@@ -6229,7 +6559,7 @@ export async function getFormOneNotifications(
         r.created_at,
         r.updated_at
       from form_one_notifications n
-      join form_one_records r on r.id = n.record_id
+      join form_one_records r on r.id = n.record_id and r.deleted_at is null
       where n.read_at is null
         and (
           n.recipient_user_id = ?
@@ -6366,6 +6696,7 @@ function mapPrismaFormOneRecord(row: FormOneRecordRow): FormOneRecord {
     createdBy: row.created_by ?? undefined,
     createdAt: toDateTimeString(row.created_at),
     updatedAt: toDateTimeString(row.updated_at),
+    deletedAt: row.deleted_at ? toDateTimeString(row.deleted_at) : undefined,
   };
 }
 
@@ -6602,8 +6933,13 @@ async function upsertTaskForProblemReport(
     "select tags from tasks where id = ? limit 1",
     [input.taskId],
   );
+  // A deleted tag isn't shown on the report, so its absence there isn't a
+  // removal — the task keeps it.
+  const deletedTags = await getDeletedTaskTagSet(connection);
   const removedFromReport = new Set(
-    (input.previousReportTags ?? []).filter((tag) => !input.tags.includes(tag)),
+    (input.previousReportTags ?? []).filter(
+      (tag) => !input.tags.includes(tag) && !deletedTags.has(tag),
+    ),
   );
   const tags = existingRows.length
     ? normalizeTaskTags([

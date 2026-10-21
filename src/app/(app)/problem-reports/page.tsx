@@ -4,6 +4,7 @@ import { ProblemReportsManager } from "@/components/problem-reports/problem-repo
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { getFirstAllowedPath } from "@/lib/navigation";
 import {
+  getDeletedTaskTagNames,
   getDevices,
   getDeviceGroupCode,
   getProblemCategories,
@@ -33,13 +34,16 @@ export default async function ProblemReportsPage({
   const gardenScope = getGardenScope(user, "problem_reports");
   const canAssignUsers = hasPermission(user, "problem_reports.assign");
   const canDelete = hasPermission(user, "problem_reports.delete");
-  const [devices, reports, users, taskTags, categories] = await Promise.all([
-    getDevices(),
+  const canDeleteTags = hasPermission(user, "problem_reports.tag_delete");
+  const [devices, reports, users, taskTags, categories, deletedTags] = await Promise.all([
+    // Deleted gardens too, so their reports still show the garden's name.
+    getDevices({ includeDeleted: true }),
     // Deleted reports are loaded only for those who may restore them.
     getProblemReports({ gardenCodes: gardenScope, includeDeleted: canDelete }),
     canAssignUsers ? getUsers() : Promise.resolve([]),
     getTaskTagNames(),
     getProblemCategories({ activeOnly: true }),
+    canDeleteTags ? getDeletedTaskTagNames() : Promise.resolve([]),
   ]);
   const visibleDevices = devices.filter((device) =>
     canAccessGarden(gardenScope, getDeviceGroupCode(device)),
@@ -57,6 +61,7 @@ export default async function ProblemReportsPage({
       devices={visibleDevices}
       users={users}
       initialTags={taskTags}
+      initialDeletedTags={deletedTags}
       canChooseDueDate={canChooseDueDate(user?.role)}
       initialEditReportId={initialEditReportId}
       permissions={{
@@ -67,7 +72,7 @@ export default async function ProblemReportsPage({
         manageTags: hasPermission(user, "problem_reports.tag"),
         createTags: hasPermission(user, "problem_reports.tag_create"),
         renameTags: hasPermission(user, "problem_reports.tag_edit"),
-        deleteTags: hasPermission(user, "problem_reports.tag_delete"),
+        deleteTags: canDeleteTags,
         manageStatus: hasPermission(user, "problem_reports.status"),
       }}
     />

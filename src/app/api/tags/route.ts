@@ -7,6 +7,7 @@ import {
   deleteTaskTag,
   renameTaskTag,
   getTaskTagNames,
+  hasDeletedWith,
 } from "@/lib/repositories";
 
 export async function GET(request: NextRequest) {
@@ -31,6 +32,13 @@ export async function POST(request: NextRequest) {
   const tagName = normalizeTaskTagName(body?.name);
   if (!tagName) {
     return NextResponse.json({ message: "Tag name is required" }, { status: 400 });
+  }
+
+  if (await hasDeletedWith("task_tags", "name", tagName)) {
+    return NextResponse.json(
+      { message: "ამ სახელით წაშლილი ტეგი არსებობს — აღადგინეთ ის." },
+      { status: 409 },
+    );
   }
 
   const tag = await createTaskTag(tagName);

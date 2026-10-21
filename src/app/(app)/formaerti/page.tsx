@@ -23,7 +23,11 @@ export default async function FormOnePage() {
   const gardenScope = getGardenScope(user, "form_one");
   const [devices, initialRecords] = await Promise.all([
     getDevices(),
-    getFormOneRecords({ gardenCodes: gardenScope }),
+    // Deleted records are loaded only for those who may restore them.
+    getFormOneRecords({
+      gardenCodes: gardenScope,
+      includeDeleted: hasPermission(user, "form_one.delete"),
+    }),
   ]);
   const visibleDevices = devices.filter((device) =>
     canAccessGarden(gardenScope, getDeviceGroupCode(device)),

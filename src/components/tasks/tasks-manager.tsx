@@ -26,6 +26,7 @@ import {
 import { AssigneeToggle } from "@/components/common/assignee-toggle";
 import { TagChipControl } from "@/components/common/tag-chip-control";
 import { useConfirmDialog } from "@/components/common/confirm-dialog";
+import { DeletedTagList } from "@/components/common/deleted-tag-list";
 import { FiltersToggle } from "@/components/common/filters-toggle";
 import {
   RecordStateSelect,
@@ -57,6 +58,8 @@ type Props = {
   devices: Device[];
   users: AppUser[];
   initialTags: string[];
+  /** Deleted tags (only for those who may delete, i.e. restore, tags). */
+  initialDeletedTags?: string[];
   initialEditTaskId?: string;
   permissions: TaskPermissions;
 };
@@ -112,6 +115,7 @@ export function TasksManager({
   devices,
   users,
   initialTags,
+  initialDeletedTags = [],
   initialEditTaskId,
   permissions,
 }: Props) {
@@ -142,6 +146,7 @@ export function TasksManager({
   const [recordState, setRecordState] = useState<RecordState>("active");
   const [managingTags, setManagingTags] = useState(false);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [deletedTags, setDeletedTags] = useState(initialDeletedTags);
   const [query, setQuery] = useState("");
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<TaskDraft | null>(null);
@@ -555,7 +560,7 @@ export function TasksManager({
      confirms here. */
   async function confirmRemoveTag(tagName: string) {
     const confirmed = await confirm({
-      message: `ნამდვილად გსურთ "${tagName}" ტეგის წაშლა? ტეგი ყველა დავალებიდან და პრობლემიდან მოიხსნება.`,
+      message: `ნამდვილად გსურთ "${tagName}" ტეგის წაშლა? ტეგი ყველა დავალებასა და პრობლემაზე დაიმალება; აღდგენისას დაბრუნდება.`,
     });
     if (confirmed) {
       await removeAvailableTag(tagName);
@@ -597,6 +602,7 @@ export function TasksManager({
     setAvailableTags((current) =>
       data.tags ?? current.filter((tag) => tag !== tagName),
     );
+    setDeletedTags((current) => [...new Set([...current, tagName])].sort());
     setSelectedTags((current) => current.filter((tag) => tag !== tagName));
     setDraft((current) => ({
       ...current,
@@ -613,6 +619,28 @@ export function TasksManager({
         tags: task.tags.filter((tag) => tag !== tagName),
       })),
     );
+    return true;
+  }
+
+  async function restoreAvailableTag(tagName: string) {
+    if (!permissions.deleteTags) {
+      return false;
+    }
+
+    setError("");
+    const response = await fetch("/api/tags/restore", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: tagName }),
+    }).catch(() => null);
+
+    if (!response?.ok) {
+      setError("ტეგის აღდგენა ვერ მოხერხდა.");
+      return false;
+    }
+
+    // The tag comes back on every record that had it, so reload them.
+    window.location.reload();
     return true;
   }
 
@@ -937,6 +965,9 @@ export function TasksManager({
                 <span>{managingTags ? "მზადაა" : "ტეგების მართვა"}</span>
               </button>
             ) : null}
+            {managingTags && permissions.deleteTags ? (
+              <DeletedTagList tags={deletedTags} onRestore={restoreAvailableTag} />
+            ) : null}
           </>
         ) : null}
       </section>
@@ -1142,6 +1173,8 @@ export function TasksManager({
                 onCreateTag={createAvailableTag}
                 onDeleteTag={removeAvailableTag}
                 onRenameTag={renameAvailableTag}
+                deletedTags={deletedTags}
+                onRestoreTag={restoreAvailableTag}
               />
             </form>
           ) : editDraft ? (
@@ -1320,6 +1353,8 @@ export function TasksManager({
                 onCreateTag={createAvailableTag}
                 onDeleteTag={removeAvailableTag}
                 onRenameTag={renameAvailableTag}
+                deletedTags={deletedTags}
+                onRestoreTag={restoreAvailableTag}
               />
             </div>
           ) : null}

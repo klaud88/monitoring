@@ -6077,7 +6077,13 @@ button.monitor-count-pill {
 
 /* Soft-deleted records (shown under the "deleted" / "all" record filter). */
 .task-row.deleted,
-.task-card2.deleted {
+.task-card2.deleted,
+.region-device-row.deleted,
+.region-admin-row.deleted,
+.user-row.deleted,
+.form-one-record.deleted,
+.rank-row.deleted,
+.record-row.deleted {
   opacity: 0.55;
   border-style: dashed;
 }
@@ -6093,6 +6099,58 @@ button.monitor-count-pill {
 
 .icon-button.restore {
   color: var(--brand);
+}
+
+.deleted-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.deleted-tag-list-label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.deleted-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border: 1px dashed var(--muted-2);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.deleted-tag-chip span {
+  text-decoration: line-through;
+}
+
+.deleted-tag-chip:hover:not(:disabled) {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+
+.deleted-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border: 1px dashed var(--module-danger-line);
+  border-radius: 10px;
+  color: var(--red);
+  font-weight: 600;
+}
+
+.deleted-banner .ghost-button {
+  margin-left: auto;
 }
 
 .task-card2-title {

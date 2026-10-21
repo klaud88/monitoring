@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
-import { createRegion, getRegions } from "@/lib/repositories";
+import { createRegion, getRegions, hasDeletedWith } from "@/lib/repositories";
 
 export async function GET(request: NextRequest) {
   const user = await verifySessionToken(
@@ -28,6 +28,13 @@ export async function POST(request: NextRequest) {
 
   if (!name) {
     return NextResponse.json({ message: "Region name is required" }, { status: 400 });
+  }
+
+  if (await hasDeletedWith("regions", "name", name)) {
+    return NextResponse.json(
+      { message: "ამ სახელით წაშლილი რაიონი არსებობს — აღადგინეთ ის." },
+      { status: 409 },
+    );
   }
 
   const region = await createRegion({ name, color });

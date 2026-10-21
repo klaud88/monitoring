@@ -62,14 +62,17 @@ export function getGardenDisplayName(device: Pick<Device, "code" | "name">): str
 /** One entry per garden — the kept deviceId is just a representative device
  *  for that garden, so a picker built from this never shows the same garden
  *  twice even when it has several physical devices. */
-export function buildGardenOptions<T extends Pick<Device, "id" | "code" | "name">>(
+export function buildGardenOptions<
+  T extends Pick<Device, "id" | "code" | "name"> & { deletedAt?: string },
+>(
   devices: T[],
 ): GardenOption[] {
   const options = new Map<string, GardenOption>();
 
   devices.forEach((device) => {
     const code = getGardenCode(device);
-    if (!code || options.has(code)) {
+    // Deleted gardens keep their name on old records but can't be picked.
+    if (!code || options.has(code) || device.deletedAt) {
       return;
     }
 

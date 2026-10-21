@@ -14,6 +14,7 @@ import {
   WifiOff,
 } from "lucide-react";
 import { DeviceAssociations } from "@/components/devices/device-associations";
+import { DeletedDeviceBanner } from "@/components/devices/deleted-device-banner";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import {
   findSiblingDevices,
@@ -74,16 +75,21 @@ export default async function DeviceDetailsPage({
     redirect(homePath);
   }
 
-  const [devices, tasks, users] = await Promise.all([
-    getDevices(),
+  const canDeleteDevice = hasPermission(user, "devices.delete");
+  const [allDevices, tasks, users] = await Promise.all([
+    getDevices({ includeDeleted: true }),
     getTasks(resolveTaskVisibilityScope(user)),
     getUsers(),
   ]);
-  const device = devices.find((item) => item.id === id);
+  const device = allDevices.find((item) => item.id === id);
 
-  if (!device) {
+  // A deleted device is shown only to those who may restore it.
+  if (!device || (device.deletedAt && !canDeleteDevice)) {
     notFound();
   }
+  const devices = allDevices.filter(
+    (item) => !item.deletedAt || item.id === device.id,
+  );
 
   const canEditDevice = hasPermission(user, "devices.edit");
   const canViewTasks = hasPermission(user, "tasks.view");
@@ -109,7 +115,7 @@ export default async function DeviceDetailsPage({
   ]);
   const relatedTasks = tasks.filter((task) => relatedIds.has(task.deviceId));
 
-  const deviceMap = new Map(devices.map((item) => [item.id, item]));
+  const deviceMap = new Map(allDevices.map((item) => [item.id, item]));
   const userMap = new Map(users.map((item) => [item.id, item]));
   const offlineEvents = device.statusEvents.filter(
     (event) => event.status === "offline",
@@ -130,6 +136,7 @@ export default async function DeviceDetailsPage({
 
   return (
     <div className="device-page">
+      {device.deletedAt ? <DeletedDeviceBanner deviceId={device.id} /> : null}
       <header className="device-head">
         <div className="device-head-main">
           <Link className="back-link" href={backHref}>
@@ -180,7 +187,7 @@ export default async function DeviceDetailsPage({
               options={devices
                 .filter((item) => item.id !== device.id)
                 .map((item) => item.name)}
-              canEdit={canEditDevice}
+              canEdit={canEditDevice && !device.deletedAt}
             />
           </div>
 

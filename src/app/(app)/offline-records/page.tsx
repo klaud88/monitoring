@@ -9,6 +9,7 @@ import {
   getDevices,
   getMonitoredDevices,
   getOfflineSnapshots,
+  getRemovedOfflineFrequencyDevices,
 } from "@/lib/repositories";
 
 export default async function OfflineRecordsPage() {
@@ -18,13 +19,16 @@ export default async function OfflineRecordsPage() {
     redirect(getFirstAllowedPath(user));
   }
 
-  const [, devices, snapshots, monitoredDevices, dailyLevels] =
+  const canDelete = hasPermission(user, "offline_records.delete");
+  const [, devices, snapshots, monitoredDevices, dailyLevels, removedFrequency] =
     await Promise.all([
       ensureTodayOfflineSnapshot(),
       getDevices(),
       getOfflineSnapshots(),
       getMonitoredDevices({ includeInactive: true }),
       getDailyOfflineLevels(),
+      // Devices taken off the frequency, for those who may restore them.
+      canDelete ? getRemovedOfflineFrequencyDevices() : Promise.resolve([]),
     ]);
   const activeDevices = devices.filter((device) => !device.isExcluded);
 
@@ -34,11 +38,12 @@ export default async function OfflineRecordsPage() {
       initialSnapshots={snapshots}
       initialMonitoredDevices={monitoredDevices}
       dailyLevels={dailyLevels}
+      initialRemovedFrequencyDevices={removedFrequency}
       userId={user?.id ?? "anonymous"}
       permissions={{
         create: hasPermission(user, "offline_records.create"),
         edit: hasPermission(user, "offline_records.edit"),
-        delete: hasPermission(user, "offline_records.delete"),
+        delete: canDelete,
         alerts: hasPermission(user, "offline_records.alerts"),
       }}
     />

@@ -49,7 +49,8 @@ export async function POST(request: NextRequest) {
   });
 }
 
-/** Clears one device's offline history — the only thing that erases it. */
+/** Clears one device's offline history. It is hidden, not deleted:
+ *  POST ./restore brings it back. */
 export async function DELETE(request: NextRequest) {
   const user = await verifySessionToken(
     request.cookies.get(SESSION_COOKIE)?.value,

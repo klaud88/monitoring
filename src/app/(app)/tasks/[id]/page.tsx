@@ -63,7 +63,7 @@ export default async function TaskDetailsPage({
   const scope = resolveTaskVisibilityScope(user);
   const [tasks, devices, users] = await Promise.all([
     getTasks(scope),
-    getDevices(),
+    getDevices({ includeDeleted: true }),
     getUsers(),
   ]);
   const task = tasks.find((item) => item.id === id);

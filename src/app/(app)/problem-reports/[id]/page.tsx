@@ -60,7 +60,7 @@ export default async function ProblemReportDetailsPage({
   /* Same scope as the list: linked gardens only, or every garden. */
   const [reports, devices, users] = await Promise.all([
     getProblemReports({ gardenCodes: getGardenScope(user, "problem_reports") }),
-    getDevices(),
+    getDevices({ includeDeleted: true }),
     getUsers(),
   ]);
   const report = reports.find((item) => item.id === id);

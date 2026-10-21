@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { readDevicePosition } from "@/lib/device-position";
-import { createDevice, getDevices } from "@/lib/repositories";
+import { createDevice, getDevices, hasDeletedWith } from "@/lib/repositories";
 import type { DeviceStatus } from "@/lib/types";
 
 const deviceStatuses: DeviceStatus[] = ["online", "offline", "error"];
@@ -33,6 +33,13 @@ export async function POST(request: NextRequest) {
 
   if (!name) {
     return NextResponse.json({ message: "Device name is required" }, { status: 400 });
+  }
+
+  if (await hasDeletedWith("devices", "code", code)) {
+    return NextResponse.json(
+      { message: "ამ კოდით წაშლილი მოწყობილობა არსებობს — აღადგინეთ ის." },
+      { status: 409 },
+    );
   }
 
   const device = await createDevice({

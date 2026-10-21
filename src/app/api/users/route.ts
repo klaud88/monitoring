@@ -3,7 +3,13 @@ import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, hasPermission, isAdmin, verifySessionToken } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { parseGardenCodes } from "@/lib/garden-scope";
-import { createUser, getGardenCodes, getRoles, getUsers } from "@/lib/repositories";
+import {
+  createUser,
+  getGardenCodes,
+  getRoles,
+  getUsers,
+  hasDeletedUserWithEmail,
+} from "@/lib/repositories";
 
 const hashPassword = (password: string) => bcrypt.hash(password, 10);
 
@@ -55,6 +61,13 @@ export async function POST(request: NextRequest) {
 
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
     return NextResponse.json({ message: "ელფოსტის ფორმატი არასწორია." }, { status: 400 });
+  }
+
+  if (await hasDeletedUserWithEmail(email)) {
+    return NextResponse.json(
+      { message: "ამ ელფოსტით წაშლილი მომხმარებელი არსებობს — აღადგინეთ ის." },
+      { status: 409 },
+    );
   }
 
   if (password.length < 8) {

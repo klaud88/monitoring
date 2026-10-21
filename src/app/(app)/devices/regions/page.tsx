@@ -4,6 +4,7 @@ import { RegionManager } from "@/components/regions/region-manager";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { getFirstAllowedPath } from "@/lib/navigation";
 import {
+  getDeletedDeviceTagNames,
   getDeviceTagNames,
   getDevices,
   getGardenRegions,
@@ -20,12 +21,18 @@ export default async function DeviceRegionsPage() {
     redirect(getFirstAllowedPath(user));
   }
 
-  const [devices, regions, tags, gardenTags, gardenRegions] = await Promise.all([
-    getDevices(),
-    getRegions(),
+  const canDeleteDevice = hasPermission(user, "devices.delete");
+  const canDeleteRegion = hasPermission(user, "regions.delete");
+  const canDeleteTags = hasPermission(user, "devices.tag_delete");
+  const [devices, regions, tags, gardenTags, gardenRegions, deletedTags] =
+    await Promise.all([
+    // Deleted devices are loaded only for those who may restore them.
+    getDevices({ includeDeleted: canDeleteDevice }),
+    getRegions({ includeDeleted: canDeleteRegion }),
     getDeviceTagNames(),
     getGardenTags(),
     getGardenRegions(),
+    canDeleteTags ? getDeletedDeviceTagNames() : Promise.resolve([]),
   ]);
 
   return (
@@ -35,16 +42,17 @@ export default async function DeviceRegionsPage() {
       initialTags={tags}
       initialGardenTags={gardenTags}
       initialGardenRegions={gardenRegions}
+      initialDeletedTags={deletedTags}
       permissions={{
         createDevice: hasPermission(user, "devices.create"),
         editDevice: hasPermission(user, "devices.edit"),
-        deleteDevice: hasPermission(user, "devices.delete"),
+        deleteDevice: canDeleteDevice,
         createTags: hasPermission(user, "devices.tag_create"),
         renameTags: hasPermission(user, "devices.tag_edit"),
-        deleteTags: hasPermission(user, "devices.tag_delete"),
+        deleteTags: canDeleteTags,
         createRegion: hasPermission(user, "regions.create"),
         editRegion: hasPermission(user, "regions.edit"),
-        deleteRegion: hasPermission(user, "regions.delete"),
+        deleteRegion: canDeleteRegion,
       }}
     />
   );

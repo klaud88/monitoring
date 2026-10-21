@@ -15,6 +15,7 @@ import {
   Minus,
   Phone,
   Plus,
+  RotateCcw,
   Save,
   Send,
   Trash2,
@@ -22,6 +23,11 @@ import {
   XCircle,
 } from "lucide-react";
 import { useConfirmDialog } from "@/components/common/confirm-dialog";
+import {
+  RecordStateSelect,
+  matchesRecordState,
+  type RecordState,
+} from "@/components/common/record-state-select";
 import type { Device, FormOneRecord, FormOneRecordItem } from "@/lib/types";
 
 type GardenOption = {
@@ -304,6 +310,12 @@ export function FormOneManager({
 }: Props) {
   const gardenOptions = useMemo(() => buildGardenOptions(devices), [devices]);
   const [records, setRecords] = useState(initialRecords);
+  const [recordState, setRecordState] = useState<RecordState>("active");
+  /** Active / deleted / all — the list and its count follow this. */
+  const shownRecords = useMemo(
+    () => records.filter((record) => matchesRecordState(record, recordState)),
+    [recordState, records],
+  );
   const [gardenDeviceId, setGardenDeviceId] = useState(
     gardenOptions[0]?.deviceId ?? "",
   );
@@ -389,7 +401,10 @@ export function FormOneManager({
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const recordId = params.get("record");
-    if (recordId && records.some((record) => record.id === recordId)) {
+    if (
+      recordId &&
+      records.some((record) => record.id === recordId && !record.deletedAt)
+    ) {
       setSelectedRecordId(recordId);
     }
   }, [records]);
@@ -501,10 +516,54 @@ export function FormOneManager({
       return;
     }
 
-    setRecords((current) => current.filter((record) => record.id !== recordId));
+    // Kept as deleted, so the "deleted" filter can restore it.
+    const deletedAt = new Date().toISOString();
+    setRecords((current) =>
+      current.map((record) =>
+        record.id === recordId ? { ...record, deletedAt } : record,
+      ),
+    );
+    setSelectedRecordId((current) => (current === recordId ? null : current));
     if (editingRecordId === recordId) {
       resetForm();
     }
+  }
+
+  async function restoreRecord(recordId: string) {
+    if (!permissions.delete) {
+      return;
+    }
+
+    const confirmed = await confirm({
+      title: "აღდგენის დადასტურება",
+      message: "ნამდვილად გსურთ ფორმა ერთის აღდგენა?",
+      confirmLabel: "აღდგენა",
+      tone: "primary",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    const response = await fetch(`/api/form-one/${recordId}/restore`, {
+      method: "POST",
+    }).catch(() => null);
+    setSaving(false);
+
+    if (!response?.ok) {
+      setError("ფორმა ერთის აღდგენა ვერ მოხერხდა.");
+      return;
+    }
+
+    const data = (await response.json()) as { record: FormOneRecord | null };
+    setRecords((current) =>
+      current.map((record) =>
+        record.id === recordId
+          ? (data.record ?? { ...record, deletedAt: undefined })
+          : record,
+      ),
+    );
   }
 
   function openCompletionRequestModal(recordId: string) {
@@ -1263,17 +1322,25 @@ export function FormOneManager({
           <h2>შევსებული ფორმები</h2>
           <ClipboardList size={20} />
         </div>
-        {records.length ? (
+        {permissions.delete ? (
+          <RecordStateSelect value={recordState} onChange={setRecordState} />
+        ) : null}
+        {shownRecords.length ? (
           <div className="form-one-record-list">
-            {records.map((record) => (
+            {shownRecords.map((record) => (
               <FormOneRecordCard
                 key={record.id}
                 record={record}
                 permissions={permissions}
                 todayValue={todayValue}
-                onOpen={() => setSelectedRecordId(record.id)}
+                onOpen={() => {
+                  if (!record.deletedAt) {
+                    setSelectedRecordId(record.id);
+                  }
+                }}
                 onEdit={() => startEdit(record)}
                 onDelete={() => removeRecord(record.id)}
+                onRestore={() => restoreRecord(record.id)}
                 onRequestCompletion={() => openCompletionRequestModal(record.id)}
                 onFlag={() => openFlagPrompt(record.id)}
                 onUnflag={() => unflagRecord(record.id)}
@@ -1485,6 +1552,7 @@ function FormOneRecordCard({
   onOpen,
   onEdit,
   onDelete,
+  onRestore,
   onRequestCompletion,
   onFlag,
   onUnflag,
@@ -1495,6 +1563,7 @@ function FormOneRecordCard({
   onOpen: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  onRestore: () => void;
   onRequestCompletion: () => void;
   onFlag: () => void;
   onUnflag: () => void;
@@ -1506,14 +1575,17 @@ function FormOneRecordCard({
   const modelCount = new Set(record.items.map((item) => item.modelLabel)).size;
   const status = getRecordDisplayStatus(record, todayValue);
   const isPendingApproval = record.status === "completion_requested";
+  const isDeleted = Boolean(record.deletedAt);
   const showCompletionButton =
     permissions.completionRequest &&
     record.status !== "completed" &&
-    !record.isFlagged;
+    !record.isFlagged &&
+    !isDeleted;
   const canEditRecord =
     canEditFormOneRecord(permissions) &&
     !record.isFlagged &&
-    record.editReviewStatus === "none";
+    record.editReviewStatus === "none" &&
+    !isDeleted;
   const dueDateClassName = `form-one-due-date-list${
     record.dueDates.length > 1 ? " changed" : ""
   }`;
@@ -1522,7 +1594,7 @@ function FormOneRecordCard({
     <article
       className={`form-one-record form-one-record-${status.key}${
         record.isFlagged ? " form-one-record-flagged" : ""
-      }`}
+      }${isDeleted ? " deleted" : ""}`}
       role="button"
       tabIndex={0}
       onClick={onOpen}
@@ -1591,7 +1663,18 @@ function FormOneRecordCard({
               <Edit3 size={17} />
             </button>
           ) : null}
-          {permissions.delete ? (
+          {permissions.delete && isDeleted ? (
+            <button
+              className="icon-button restore"
+              type="button"
+              aria-label="აღდგენა"
+              title="აღდგენა"
+              onClick={onRestore}
+            >
+              <RotateCcw size={17} />
+            </button>
+          ) : null}
+          {permissions.delete && !isDeleted ? (
             <button
               className="icon-button danger"
               type="button"
@@ -1602,7 +1685,7 @@ function FormOneRecordCard({
               <Trash2 size={17} />
             </button>
           ) : null}
-          {permissions.flag && !record.isFlagged ? (
+          {permissions.flag && !record.isFlagged && !isDeleted ? (
             <button
               className="icon-button flag"
               type="button"
@@ -1613,7 +1696,7 @@ function FormOneRecordCard({
               <Ban size={17} />
             </button>
           ) : null}
-          {permissions.flag && record.isFlagged ? (
+          {permissions.flag && record.isFlagged && !isDeleted ? (
             <button
               className="icon-button flag"
               type="button"
@@ -2603,7 +2686,8 @@ function buildGardenOptions(devices: Device[]): GardenOption[] {
 
   devices.forEach((device) => {
     const code = getGardenCode(device);
-    if (!code || options.has(code)) {
+    // Deleted gardens keep their name on old records but can't be picked.
+    if (!code || options.has(code) || device.deletedAt) {
       return;
     }
 
