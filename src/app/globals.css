@@ -4181,6 +4181,97 @@ select.garden-region-pill {
   gap: 6px;
 }
 
+/* The tag picker in the task and problem forms: even columns, A→Z. */
+.row-tags.tag-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px;
+}
+
+.tag-grid .tag-chip-control {
+  min-width: 0;
+}
+
+/* Rename/delete buttons take ~64px, so those cells need more room. */
+.row-tags.tag-grid:has(.tag-delete-button) {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+.tag-grid .tag-chip-control .tag-toggle {
+  flex: 1 1 auto;
+  justify-content: flex-start;
+  height: 100%;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+/* The form's status: four tinted buttons, the selected one filled. */
+.status-picker {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.status-picker-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1.5px solid transparent;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+  opacity: 0.62;
+  cursor: pointer;
+  transition:
+    opacity 0.14s ease,
+    border-color 0.14s ease,
+    box-shadow 0.14s ease;
+}
+
+.status-picker-option:hover {
+  opacity: 0.9;
+}
+
+.status-picker-option.planned {
+  background: var(--tint-blue);
+  color: var(--tint-blue-ink);
+}
+
+.status-picker-option.in_progress {
+  background: var(--tint-amber);
+  color: var(--tint-amber-ink);
+}
+
+.status-picker-option.blocked {
+  background: var(--tint-red);
+  color: var(--tint-red-ink);
+}
+
+.status-picker-option.done {
+  background: var(--tint-green);
+  color: var(--tint-green-ink);
+}
+
+.status-picker-option.active {
+  border-color: currentColor;
+  opacity: 1;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 18%, transparent);
+}
+
+@media (max-width: 760px) {
+  .row-tags.tag-grid,
+  .status-picker {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .row-tags.tag-grid:has(.tag-delete-button) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .row-actions {
   display: inline-flex;
   flex-wrap: wrap;
@@ -4540,7 +4631,6 @@ select.garden-region-pill {
 }
 
 .offline-device-panel,
-.offline-snapshot-panel,
 .offline-rank-panel {
   min-width: 0;
 }
@@ -4566,8 +4656,7 @@ select.garden-region-pill {
   margin-top: 12px;
 }
 
-.offline-device-list,
-.offline-snapshot-list {
+.offline-device-list {
   display: grid;
   gap: 10px;
   margin-top: 14px;
@@ -4807,87 +4896,15 @@ button.monitor-count-pill {
   box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.14);
 }
 
-.offline-snapshot-day {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-  padding: 12px;
-}
-
-.offline-snapshot-day header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 10px;
-}
-
-.offline-snapshot-day header strong,
-.offline-snapshot-day header span {
-  display: block;
-}
-
-.offline-snapshot-day header span {
-  margin-top: 2px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 750;
-}
-
-.snapshot-device-cloud {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 8px;
-}
-
-.snapshot-device-chip {
-  display: inline-grid;
-  grid-template-columns: auto auto;
-  gap: 1px 6px;
-  align-items: center;
-  width: 100%;
-  min-width: 0;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface-soft);
-  color: var(--text);
-  padding: 7px 9px;
-}
-
-.snapshot-device-chip svg {
-  grid-row: 1 / 3;
-  color: var(--red);
-}
-
-.snapshot-device-chip strong,
-.snapshot-device-chip small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.snapshot-device-chip strong {
-  font-size: 12px;
-}
-
-.snapshot-device-chip small {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 800;
-}
-
-.snapshot-device-chip.critical,
 .rank-row.critical {
   border-color: rgba(220, 38, 38, 0.32);
   background: var(--danger-soft);
 }
 
-.snapshot-device-chip.critical strong,
 .rank-row.critical strong {
   color: var(--red);
 }
 
-.snapshot-device-chip.alerting,
 .offline-device-option.alerting {
   animation: offline-alert-pulse 1.15s infinite;
 }
@@ -6294,6 +6311,19 @@ button.monitor-count-pill {
   padding-bottom: 0;
 }
 
+/* A required field left empty (e.g. a new report's phone). */
+.task-field.invalid > span {
+  color: var(--tint-red-ink);
+  font-weight: 600;
+}
+
+.task-field.invalid input,
+.task-field.invalid input:focus {
+  border-color: var(--red);
+  background: var(--tint-red);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 18%, transparent);
+}
+
 /* the picker sets its own grid-column elsewhere; inside the editor the
    span utilities decide */
 .task-editor-body .span-2 {
@@ -7129,6 +7159,310 @@ button.monitor-count-pill {
 
 .kpi-change.down {
   color: var(--tint-green-ink);
+}
+
+/* Task statistics: per assignee, under the offline charts. */
+.task-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 12px;
+  padding-top: 22px;
+  border-top: 1px solid var(--panel-line);
+}
+
+.task-stats-title {
+  margin: 0 0 2px;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.task-stats .select-control {
+  min-height: 36px;
+}
+
+.task-stats-kpis {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(0, 1.6fr);
+}
+
+.task-stats-overdue {
+  color: var(--tint-red-ink) !important;
+}
+
+.task-stats-bucket-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.task-stats-bucket-row span {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.task-stats-bucket-row strong {
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.task-stats-bucket-row small {
+  color: var(--ink-muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.task-stats-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid var(--panel-line);
+  border-radius: var(--radius-card);
+  background: var(--panel);
+  box-shadow: none;
+}
+
+.task-stats-card h3 {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 600;
+}
+
+.task-stats-table,
+.task-stats-list {
+  display: grid;
+  overflow-x: auto;
+}
+
+.task-stats-row {
+  display: grid;
+  grid-template-columns:
+    minmax(150px, 1.6fr) repeat(4, minmax(64px, 0.7fr))
+    minmax(96px, 1fr) repeat(4, minmax(64px, 0.7fr));
+  align-items: center;
+  gap: 8px;
+  min-width: 940px;
+  padding: 9px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--panel-row-line);
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.task-stats-row.head {
+  color: var(--ink-muted);
+  font-size: 12px;
+  cursor: default;
+}
+
+.task-stats-row:not(.head):hover {
+  background: var(--surface-soft);
+}
+
+.task-stats-row.active {
+  background: var(--brand-soft);
+}
+
+.task-stats-row > :first-child {
+  text-align: left;
+}
+
+.task-stats-name {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-stats-cell {
+  font-variant-numeric: tabular-nums;
+}
+
+.task-stats-cell.strong {
+  font-weight: 700;
+}
+
+.task-stats-cell.warn {
+  color: var(--tint-red-ink);
+  font-weight: 600;
+}
+
+.task-stats-task {
+  display: grid;
+  grid-template-columns:
+    minmax(180px, 2fr) minmax(70px, 0.6fr) repeat(2, minmax(124px, 1fr))
+    minmax(90px, 0.8fr) 124px;
+  align-items: center;
+  gap: 10px;
+  min-width: 860px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--panel-row-line);
+  color: inherit;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.task-stats-task.head {
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+a.task-stats-task:hover {
+  background: var(--surface-soft);
+}
+
+a.task-stats-task:hover .task-stats-task-title {
+  color: var(--brand);
+}
+
+.task-stats-task.overdue {
+  background: var(--row-danger);
+}
+
+.task-stats-task-title {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-stats-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+@media (max-width: 1180px) {
+  .task-stats-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .task-stats-buckets {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Phone: each person and each task becomes a labelled card. */
+@media (max-width: 760px) {
+  .task-stats-kpis {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .task-stats .analytics-range .select-control {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .task-stats-card {
+    padding: 14px 12px;
+  }
+
+  .task-stats-card .rank-card-head {
+    flex-wrap: wrap;
+  }
+
+  .task-stats-card .rank-card-head span {
+    white-space: normal;
+  }
+
+  .task-stats-table,
+  .task-stats-list {
+    gap: 8px;
+    overflow: visible;
+  }
+
+  .task-stats-row.head,
+  .task-stats-task.head {
+    display: none;
+  }
+
+  .task-stats-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 12px;
+    min-width: 0;
+    padding: 11px 12px;
+    border: 1px solid var(--panel-line);
+    border-radius: var(--radius-card);
+    text-align: left;
+  }
+
+  .task-stats-name,
+  .task-stats-cell.wide {
+    grid-column: 1 / -1;
+  }
+
+  .task-stats-cell {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .task-stats-cell::before,
+  .task-stats-task [data-label]::before {
+    content: attr(data-label);
+    color: var(--ink-muted);
+    font-weight: 400;
+  }
+
+  .task-stats-task {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "title status"
+      "garden garden"
+      "registered registered"
+      "closed closed"
+      "duration duration";
+    gap: 5px 10px;
+    min-width: 0;
+    padding: 11px 12px;
+    border: 1px solid var(--panel-line);
+    border-radius: var(--radius-card);
+  }
+
+  .task-stats-task-title {
+    grid-area: title;
+    white-space: normal;
+  }
+
+  .task-stats-task > .task-status-pill {
+    grid-area: status;
+    align-self: start;
+  }
+
+  .task-stats-garden {
+    grid-area: garden;
+    color: var(--ink-muted);
+  }
+
+  .task-stats-task [data-label] {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    white-space: nowrap;
+  }
+
+  .task-stats-task [data-label="დაფიქსირდა"] {
+    grid-area: registered;
+  }
+
+  .task-stats-task [data-label="დაიხურა"] {
+    grid-area: closed;
+  }
+
+  .task-stats-task [data-label="დრო"] {
+    grid-area: duration;
+  }
 }
 
 /* Column chart: one measure, one hue, bars anchored at zero */
@@ -8431,6 +8765,13 @@ a.task-card2:hover .task-card2-title {
   background: var(--panel);
 }
 
+.matrix-tools .matrix-search {
+  flex: 0 1 190px;
+  min-width: 140px;
+  min-height: 32px;
+  background: var(--panel);
+}
+
 .matrix-tools .select-control select {
   min-height: 30px;
   font-size: 13px;
@@ -8864,10 +9205,10 @@ button.matrix-cell:hover {
   background: var(--panel-head);
 }
 
-/* the three panels below the matrix */
+/* the two panels below the calendar: frequency and devices */
 .offline-record-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
   align-items: start;
   margin-bottom: 0;
@@ -9793,6 +10134,10 @@ html.wheel-locked body {
 
   .matrix-tools {
     flex-wrap: wrap;
+  }
+
+  .matrix-tools .matrix-search {
+    flex: 1 1 100%;
   }
 
   /* --- ანალიტიკა --- */

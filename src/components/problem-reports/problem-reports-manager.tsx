@@ -24,8 +24,10 @@ import {
   matchesRecordState,
   type RecordState,
 } from "@/components/common/record-state-select";
+import { StatusPicker } from "@/components/common/status-picker";
 import { TaskTagPicker } from "@/components/tasks/task-tag-picker";
 import { formatShortDate } from "@/lib/display";
+import { PHONE_REQUIRED_MESSAGE } from "@/lib/problem-report-view";
 import { mergeTags, renameTagInList } from "@/lib/tags";
 import { workingDayDueDate } from "@/lib/working-days";
 import { getAssignableTaskUsers } from "@/lib/task-assignees";
@@ -158,6 +160,8 @@ export function ProblemReportsManager({
   const [isPhone, setIsPhone] = useState(false);
   const { confirm, confirmationDialog } = useConfirmDialog();
   const editorRef = useRef<HTMLElement>(null);
+  const phoneInputRef = useRef<HTMLInputElement>(null);
+  const [phoneMissing, setPhoneMissing] = useState(false);
   const [draft, setDraft] = useState<ReportDraft>(() =>
     emptyDraft(devices.find((device) => !device.deletedAt)?.id || ""),
   );
@@ -302,6 +306,10 @@ export function ProblemReportsManager({
     ) {
       return;
     }
+    if (!draft.phone.trim()) {
+      await askForPhone();
+      return;
+    }
 
     setSaving(true);
     setError("");
@@ -313,6 +321,13 @@ export function ProblemReportsManager({
     setSaving(false);
 
     if (!response?.ok) {
+      const failure = (await response?.json().catch(() => null)) as {
+        field?: string;
+      } | null;
+      if (failure?.field === "phone") {
+        await askForPhone();
+        return;
+      }
       setError("პრობლემის რეგისტრაცია ვერ მოხერხდა.");
       return;
     }
@@ -322,6 +337,19 @@ export function ProblemReportsManager({
     // Fields clear only once the report is stored.
     setDraft(emptyDraft(draft.deviceId));
     setCreateOpen(false);
+  }
+
+  /** Marks the phone field red and says why; it stays red until filled. */
+  async function askForPhone() {
+    setPhoneMissing(true);
+    await confirm({
+      title: "ტელეფონის ნომერი",
+      message: PHONE_REQUIRED_MESSAGE,
+      confirmLabel: "გასაგებია",
+      tone: "primary",
+      hideCancel: true,
+    });
+    phoneInputRef.current?.focus();
   }
 
   /* "რედაქტირება" on the detail page links back here with ?edit=<id>. */
@@ -853,8 +881,16 @@ export function ProblemReportsManager({
                 users={assignableUsers}
                 canChooseDueDate={canChooseDueDate}
                 onChange={(updater) =>
-                  setDraft((current) => updater(current) ?? current)
+                  setDraft((current) => {
+                    const next = updater(current) ?? current;
+                    if (next.phone.trim()) {
+                      setPhoneMissing(false);
+                    }
+                    return next;
+                  })
                 }
+                phoneInvalid={phoneMissing}
+                phoneInputRef={phoneInputRef}
                 onToggleTag={toggleDraftTag}
                 onCreateTag={createAvailableTag}
                 onDeleteTag={removeAvailableTag}
@@ -1256,6 +1292,8 @@ function ReportFields({
   onToggleAssignee,
   categories = [],
   mode,
+  phoneInvalid = false,
+  phoneInputRef,
 }: {
   draft: ReportDraft;
   devices: Device[];
@@ -1276,6 +1314,9 @@ function ReportFields({
   onToggleAssignee: (userId: string) => void;
   categories?: ReportCategoryOption[];
   mode: "create" | "edit";
+  /** Create only: the phone is required, red until it is filled in. */
+  phoneInvalid?: boolean;
+  phoneInputRef?: React.Ref<HTMLInputElement>;
 }) {
   const canEditCore = mode === "create" || permissions.edit;
   const update = (patch: Partial<ReportDraft>) => {
@@ -1292,6 +1333,13 @@ function ReportFields({
 
   return (
     <>
+      {permissions.manageStatus ? (
+        <StatusPicker
+          className="span-full"
+          value={draft.status}
+          onChange={(status) => update({ status })}
+        />
+      ) : null}
       <label className="task-field span-2">
         <span>ბაღი</span>
         <select
@@ -1370,13 +1418,17 @@ function ReportFields({
           />
         </label>
       )}
-      <label className="task-field">
-        <span>ტელეფონი</span>
+      <label className={`task-field${phoneInvalid ? " invalid" : ""}`}>
+        <span>{mode === "create" ? "ტელეფონი *" : "ტელეფონი"}</span>
+        {/* No native `required`: its tooltip would pre-empt the dialog. */}
         <input
+          ref={phoneInputRef}
           value={draft.phone}
           onChange={(event) => update({ phone: event.target.value })}
           disabled={!canEditCore}
           inputMode="tel"
+          aria-required={mode === "create"}
+          aria-invalid={phoneInvalid || undefined}
         />
       </label>
       <label className="task-field">
@@ -1405,23 +1457,6 @@ function ReportFields({
             {Object.entries(priorityLabels).map(([value, label]) => (
               <option key={value} value={value}>
                 {label}
-              </option>
-            ))}
-          </select>
-        </label>
-      ) : null}
-      {permissions.manageStatus ? (
-        <label className="task-field">
-          <span>სტატუსი</span>
-          <select
-            value={draft.status}
-            onChange={(event) =>
-              update({ status: event.target.value as TaskStatus })
-            }
-          >
-            {statusOrder.map((value) => (
-              <option key={value} value={value}>
-                {statusLabels[value]}
               </option>
             ))}
           </select>

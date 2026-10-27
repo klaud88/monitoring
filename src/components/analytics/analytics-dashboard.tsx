@@ -3,6 +3,11 @@
 import { useMemo, useState } from "react";
 import { CalendarDays, Download, Tags, WifiOff } from "lucide-react";
 import type { Device, OfflineSnapshot, OfflineSummary } from "@/lib/types";
+import {
+  TaskStats,
+  type TaskStatRow,
+  type TaskStatUser,
+} from "./task-stats";
 
 const now = new Date();
 const oneYearAgo = new Date(now);
@@ -69,10 +74,12 @@ export function AnalyticsDashboard({
   devices,
   snapshots,
   canExport,
+  taskStats,
 }: {
   devices: Device[];
   snapshots: OfflineSnapshot[];
   canExport: boolean;
+  taskStats: { tasks: TaskStatRow[]; users: TaskStatUser[] };
 }) {
   const [preset, setPreset] = useState<Preset>("12m");
   const [fromDate, setFromDate] = useState(oneYearAgo.toISOString().slice(0, 10));
@@ -413,6 +420,12 @@ export function AnalyticsDashboard({
           items={tagSummary}
         />
       </section>
+
+      <TaskStats
+        tasks={taskStats.tasks}
+        users={taskStats.users}
+        canExport={canExport}
+      />
     </div>
   );
 }

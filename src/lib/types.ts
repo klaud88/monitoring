@@ -128,6 +128,8 @@ export type Task = {
   startsAt?: string;
   dueDate: string;
   createdAt: string;
+  /** When it last became done; cleared if it is reopened. */
+  completedAt?: string;
   problemReportId?: string;
   /** Marked "informational" — tasks.info permission holders see these
    *  regardless of their own full/assigned-only scope (green INFO badge). */

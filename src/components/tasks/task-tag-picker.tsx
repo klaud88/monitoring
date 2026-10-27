@@ -118,8 +118,11 @@ export function TaskTagPicker({
     <div className={`task-tag-picker ${className ?? ""}`.trim()}>
       {confirmationDialog}
       <span>ტეგები</span>
-      <div className="row-tags">
-        {availableTags.map((tagName) => (
+      {/* Alphabetical, in even columns, so a tag is easy to find. */}
+      <div className="row-tags tag-grid">
+        {[...availableTags]
+          .sort((a, b) => a.localeCompare(b, "ka"))
+          .map((tagName) => (
           <TagChipControl
             key={tagName}
             name={tagName}
@@ -134,7 +137,7 @@ export function TaskTagPicker({
             onDelete={canDeleteTags ? () => void deleteTag(tagName) : undefined}
             busy={Boolean(deletingTag)}
           />
-        ))}
+          ))}
       </div>
       {canDeleteTags && onRestoreTag ? (
         <DeletedTagList tags={deletedTags} onRestore={onRestoreTag} />

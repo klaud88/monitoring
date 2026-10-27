@@ -33,6 +33,7 @@ import {
   matchesRecordState,
   type RecordState,
 } from "@/components/common/record-state-select";
+import { StatusPicker } from "@/components/common/status-picker";
 import { TaskTagPicker } from "@/components/tasks/task-tag-picker";
 import {
   buildGardenOptions,
@@ -1212,28 +1213,6 @@ export function TasksManager({
                 />
               </label>
               <label className="task-field">
-                <span>სტატუსი</span>
-                <select
-                  value={editDraft.status}
-                  onChange={(event) =>
-                    setEditDraft((current) =>
-                      current
-                        ? {
-                            ...current,
-                            status: event.target.value as TaskStatus,
-                          }
-                        : current,
-                    )
-                  }
-                >
-                  {statusOrder.map((value) => (
-                    <option key={value} value={value}>
-                      {statusLabels[value]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="task-field">
                 <span>პრიორიტეტი</span>
                 <select
                   value={editDraft.priority}
@@ -1312,6 +1291,15 @@ export function TasksManager({
                   rows={3}
                 />
               </label>
+              <StatusPicker
+                className="span-full"
+                value={editDraft.status}
+                onChange={(status) =>
+                  setEditDraft((current) =>
+                    current ? { ...current, status } : current,
+                  )
+                }
+              />
               <div className="task-field span-full">
                 <span>დავალების შემსრულებლები</span>
                 <div className="row-tags">

@@ -329,6 +329,7 @@ model tasks {
   is_info        Boolean          @default(false)
   starts_at      DateTime?        @db.DateTime(0)
   due_date       DateTime         @db.Date
+  completed_at   DateTime?        @db.Timestamp(0)
   created_by     String?          @db.VarChar(64)
   created_at     DateTime         @default(now()) @db.Timestamp(0)
   updated_at     DateTime         @default(now()) @db.Timestamp(0)

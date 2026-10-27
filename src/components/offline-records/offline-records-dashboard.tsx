@@ -26,6 +26,7 @@ import {
   type RecordState,
 } from "@/components/common/record-state-select";
 import { recordAudit } from "@/lib/client-audit";
+import { getGardenCode } from "@/lib/device-options";
 import type {
   DailyOfflineEntry,
   DailyOfflineLevel,
@@ -39,7 +40,6 @@ import type {
   Device,
   MonitoredDevice,
   OfflineSnapshot,
-  OfflineSnapshotDevice,
 } from "@/lib/types";
 
 type RemovedFrequencyDevice = {
@@ -169,6 +169,7 @@ export function OfflineRecordsDashboard({
   const [historyDeviceId, setHistoryDeviceId] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [matrixOpen, setMatrixOpen] = useState(true);
+  const [matrixQuery, setMatrixQuery] = useState("");
   const [matrixSort, setMatrixSort] = useState<MatrixSort>("offline-desc");
   const [matrixOrder, setMatrixOrder] = useState<string[]>([]);
   const dragIndexRef = useRef<number | null>(null);
@@ -424,7 +425,6 @@ export function OfflineRecordsDashboard({
     return days;
   }, [fromDate, offlineByDay, toDate]);
 
-  /** Rows of the matrix: gardens that were offline at least once in range. */
   /** Problem days per device in the range: red, pink or purple. */
   const problemDayCounts = useMemo(() => {
     const candidates = new Set<string>();
@@ -445,13 +445,25 @@ export function OfflineRecordsDashboard({
     return counts;
   }, [activeDeviceIds, dailyLevels, getCellState, matrixDays, offlineCounts]);
 
+  /** Rows of the calendar: every device, narrowed by the garden search —
+   *  digits match the start of the garden number, anything else the name. */
   const matrixDevices = useMemo(() => {
-    const rows = [...problemDayCounts.entries()].map(([deviceId, count]) => ({
-      deviceId,
-      name: deviceMap.get(deviceId)?.name ?? deviceId,
-      status: deviceMap.get(deviceId)?.status ?? "offline",
-      count,
-    }));
+    const normalized = matrixQuery.trim().toLowerCase();
+    const byNumber = /^\d+$/.test(normalized);
+    const rows = devices
+      .filter(
+        (device) =>
+          !normalized ||
+          (byNumber
+            ? getGardenCode(device).startsWith(normalized)
+            : device.name.toLowerCase().includes(normalized)),
+      )
+      .map((device) => ({
+        deviceId: device.id,
+        name: device.name,
+        status: device.status,
+        count: problemDayCounts.get(device.id) ?? 0,
+      }));
 
     if (matrixSort === "custom" && matrixOrder.length) {
       const rank = new Map(matrixOrder.map((id, index) => [id, index]));
@@ -474,7 +486,7 @@ export function OfflineRecordsDashboard({
           return b.count - a.count;
       }
     });
-  }, [deviceMap, matrixOrder, matrixSort, problemDayCounts]);
+  }, [devices, matrixOrder, matrixQuery, matrixSort, problemDayCounts]);
 
   useEffect(() => {
     try {
@@ -508,6 +520,9 @@ export function OfflineRecordsDashboard({
     [matrixStorageKey],
   );
 
+  /* A filtered list can't be reordered: its indexes skip hidden rows. */
+  const matrixSearching = Boolean(matrixQuery.trim());
+
   function changeMatrixSort(next: MatrixSort) {
     setMatrixSort(next);
     persistMatrix({ order: matrixOrder, sort: next });
@@ -519,7 +534,7 @@ export function OfflineRecordsDashboard({
     dragIndexRef.current = null;
     setDragOverIndex(null);
 
-    if (fromIndex === null || fromIndex === targetIndex) {
+    if (fromIndex === null || fromIndex === targetIndex || matrixSearching) {
       return;
     }
 
@@ -894,15 +909,15 @@ export function OfflineRecordsDashboard({
         </div>
       </section>
 
-      {/* MATRIX — rows are gardens, columns are captured mornings */}
+      {/* MATRIX — rows are every device, columns are the days in range */}
       <section
         className="matrix-panel"
         data-open={matrixOpen ? "true" : "false"}
-        aria-label="მოწყობილობა × დღე"
+        aria-label="მონიტორინგის კალენდარი"
       >
         <header className="matrix-head">
           <div className="matrix-title">
-            <h2>მოწყობილობა × დღე</h2>
+            <h2>მონიტორინგის კალენდარი</h2>
             <span className="matrix-count">{matrixDevices.length}</span>
             <button
               className="matrix-toggle"
@@ -918,6 +933,16 @@ export function OfflineRecordsDashboard({
           </div>
 
           <div className="matrix-tools">
+            <div className="search-field matrix-search">
+              <Search size={15} />
+              <input
+                value={matrixQuery}
+                onChange={(event) => setMatrixQuery(event.target.value)}
+                placeholder="ბაღის ნომერი"
+                inputMode="search"
+                aria-label="ბაღის ძებნა"
+              />
+            </div>
             <label className="select-control">
               <Filter size={15} />
               <select
@@ -986,7 +1011,7 @@ export function OfflineRecordsDashboard({
                     <div
                       key={row.deviceId}
                       className={`matrix-row${dragOverIndex === index ? " drag-over" : ""}`}
-                      draggable
+                      draggable={!matrixSearching}
                       onDragStart={() => {
                         dragIndexRef.current = index;
                       }}
@@ -1103,9 +1128,7 @@ export function OfflineRecordsDashboard({
             </div>
           </div>
         ) : (
-          <p className="matrix-empty">
-            არჩეულ პერიოდში offline მოწყობილობა არ არის.
-          </p>
+          <p className="matrix-empty">მოწყობილობა ვერ მოიძებნა.</p>
         )}
 
         <footer className="matrix-foot">
@@ -1206,48 +1229,6 @@ export function OfflineRecordsDashboard({
               : null}
           </div>
         </aside>
-        <section className="surface offline-snapshot-panel">
-          <div className="section-title">
-            <h2>დღიური აღრიცხვა</h2>
-            <span className="count-pill">{thresholdDeviceIds.size} წითელი</span>
-          </div>
-
-          <div className="offline-snapshot-list">
-            {filteredSnapshots.length ? (
-              filteredSnapshots.map((snapshot) => (
-                <article key={snapshot.id} className="offline-snapshot-day">
-                  <header>
-                    <div>
-                      <strong>{formatDate(snapshot.date)}</strong>
-                      <span>09:00 · {snapshot.devices.length} offline</span>
-                    </div>
-                    <WifiOff size={18} />
-                  </header>
-                  <div className="snapshot-device-cloud">
-                    {snapshot.devices.length ? (
-                      snapshot.devices.map((device) => (
-                        <SnapshotDeviceChip
-                          key={device.deviceId}
-                          device={device}
-                          isCritical={thresholdDeviceIds.has(device.deviceId)}
-                          isAlerting={alertingDeviceIds.has(device.deviceId)}
-                          count={offlineCounts.get(device.deviceId) ?? 0}
-                        />
-                      ))
-                    ) : (
-                      <p className="muted">ამ დღეს offline არ დაფიქსირდა.</p>
-                    )}
-                  </div>
-                </article>
-              ))
-            ) : (
-              <div className="empty-state">
-                <CheckCircle2 size={22} />
-                <span>ამ დიაპაზონში ჩანაწერი არ არის.</span>
-              </div>
-            )}
-          </div>
-        </section>
         <aside className="surface offline-device-panel">
           <div className="section-title">
             <h2>მოწყობილობები</h2>
@@ -1674,28 +1655,6 @@ function MonitoringHistoryModal({
         )}
       </section>
     </div>
-  );
-}
-
-function SnapshotDeviceChip({
-  device,
-  isCritical,
-  isAlerting,
-  count,
-}: {
-  device: OfflineSnapshotDevice;
-  isCritical: boolean;
-  isAlerting: boolean;
-  count: number;
-}) {
-  return (
-    <span
-      className={`snapshot-device-chip ${isCritical ? "critical" : ""} ${isAlerting ? "alerting" : ""}`}
-      title={`${count} დღე offline`}
-    >
-      {isAlerting ? <BellRing size={13} /> : null}
-      <strong>{device.deviceName}</strong>
-    </span>
   );
 }
 

@@ -9,6 +9,8 @@ type ConfirmDialogOptions = {
   cancelLabel?: string;
   /** "danger" (red, default) for deletes; "primary" for e.g. restoring. */
   tone?: "danger" | "primary";
+  /** A notice rather than a question: only the confirm button is shown. */
+  hideCancel?: boolean;
 };
 
 type ConfirmDialogRequest = Required<ConfirmDialogOptions> & {
@@ -21,6 +23,7 @@ const defaultConfirmOptions: Required<ConfirmDialogOptions> = {
   confirmLabel: "კი",
   cancelLabel: "არა",
   tone: "danger",
+  hideCancel: false,
 };
 
 export function useConfirmDialog() {
@@ -52,13 +55,15 @@ export function useConfirmDialog() {
         <h2 id="confirm-dialog-title">{request.title}</h2>
         <p>{request.message}</p>
         <div className="confirm-dialog-actions">
-          <button
-            className="ghost-button"
-            type="button"
-            onClick={() => close(false)}
-          >
-            {request.cancelLabel}
-          </button>
+          {request.hideCancel ? null : (
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={() => close(false)}
+            >
+              {request.cancelLabel}
+            </button>
+          )}
           <button
             className={`primary-button${request.tone === "danger" ? " danger" : ""}`}
             type="button"

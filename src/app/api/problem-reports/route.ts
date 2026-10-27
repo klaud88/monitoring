@@ -3,7 +3,10 @@ import { canAccessGarden, getGardenScope } from "@/lib/garden-scope";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { filterRegisteredTaskTags, normalizeTaskTags } from "@/lib/catalog";
-import { redactTaskFields } from "@/lib/problem-report-view";
+import {
+  PHONE_REQUIRED_MESSAGE,
+  redactTaskFields,
+} from "@/lib/problem-report-view";
 import {
   createProblemReport,
   createTaskTag,
@@ -89,6 +92,14 @@ export async function POST(request: NextRequest) {
   if (!title || !issue || !deviceId || !dueDate) {
     return NextResponse.json(
       { message: "Missing required problem report fields" },
+      { status: 400 },
+    );
+  }
+
+  // The reporter must be reachable: no report without a phone number.
+  if (!phone) {
+    return NextResponse.json(
+      { message: PHONE_REQUIRED_MESSAGE, field: "phone" },
       { status: 400 },
     );
   }

@@ -400,6 +400,7 @@ type TaskRow = {
   starts_at: DatabaseDate | null;
   due_date: DatabaseDate;
   created_at: DatabaseDate;
+  completed_at: DatabaseDate | null;
   problem_report_id: string | null;
   assignee_ids: string | null;
   deleted_at: DatabaseDate | null;
@@ -546,6 +547,19 @@ const toDateTimeString = (value: DatabaseDate) =>
  * sql_mode, so it goes back as a Date: with the pool's timezone "Z" mysql2
  * writes it as the same wall clock it was read from.
  */
+/*
+ * tasks.completed_at follows the status: stamped when a task becomes done,
+ * cleared when it leaves done, kept while it stays done. `next` is the SQL
+ * for the new status; the fragment must precede `status = …` in the SET,
+ * because MySQL assigns left to right and this reads the old status.
+ */
+const completedAtAssignment = (next: string) => `
+  completed_at = case
+    when ${next} <> 'done' then null
+    when status = 'done' then completed_at
+    else current_timestamp
+  end`;
+
 const toDateTimeParam = (value?: string) => {
   if (!value) {
     return null;
@@ -979,6 +993,18 @@ async function ensureOperationalSchema() {
         "deleted_at",
         "deleted_at timestamp null",
       );
+      // When the task was closed — the task statistics measure from it.
+      if (
+        await addColumnIfMissing(
+          connection,
+          taskColumns,
+          "tasks",
+          "completed_at",
+          "completed_at timestamp null after due_date",
+        )
+      ) {
+        await backfillTaskCompletedAt(connection);
+      }
       const userColumns = await getTableColumns(connection, "users");
       // A deleted user is is_active = false; this records when.
       await addColumnIfMissing(
@@ -1457,6 +1483,60 @@ async function getTableColumns(connection: PoolConnection, tableName: string) {
   );
 
   return new Set(rows.map((row) => String(row.column_name)));
+}
+
+/**
+ * One-off, when tasks.completed_at is added: a task that is already done gets
+ * the time of its last move to done from the audit log — a status change in
+ * `changes`, or (older rows) the first of the trailing run of rows saved with
+ * status done. Without any such row, its last update stands in.
+ */
+async function backfillTaskCompletedAt(connection: PoolConnection) {
+  const [rows] = await connection.query<RowDataPacket[]>(`
+    select t.id, t.updated_at, al.created_at, al.metadata
+    from tasks t
+    left join audit_logs al
+      on al.entity_type = 'task' and al.entity_id = t.id
+    where t.status = 'done' and t.completed_at is null
+    order by t.id, al.created_at asc
+  `);
+
+  const doneSince = new Map<string, { at: DatabaseDate; fallback: DatabaseDate }>();
+  const trailingDone = new Map<string, DatabaseDate | null>();
+  for (const row of rows) {
+    const taskId = String(row.id);
+    if (!doneSince.has(taskId)) {
+      doneSince.set(taskId, { at: row.updated_at, fallback: row.updated_at });
+    }
+    if (!row.created_at) {
+      continue;
+    }
+    const metadata = (parseAuditMetadata(row.metadata) ?? {}) as {
+      status?: string;
+      changes?: { field?: string; to?: string }[];
+    };
+    const statusChange = Array.isArray(metadata.changes)
+      ? metadata.changes.find((change) => change?.field === "status")
+      : undefined;
+    const status = statusChange?.to ?? metadata.status;
+    if (status === undefined) {
+      continue;
+    }
+    if (status === "done") {
+      if (statusChange || !trailingDone.get(taskId)) {
+        trailingDone.set(taskId, row.created_at);
+      }
+    } else {
+      trailingDone.set(taskId, null);
+    }
+  }
+
+  for (const [taskId, entry] of doneSince) {
+    await connection.query("update tasks set completed_at = ? where id = ?", [
+      trailingDone.get(taskId) ?? entry.fallback,
+      taskId,
+    ]);
+  }
 }
 
 async function addColumnIfMissing(
@@ -4822,7 +4902,7 @@ async function completeExpiredInfoTasks() {
     `);
     await connection.query(`
       update tasks
-      set status = 'done'
+      set completed_at = current_timestamp, status = 'done'
       where is_info = true
         and info_auto_done_at is not null
         and info_auto_done_at <= now()
@@ -4883,6 +4963,7 @@ export async function getTasks(
         t.starts_at,
         t.due_date,
         t.created_at,
+        t.completed_at,
         t.deleted_at,
         pr.id as problem_report_id,
         group_concat(ta.user_id order by ta.user_id separator ',') as assignee_ids
@@ -4935,6 +5016,7 @@ export async function getTasks(
     startsAt: row.starts_at ? toDateTimeString(row.starts_at) : undefined,
     dueDate: toDateString(row.due_date),
     createdAt: toDateTimeString(row.created_at),
+    completedAt: row.completed_at ? toDateTimeString(row.completed_at) : undefined,
     problemReportId: row.problem_report_id ?? undefined,
     assigneeIds: csv(row.assignee_ids),
     deletedAt: row.deleted_at ? toDateTimeString(row.deleted_at) : undefined,
@@ -4959,8 +5041,8 @@ export async function createTask(
     try {
       await connection.query<ResultSetHeader>(
         `
-          insert into tasks (id, title, issue, comment_text, phone, device_id, status, priority, tags, is_info, info_auto_done_days, info_auto_done_at, starts_at, due_date)
-          values (?, ?, ?, ?, ?, ?, ?, ?, cast(? as json), ?, ?, if(? is null, null, date_add(now(), interval ? day)), ?, ?)
+          insert into tasks (id, title, issue, comment_text, phone, device_id, status, priority, tags, is_info, info_auto_done_days, info_auto_done_at, starts_at, due_date, completed_at)
+          values (?, ?, ?, ?, ?, ?, ?, ?, cast(? as json), ?, ?, if(? is null, null, date_add(now(), interval ? day)), ?, ?, if(? = 'done', current_timestamp, null))
         `,
         [
           task.id,
@@ -4978,6 +5060,7 @@ export async function createTask(
           task.infoAutoDoneDays ?? 0,
           toDateTimeParam(task.startsAt),
           task.dueDate,
+          task.status,
         ],
       );
 
@@ -5030,6 +5113,7 @@ export async function updateTask(
             comment_text = ?,
             phone = ?,
             device_id = ?,
+            ${completedAtAssignment("?")},
             status = ?,
             priority = ?,
             tags = cast(? as json),
@@ -5054,6 +5138,7 @@ export async function updateTask(
           input.comment?.trim() || null,
           input.phone ?? null,
           input.deviceId,
+          input.status,
           input.status,
           input.priority,
           JSON.stringify(storedTags),
@@ -6967,13 +7052,14 @@ async function upsertTaskForProblemReport(
   await connection.query<ResultSetHeader>(
     `
       insert into tasks
-        (id, title, issue, comment_text, phone, device_id, status, priority, tags, due_date, created_by)
-      values (?, ?, ?, ?, ?, ?, ?, ?, cast(? as json), ?, ?)
+        (id, title, issue, comment_text, phone, device_id, status, priority, tags, due_date, created_by, completed_at)
+      values (?, ?, ?, ?, ?, ?, ?, ?, cast(? as json), ?, ?, if(? = 'done', current_timestamp, null))
       on duplicate key update
         title = values(title),
         issue = values(issue),
         phone = values(phone),
         device_id = values(device_id),
+        ${completedAtAssignment("values(status)")},
         status = values(status),
         priority = values(priority),
         tags = values(tags),
@@ -6991,6 +7077,7 @@ async function upsertTaskForProblemReport(
       JSON.stringify(tags),
       input.dueDate,
       input.createdBy ?? null,
+      input.status,
     ],
   );
 
@@ -7160,10 +7247,10 @@ export async function updateTaskStatus(
   status: TaskStatus,
 ): Promise<Task | null> {
   const updated = await withConnection(async (connection) => {
-    await connection.query("update tasks set status = ? where id = ?", [
-      status,
-      id,
-    ]);
+    await connection.query(
+      `update tasks set ${completedAtAssignment("?")}, status = ? where id = ?`,
+      [status, status, id],
+    );
     await connection.query(
       "update problem_reports set status = ? where task_id = ?",
       [status, id],
