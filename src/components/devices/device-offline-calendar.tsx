@@ -6,8 +6,9 @@ import {
   describeDay,
   formatCellDate,
   legendItems,
-  problemStates,
   stateLabels,
+  StatusCounts,
+  tallyStates,
 } from "@/components/offline-records/offline-day";
 import { cellStateFor } from "@/lib/offline-day";
 import type { DailyOfflineEntry, UncheckedDay } from "@/lib/repositories";
@@ -71,7 +72,7 @@ export function DeviceOfflineCalendar({
     });
   }, [levelByDay, rangeDays, uncheckedMap]);
 
-  const problemCount = days.filter((day) => problemStates.has(day.state)).length;
+  const tally = tallyStates(days.map((day) => day.state));
   const selected = selectedDate
     ? days.find((day) => day.date === selectedDate)
     : undefined;
@@ -92,13 +93,7 @@ export function DeviceOfflineCalendar({
             </button>
           ))}
         </div>
-        <span
-          className={`matrix-total${problemCount ? " over" : ""}`}
-          title="პრობლემური დღე"
-        >
-          {problemCount}
-        </span>
-        <span className="device-offline-count">პრობლემური დღე</span>
+        <StatusCounts tally={tally} />
       </div>
 
       <span className="matrix-legend">

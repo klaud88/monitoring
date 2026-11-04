@@ -8791,10 +8791,6 @@ a.task-card2:hover .task-card2-title {
   font-size: 13px;
 }
 
-.matrix-threshold {
-  gap: 6px;
-}
-
 .matrix-period {
   display: inline-flex;
   flex-wrap: wrap;
@@ -8806,17 +8802,59 @@ a.task-card2:hover .task-card2-title {
   min-height: 30px;
 }
 
-.matrix-threshold span {
-  color: var(--ink-muted);
-  font-size: 12.5px;
-  white-space: nowrap;
+/* days per status in the chosen period, in the calendar's own colours */
+.status-counts {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 3px;
 }
 
-.matrix-threshold input {
-  width: 52px;
-  min-height: 30px;
+.status-count,
+.status-count-label {
+  width: 30px;
   text-align: center;
   font-variant-numeric: tabular-nums;
+}
+
+.status-count {
+  height: 20px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  font-weight: 800;
+  line-height: 20px;
+}
+
+.status-count.ok {
+  background: #b4e2c5;
+  color: #14532d;
+}
+
+.status-count.unstable {
+  background: #7c3aed;
+  color: #fff;
+}
+
+.status-count.late {
+  background: #f9a8d4;
+  color: #831843;
+}
+
+.status-count.missed {
+  background: #dc2626;
+  color: #fff;
+}
+
+.status-count.zero {
+  opacity: 0.3;
+}
+
+.status-count-label {
+  overflow: hidden;
+  font-size: 9.5px;
+  letter-spacing: 0;
+  text-overflow: clip;
+  text-transform: none;
+  white-space: nowrap;
 }
 
 .matrix-legend {
@@ -8836,38 +8874,6 @@ a.task-card2:hover .task-card2-title {
   cursor: help;
 }
 
-/* status chips pick what the threshold counts */
-.matrix-legend-toggle {
-  min-height: 26px;
-  padding: 2px 9px 2px 6px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--ink-muted);
-  font: inherit;
-  cursor: pointer;
-  opacity: 0.55;
-  transition:
-    opacity 0.12s ease,
-    border-color 0.12s ease;
-}
-
-.matrix-legend-toggle:hover {
-  opacity: 0.85;
-}
-
-.matrix-legend-toggle.active {
-  border-color: var(--line-strong);
-  background: var(--surface-muted);
-  color: var(--ink);
-  font-weight: 700;
-  opacity: 1;
-}
-
-.matrix-legend-toggle .matrix-cell {
-  cursor: pointer;
-}
-
 .matrix-legend .matrix-cell {
   width: 12px;
   flex: 0 0 12px;
@@ -8882,7 +8888,7 @@ a.task-card2:hover .task-card2-title {
 .matrix-scroll {
   overflow: auto;
   scrollbar-width: thin;
-  --matrix-left-w: 250px;
+  --matrix-left-w: 340px;
   --matrix-right-w: 84px;
 }
 
@@ -8957,12 +8963,6 @@ a.task-card2:hover .task-card2-title {
 .matrix-row-head .matrix-name {
   letter-spacing: 0.03em;
   text-transform: uppercase;
-}
-
-.matrix-col-total {
-  width: 34px;
-  flex: 0 0 34px;
-  text-align: center;
 }
 
 /* the day strip */
@@ -9043,26 +9043,6 @@ a.task-card2:hover .task-card2-title {
   white-space: nowrap;
 }
 
-.matrix-total {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  flex: 0 0 34px;
-  height: 20px;
-  border-radius: 999px;
-  background: var(--surface-muted);
-  color: var(--ink-muted);
-  font-size: 11.5px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.matrix-total.over {
-  background: var(--tint-red);
-  color: var(--tint-red-ink);
-}
-
 .matrix-cell {
   display: flex;
   align-items: center;
@@ -9094,11 +9074,6 @@ button.matrix-cell:hover {
 /* days run newest first, so the month boundary is on day 1's right */
 .matrix-cell.month-start {
   box-shadow: inset -2px 0 0 var(--line-strong);
-}
-
-/* outside the threshold window (last N working days): not counted, faded */
-.matrix-cell.out-window {
-  opacity: 0.4;
 }
 
 /* Offline calendar colours (rules: deploy/logic.md). Fixed values, not theme
@@ -10202,6 +10177,42 @@ html.wheel-locked body {
     gap: 6px;
     padding: 0 8px 0 10px;
     font-size: 11.5px;
+  }
+
+  /* the status pills go under the name, so the frozen column stays narrow */
+  .matrix-body .matrix-row {
+    height: 46px;
+  }
+
+  .matrix-left {
+    flex-wrap: wrap;
+    align-content: center;
+    row-gap: 3px;
+  }
+
+  .matrix-left .matrix-name {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .matrix-left .status-counts {
+    flex: 1 0 100%;
+    gap: 2px;
+  }
+
+  .matrix-left .status-count {
+    width: 26px;
+  }
+
+  .matrix-left .status-count {
+    height: 18px;
+    font-size: 10.5px;
+    line-height: 18px;
+  }
+
+  /* too narrow for the labels: the colours and the legend say which is which */
+  .matrix-left .status-counts-head {
+    display: none;
   }
 
   .matrix-tools {
@@ -11747,11 +11758,6 @@ html.wheel-locked body {
 
 .device-offline-tools .preset-switch {
   margin-right: auto;
-}
-
-.device-offline-count {
-  color: var(--ink-muted);
-  font-size: 12.5px;
 }
 
 .device-offline-days {

@@ -34,18 +34,3 @@ export function cellStateFor(
   }
   return uncheckedDays.has(date) ? "missed" : "ok";
 }
-
-/** The last `count` working days, newest first, ending today. Today joins
- *  once it is graded for the device (no longer pending). */
-export function lastWorkingDays(todayKey: string, count: number) {
-  const days: string[] = [];
-  const cursor = new Date(`${todayKey}T00:00:00Z`);
-  while (days.length < count && days.length < 400) {
-    const date = cursor.toISOString().slice(0, 10);
-    if (!isWeekend(date)) {
-      days.push(date);
-    }
-    cursor.setUTCDate(cursor.getUTCDate() - 1);
-  }
-  return days;
-}

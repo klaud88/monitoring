@@ -35,8 +35,68 @@ export const stateLabels: Record<CellState, string> = {
  *  chips can pick. */
 export const levelOrder: DailyOfflineLevel[] = ["ok", "unstable", "late", "missed"];
 
-/** Days that count against a device in the calendar rows and threshold. */
-export const problemStates = new Set<CellState>(["missed", "late", "unstable"]);
+export type StatusTally = Record<DailyOfflineLevel, number>;
+
+const levelShortLabels: Record<DailyOfflineLevel, string> = {
+  ok: "სტაბ.",
+  unstable: "არასტ.",
+  late: "განახლ.",
+  missed: "გათიშ.",
+};
+
+/** Days per status in a range: weekends and today's open day don't count. */
+export function tallyStates(states: CellState[]): StatusTally {
+  const tally: StatusTally = { ok: 0, unstable: 0, late: 0, missed: 0 };
+  states.forEach((state) => {
+    if (state in tally) {
+      tally[state as DailyOfflineLevel] += 1;
+    }
+  });
+  return tally;
+}
+
+/** Missed + renewed + unstable days. */
+export function problemTotal(tally: StatusTally) {
+  return tally.missed + tally.late + tally.unstable;
+}
+
+export function describeTally(tally: StatusTally) {
+  const total = levelOrder.reduce((sum, level) => sum + tally[level], 0);
+  return `${total} დღიდან: ${levelOrder
+    .map((level) => `${levelLabels[level]} ${tally[level]}`)
+    .join(" · ")}`;
+}
+
+/** One pill per status, in the calendar's own colours. */
+export function StatusCounts({ tally }: { tally: StatusTally }) {
+  return (
+    <span className="status-counts" title={describeTally(tally)}>
+      {levelOrder.map((level) => (
+        <span
+          key={level}
+          className={`status-count ${level}${tally[level] ? "" : " zero"}`}
+          aria-label={`${levelLabels[level]}: ${tally[level]}`}
+        >
+          {tally[level]}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/** Column heading above the pills. */
+export function StatusCountsHead() {
+  return (
+    <span className="status-counts status-counts-head" aria-hidden="true">
+      {levelOrder.map((level) => (
+        <span key={level} className="status-count-label" title={levelLabels[level]}>
+          {levelShortLabels[level]}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 
 /** Above the calendar: every colour and what it means (deploy/logic.md). */
 export const legendItems: { state: CellState; hint: string }[] = [
