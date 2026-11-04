@@ -88,6 +88,8 @@ type MatrixSort =
 type MatrixPreference = {
   order: string[];
   sort: MatrixSort;
+  /** Show only the devices over the threshold. */
+  onlyOver?: boolean;
 };
 
 const matrixSortLabels: Record<MatrixSort, string> = {
@@ -139,6 +141,7 @@ export function OfflineRecordsDashboard({
   const [matrixQuery, setMatrixQuery] = useState("");
   const [matrixSort, setMatrixSort] = useState<MatrixSort>("offline-desc");
   const [matrixOrder, setMatrixOrder] = useState<string[]>([]);
+  const [matrixOnlyOver, setMatrixOnlyOver] = useState(false);
   const dragIndexRef = useRef<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [selectedCell, setSelectedCell] = useState<{
@@ -204,7 +207,8 @@ export function OfflineRecordsDashboard({
     return counts;
   }, [filteredSnapshots]);
 
-  const thresholdDeviceIds = useMemo(() => {
+  /** The frequency panel's own measure: 09:00 snapshots in the range. */
+  const snapshotOverIds = useMemo(() => {
     const ids = new Set<string>();
     offlineCounts.forEach((count, deviceId) => {
       if (count >= threshold) {
@@ -320,7 +324,8 @@ export function OfflineRecordsDashboard({
   );
 
   /** One column per calendar day in the chosen range — 30 days, 30 cells —
-   *  whether or not that day happens to have a snapshot. */
+   *  whether or not that day happens to have a snapshot. Newest first: the
+   *  count starts today (the range end) and goes back. */
   const matrixDays = useMemo(() => {
     const start = new Date(`${fromDate}T00:00:00Z`);
     const end = new Date(`${toDate}T00:00:00Z`);
@@ -338,9 +343,9 @@ export function OfflineRecordsDashboard({
       hasSnapshot: boolean;
       isMonthStart: boolean;
     }[] = [];
-    const cursor = new Date(start);
+    const cursor = new Date(end);
 
-    while (cursor <= end && days.length < 400) {
+    while (cursor >= start && days.length < 400) {
       const date = cursor.toISOString().slice(0, 10);
       const day = cursor.getUTCDate();
       days.push({
@@ -349,7 +354,7 @@ export function OfflineRecordsDashboard({
         hasSnapshot: offlineByDay.has(date),
         isMonthStart: day === 1,
       });
-      cursor.setUTCDate(cursor.getUTCDate() + 1);
+      cursor.setUTCDate(cursor.getUTCDate() - 1);
     }
 
     return days;
@@ -375,12 +380,25 @@ export function OfflineRecordsDashboard({
     return counts;
   }, [activeDeviceIds, dailyLevels, getCellState, matrixDays, offlineCounts]);
 
+  /** Threshold: at least this many problem days in the chosen range — the
+   *  same number shown beside each row. */
+  const overThresholdIds = useMemo(() => {
+    const ids = new Set<string>();
+    problemDayCounts.forEach((count, deviceId) => {
+      if (count >= threshold) {
+        ids.add(deviceId);
+      }
+    });
+    return ids;
+  }, [problemDayCounts, threshold]);
+
   /** Rows of the calendar: every device, narrowed by the garden search —
    *  digits match the start of the garden number, anything else the name. */
   const matrixDevices = useMemo(() => {
     const normalized = matrixQuery.trim().toLowerCase();
     const byNumber = /^\d+$/.test(normalized);
     const rows = devices
+      .filter((device) => !matrixOnlyOver || overThresholdIds.has(device.id))
       .filter(
         (device) =>
           !normalized ||
@@ -416,7 +434,15 @@ export function OfflineRecordsDashboard({
           return b.count - a.count;
       }
     });
-  }, [devices, matrixOrder, matrixQuery, matrixSort, problemDayCounts]);
+  }, [
+    devices,
+    matrixOnlyOver,
+    matrixOrder,
+    matrixQuery,
+    matrixSort,
+    overThresholdIds,
+    problemDayCounts,
+  ]);
 
   useEffect(() => {
     try {
@@ -430,6 +456,9 @@ export function OfflineRecordsDashboard({
       }
       if (stored.sort && stored.sort in matrixSortLabels) {
         setMatrixSort(stored.sort);
+      }
+      if (typeof stored.onlyOver === "boolean") {
+        setMatrixOnlyOver(stored.onlyOver);
       }
     } catch {
       // localStorage may be unavailable in restricted contexts.
@@ -451,11 +480,17 @@ export function OfflineRecordsDashboard({
   );
 
   /* A filtered list can't be reordered: its indexes skip hidden rows. */
-  const matrixSearching = Boolean(matrixQuery.trim());
+  const matrixFiltered = Boolean(matrixQuery.trim()) || matrixOnlyOver;
 
   function changeMatrixSort(next: MatrixSort) {
     setMatrixSort(next);
-    persistMatrix({ order: matrixOrder, sort: next });
+    persistMatrix({ order: matrixOrder, sort: next, onlyOver: matrixOnlyOver });
+  }
+
+  function toggleOnlyOver() {
+    const next = !matrixOnlyOver;
+    setMatrixOnlyOver(next);
+    persistMatrix({ order: matrixOrder, sort: matrixSort, onlyOver: next });
   }
 
   /** Dropping a row rewrites the personal order and switches to it. */
@@ -464,7 +499,7 @@ export function OfflineRecordsDashboard({
     dragIndexRef.current = null;
     setDragOverIndex(null);
 
-    if (fromIndex === null || fromIndex === targetIndex || matrixSearching) {
+    if (fromIndex === null || fromIndex === targetIndex || matrixFiltered) {
       return;
     }
 
@@ -474,7 +509,7 @@ export function OfflineRecordsDashboard({
 
     setMatrixOrder(ids);
     setMatrixSort("custom");
-    persistMatrix({ order: ids, sort: "custom" });
+    persistMatrix({ order: ids, sort: "custom", onlyOver: matrixOnlyOver });
   }
 
   function toggleSelectedDevice(deviceId: string) {
@@ -828,7 +863,7 @@ export function OfflineRecordsDashboard({
             ზღვარს ზემოთ
           </span>
           <div className="kpi-value">
-            <strong className="over">{thresholdDeviceIds.size}</strong>
+            <strong className="over">{overThresholdIds.size}</strong>
           </div>
         </div>
         <div className="kpi-cell">
@@ -890,6 +925,42 @@ export function OfflineRecordsDashboard({
                 )}
               </select>
             </label>
+            {/* Same period as the page head: both controls move together. */}
+            <div className="matrix-period">
+              <div className="preset-switch" role="group" aria-label="კალენდრის პერიოდი">
+                {rangePresets.map((preset) => (
+                  <button
+                    key={preset.days}
+                    type="button"
+                    className={activePresetDays === preset.days ? "active" : ""}
+                    onClick={() => applyRangePreset(preset.days)}
+                    aria-pressed={activePresetDays === preset.days}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+              <label className="select-control offline-date">
+                <span>დან</span>
+                <input
+                  type="date"
+                  value={fromDate}
+                  max={toDate}
+                  onChange={(event) => setFromDate(event.target.value)}
+                  aria-label="კალენდრის პერიოდის დასაწყისი"
+                />
+              </label>
+              <label className="select-control offline-date">
+                <span>მდე</span>
+                <input
+                  type="date"
+                  value={toDate}
+                  min={fromDate}
+                  onChange={(event) => setToDate(event.target.value)}
+                  aria-label="კალენდრის პერიოდის ბოლო"
+                />
+              </label>
+            </div>
             <label className="select-control matrix-threshold">
               <span>ზღვარი</span>
               <input
@@ -900,8 +971,19 @@ export function OfflineRecordsDashboard({
                   setThreshold(Math.max(1, Number(event.target.value) || 1))
                 }
               />
-              <span>დღე</span>
+              <span>დღე / {matrixDays.length}-დან</span>
             </label>
+            <div className="preset-switch">
+              <button
+                type="button"
+                className={matrixOnlyOver ? "active" : ""}
+                onClick={toggleOnlyOver}
+                aria-pressed={matrixOnlyOver}
+                title="მხოლოდ ის მოწყობილობები, რომლებმაც არჩეულ პერიოდში ზღვარს გადააჭარბა"
+              >
+                მხოლოდ ზღვარს ზემოთ ({overThresholdIds.size})
+              </button>
+            </div>
             <span className="matrix-legend">
               {legendItems.map((item) => (
                 <span key={item.state} className="matrix-legend-item" title={item.hint}>
@@ -935,13 +1017,13 @@ export function OfflineRecordsDashboard({
 
               <div className="matrix-body">
                 {matrixDevices.map((row, index) => {
-                  const over = thresholdDeviceIds.has(row.deviceId);
+                  const over = overThresholdIds.has(row.deviceId);
                   const monitored = monitoredMap.has(row.deviceId);
                   return (
                     <div
                       key={row.deviceId}
                       className={`matrix-row${dragOverIndex === index ? " drag-over" : ""}`}
-                      draggable={!matrixSearching}
+                      draggable={!matrixFiltered}
                       onDragStart={() => {
                         dragIndexRef.current = index;
                       }}
@@ -1058,12 +1140,16 @@ export function OfflineRecordsDashboard({
             </div>
           </div>
         ) : (
-          <p className="matrix-empty">მოწყობილობა ვერ მოიძებნა.</p>
+          <p className="matrix-empty">
+            {matrixOnlyOver && !matrixQuery.trim()
+              ? "ამ პერიოდში ზღვარს არცერთი მოწყობილობა არ გადაცდენია."
+              : "მოწყობილობა ვერ მოიძებნა."}
+          </p>
         )}
 
         <footer className="matrix-foot">
           {matrixOpen ? (
-            "სტრიქონის გადათრევით საკუთარ რიგს აწყობთ — შენახვა ავტომატურია. უჯრაზე დაწკაპუნება დღის გათიშვებს აჩვენებს."
+            "დღეები დღევანდელიდან უკან მიდის. სტრიქონის გადათრევით საკუთარ რიგს აწყობთ — შენახვა ავტომატურია. უჯრაზე დაწკაპუნება დღის გათიშვებს აჩვენებს."
           ) : (
             `დაკეცილია — ${Math.min(3, matrixDevices.length)} მოწყობილობა ჩანს ${matrixDevices.length}-დან.`
           )}
@@ -1084,7 +1170,7 @@ export function OfflineRecordsDashboard({
               rankedDevices.map((device) => (
                 <div
                   key={device.deviceId}
-                  className={`rank-row ${thresholdDeviceIds.has(device.deviceId) ? "critical" : ""}`}
+                  className={`rank-row ${snapshotOverIds.has(device.deviceId) ? "critical" : ""}`}
                 >
                   <div className="rank-row-head">
                     <div>

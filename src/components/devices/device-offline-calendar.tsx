@@ -54,7 +54,7 @@ export function DeviceOfflineCalendar({
     [blackoutMap],
   );
 
-  /* Same range as the calendar: N days back up to today, oldest first. */
+  /* Same range and order as the calendar: today first, N days back. */
   const days = useMemo(() => {
     const result: { date: string; isMonthStart: boolean }[] = [];
     const cursor = new Date();
@@ -68,7 +68,7 @@ export function DeviceOfflineCalendar({
       }
       cursor.setDate(cursor.getDate() + 1);
     }
-    return result.map((day) => {
+    return result.reverse().map((day) => {
       const graded = levelByDay.get(day.date);
       return {
         ...day,

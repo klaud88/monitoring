@@ -8795,6 +8795,17 @@ a.task-card2:hover .task-card2-title {
   gap: 6px;
 }
 
+.matrix-period {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.matrix-period .offline-date input {
+  min-height: 30px;
+}
+
 .matrix-threshold span {
   color: var(--ink-muted);
   font-size: 12.5px;
@@ -9048,8 +9059,9 @@ button.matrix-cell:hover {
   outline-color: var(--brand);
 }
 
+/* days run newest first, so the month boundary is on day 1's right */
 .matrix-cell.month-start {
-  box-shadow: inset 2px 0 0 var(--line-strong);
+  box-shadow: inset -2px 0 0 var(--line-strong);
 }
 
 .matrix-cell.no-data {
