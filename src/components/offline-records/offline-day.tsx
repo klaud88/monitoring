@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect } from "react";
-import { CheckCircle2, WifiOff, X, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, WifiOff, X } from "lucide-react";
 import type {
   DailyOfflineEntry,
   DailyOfflineLevel,
+  UncheckedDay,
 } from "@/lib/repositories";
 import type { CellState } from "@/lib/offline-day";
 
@@ -28,8 +29,11 @@ export const stateLabels: Record<CellState, string> = {
   ...levelLabels,
   pending: "მიმდინარე",
   weekend: "შაბათ-კვირა",
-  "no-data": "მონაცემი არ არის",
 };
+
+/** The four real day statuses, in legend order: the ones the threshold
+ *  chips can pick. */
+export const levelOrder: DailyOfflineLevel[] = ["ok", "unstable", "late", "missed"];
 
 /** Days that count against a device in the calendar rows and threshold. */
 export const problemStates = new Set<CellState>(["missed", "late", "unstable"]);
@@ -39,13 +43,12 @@ export const legendItems: { state: CellState; hint: string }[] = [
   { state: "ok", hint: "მხოლოდ მოკლე (30 წთ-მდე) გათიშვები" },
   { state: "unstable", hint: "09–17 შორის 3+ ცალკე გათიშვა" },
   { state: "late", hint: "ერთხელ მაინც 30+ წთ გათიშული, დანარჩენ დროს ონლაინ" },
-  { state: "missed", hint: "09–17 შორის 20 წთ უწყვეტად ონლაინ არ ყოფილა" },
+  {
+    state: "missed",
+    hint: "09–17 შორის 20 წთ უწყვეტად ონლაინ არ ყოფილა. ყვითელი კუთხე — იმ დღეს შემოწმება ვერ შესრულდა; მიზეზი უჯრაზეა",
+  },
   { state: "pending", hint: "დღეს: ინფორმაცია გროვდება, სტატუსი 17:00-ზე მიენიჭება" },
   { state: "weekend", hint: "არ ფასდება" },
-  {
-    state: "no-data",
-    hint: "კავშირი ვერ დამყარდა: ყველა დამატებული მოწყობილობის (არა ერთი ბაღის) 20%-ზე ნაკლები იყო ონლაინ, ან შემოწმება არ მუშაობდა",
-  },
 ];
 
 export const WINDOW_MINUTES =
@@ -63,15 +66,15 @@ export function DayDetailModal({
   date,
   state,
   graded,
-  noDataNote,
+  unchecked,
   onClose,
 }: {
   deviceName: string;
   date: string;
   state: CellState;
   graded: DailyOfflineEntry | undefined;
-  /** Why the day has no data (check down, or under 20% of all devices online). */
-  noDataNote: string;
+  /** Set when no sync succeeded that day: why, from the failure log. */
+  unchecked?: UncheckedDay;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -87,7 +90,6 @@ export function DayDetailModal({
   const drops = graded?.drops ?? [];
   const judged = graded?.windowMinutes ?? WINDOW_MINUTES;
   const offline = graded?.minutes ?? 0;
-  const known = state !== "no-data";
   const hours = Array.from(
     { length: OFFLINE_WINDOW_END_HOUR - OFFLINE_WINDOW_START_HOUR + 1 },
     (_, index) => OFFLINE_WINDOW_START_HOUR + index,
@@ -107,7 +109,7 @@ export function DayDetailModal({
             <p className="eyebrow">{formatDate(date)}</p>
             <h2 id="day-detail-title">{deviceName}</h2>
             <span className="day-detail-state">
-              <i className={`matrix-cell ${state}`} />
+              <i className={`matrix-cell ${state}${unchecked ? " unchecked" : ""}`} />
               {stateLabels[state]}
             </span>
           </div>
@@ -121,7 +123,38 @@ export function DayDetailModal({
           </button>
         </header>
 
-        {known ? (
+        {unchecked ? (
+          <div className="day-detail-unchecked">
+            <p>
+              <AlertTriangle size={18} />
+              <span>
+                <strong>სტატუსი ვერ წამოვიდა</strong>
+                {unchecked.reason}
+              </span>
+            </p>
+            {unchecked.failures.length ? (
+              <ol>
+                {unchecked.failures.map((failure, index) => (
+                  <li key={`${failure.at}-${index}`}>
+                    <time>{failure.at}</time>
+                    <code>{failure.message}</code>
+                  </li>
+                ))}
+              </ol>
+            ) : null}
+            {unchecked.attempts > unchecked.failures.length ? (
+              <small>
+                ნაჩვენებია ბოლო {unchecked.failures.length} /{" "}
+                {unchecked.attempts} ცდიდან (ლოგი: biostar_sync_failures).
+              </small>
+            ) : null}
+            <small>
+              ჩანაწერის გარეშე დღე პრობლემად (გათიშულად) ითვლება.
+            </small>
+          </div>
+        ) : null}
+
+        {unchecked && !drops.length ? null : (
           <>
             <div className="day-detail-summary">
               <div>
@@ -218,11 +251,6 @@ export function DayDetailModal({
               დანარჩენ დროს 09:00–17:00 შორის მოწყობილობა ონლაინ იყო.
             </p>
           </>
-        ) : (
-          <p className="day-detail-empty">
-            <XCircle size={18} />
-            მონაცემი არ არის: {noDataNote}.
-          </p>
         )}
       </section>
     </div>
@@ -233,7 +261,7 @@ export function describeDay(
   date: string,
   state: CellState,
   graded: DailyOfflineEntry | undefined,
-  noDataNote = "კავშირი ვერ დამყარდა",
+  unchecked?: UncheckedDay,
 ) {
   const day = formatDate(date);
   // One line per drop: "10:16–17:00 (6სთ 44წთ)".
@@ -243,6 +271,16 @@ export function describeDay(
         .map((drop) => `${drop.start}–${drop.end} (${formatMinutes(drop.minutes)})`)
         .join("\n")
     : "";
+
+  if (unchecked && state === "missed") {
+    const log = unchecked.failures.length
+      ? "\nლოგი:\n" +
+        unchecked.failures
+          .map((failure) => `${failure.at} — ${failure.message}`)
+          .join("\n")
+      : "";
+    return `${day} — ${levelLabels.missed}: სტატუსი ვერ წამოვიდა\n${unchecked.reason}${log}${drops}`;
+  }
 
   switch (state) {
     case "weekend":
@@ -255,8 +293,6 @@ export function describeDay(
       return `${day} — განახლებული: გაითიშა და ისევ ჩაირთო${drops}`;
     case "unstable":
       return `${day} — არასტაბილური: ${graded?.events ?? 0} გათიშვა${drops}`;
-    case "no-data":
-      return `${day} — მონაცემი არ არის: ${noDataNote}`;
     default:
       return `${day} — ${levelLabels.ok}${drops}`;
   }

@@ -9,12 +9,8 @@ import {
   problemStates,
   stateLabels,
 } from "@/components/offline-records/offline-day";
-import {
-  cellStateFor,
-  noDataNoteFor,
-  type BlackoutStat,
-} from "@/lib/offline-day";
-import type { DailyOfflineEntry } from "@/lib/repositories";
+import { cellStateFor } from "@/lib/offline-day";
+import type { DailyOfflineEntry, UncheckedDay } from "@/lib/repositories";
 
 const rangePresets = [
   { days: 7, label: "7 დღე" },
@@ -26,10 +22,8 @@ type Props = {
   deviceName: string;
   /** This device's graded days only. */
   levels: DailyOfflineEntry[];
-  coveredDays: string[];
-  /** Days the check could not reach (under 20% of ALL devices online),
-   *  worked out on the server over every device, as in the calendar. */
-  blackouts: [date: string, stat: BlackoutStat][];
+  /** Days no sync succeeded (shared by every device), with the reason. */
+  uncheckedDays: UncheckedDay[];
 };
 
 /** One device's row of the monitoring calendar: same cells, same colours,
@@ -37,8 +31,7 @@ type Props = {
 export function DeviceOfflineCalendar({
   deviceName,
   levels,
-  coveredDays,
-  blackouts,
+  uncheckedDays,
 }: Props) {
   const [rangeDays, setRangeDays] = useState(30);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -47,11 +40,9 @@ export function DeviceOfflineCalendar({
     () => new Map(levels.map((entry) => [entry.date, entry])),
     [levels],
   );
-  const coveredSet = useMemo(() => new Set(coveredDays), [coveredDays]);
-  const blackoutMap = useMemo(() => new Map(blackouts), [blackouts]);
-  const blackoutDays = useMemo(
-    () => new Set(blackoutMap.keys()),
-    [blackoutMap],
+  const uncheckedMap = useMemo(
+    () => new Map(uncheckedDays.map((day) => [day.date, day])),
+    [uncheckedDays],
   );
 
   /* Same range and order as the calendar: today first, N days back. */
@@ -73,10 +64,11 @@ export function DeviceOfflineCalendar({
       return {
         ...day,
         graded,
-        state: cellStateFor(day.date, graded, blackoutDays, coveredSet),
+        state: cellStateFor(day.date, graded, uncheckedMap),
+        unchecked: uncheckedMap.get(day.date),
       };
     });
-  }, [blackoutDays, coveredSet, levelByDay, rangeDays]);
+  }, [levelByDay, rangeDays, uncheckedMap]);
 
   const problemCount = days.filter((day) => problemStates.has(day.state)).length;
   const selected = selectedDate
@@ -122,13 +114,8 @@ export function DeviceOfflineCalendar({
           <button
             key={day.date}
             type="button"
-            className={`matrix-cell ${day.state}${day.isMonthStart ? " month-start" : ""}${selectedDate === day.date ? " picked" : ""}`}
-            title={describeDay(
-              day.date,
-              day.state,
-              day.graded,
-              noDataNoteFor(blackoutMap.get(day.date)),
-            )}
+            className={`matrix-cell ${day.state}${day.unchecked ? " unchecked" : ""}${day.isMonthStart ? " month-start" : ""}${selectedDate === day.date ? " picked" : ""}`}
+            title={describeDay(day.date, day.state, day.graded, day.unchecked)}
             onClick={() =>
               setSelectedDate(selectedDate === day.date ? null : day.date)
             }
@@ -147,7 +134,7 @@ export function DeviceOfflineCalendar({
           date={selected.date}
           state={selected.state}
           graded={selected.graded}
-          noDataNote={noDataNoteFor(blackoutMap.get(selected.date))}
+          unchecked={selected.unchecked}
           onClose={() => setSelectedDate(null)}
         />
       ) : null}

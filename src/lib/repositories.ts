@@ -657,8 +657,9 @@ export async function syncBiostarDevices({
 
   if (!biostarSyncPromise) {
     biostarSyncPromise = runBiostarDeviceSync()
-      .catch((error) => {
+      .catch(async (error) => {
         nextBiostarSyncAllowedAt = Date.now() + getSyncFailureBackoffMs();
+        await recordSyncFailure(new Date(), error);
         throw error;
       })
       .finally(() => {
@@ -1457,6 +1458,16 @@ async function ensureOperationalSchema() {
       // actually ran (Offline calendar, deploy/logic.md).
       await connection.query(
         "create table if not exists biostar_sync_runs (synced_at datetime not null primary key)",
+      );
+      // One row per failed BioStar sync, with the error: why a day could
+      // not be graded, so the cause can be fixed (deploy/logic.md).
+      await connection.query(
+        `create table if not exists biostar_sync_failures (
+          id bigint not null auto_increment primary key,
+          failed_at datetime not null,
+          message text not null,
+          key biostar_sync_failures_failed_at (failed_at)
+        )`,
       );
       await ensureProblemReportTaskView(connection);
       await ensureGardenUsersForDevices(connection);
@@ -3965,12 +3976,26 @@ export type DailyOfflineEntry = {
   pending?: boolean;
 };
 
+/** A working day on which no sync succeeded inside the window: it can't be
+ *  graded, so it counts as missed, with the logged reason. */
+export type UncheckedDay = {
+  date: string;
+  reason: string;
+  /** Failed sync attempts logged that day (any hour). */
+  attempts: number;
+  /** The latest few failures, Tbilisi "HH:MM" + error message. */
+  failures: { at: string; message: string }[];
+};
+
 export type DailyOfflineReport = {
   levels: DailyOfflineEntry[];
   /** Days on which the 5-minute sync ran inside the window. */
   coveredDays: string[];
+  uncheckedDays: UncheckedDay[];
   lastSyncAt?: string;
 };
+
+const UNCHECKED_FAILURES_SHOWN = 5;
 
 type OfflinePeriodRow = {
   device_id: string;
@@ -4010,6 +4035,22 @@ async function recordSyncRun(syncedAt: Date) {
     );
     await connection.query(
       "delete from biostar_sync_runs where synced_at < date_sub(now(), interval ? day)",
+      [SYNC_RUN_RETENTION_DAYS],
+    );
+  }).catch(() => null);
+}
+
+/** Logs a failed BioStar sync; the calendar shows it on the day it hit. */
+async function recordSyncFailure(failedAt: Date, error: unknown) {
+  const message =
+    error instanceof Error ? error.message : String(error ?? "unknown error");
+  await withConnection(async (connection) => {
+    await connection.query(
+      "insert into biostar_sync_failures (failed_at, message) values (?, ?)",
+      [toSqlDateTime(failedAt), message.slice(0, 2000)],
+    );
+    await connection.query(
+      "delete from biostar_sync_failures where failed_at < date_sub(now(), interval ? day)",
       [SYNC_RUN_RETENTION_DAYS],
     );
   }).catch(() => null);
@@ -4096,7 +4137,7 @@ export async function getDailyOfflineLevels({
   to?: string;
 } = {}): Promise<DailyOfflineReport> {
   if (isBuildTime()) {
-    return { levels: [], coveredDays: [] };
+    return { levels: [], coveredDays: [], uncheckedDays: [] };
   }
 
   await ensureOperationalSchema();
@@ -4136,8 +4177,30 @@ export async function getDailyOfflineLevels({
       "select date_format(max(synced_at), '%Y-%m-%d %H:%i:%s') as last_sync from biostar_sync_runs",
     ),
   ]);
+  const failureRows = await queryRows<{
+    day: string;
+    at: string;
+    message: string;
+  }>(
+    `
+      select
+        date_format(failed_at, '%Y-%m-%d') as day,
+        date_format(failed_at, '%H:%i') as at,
+        message
+      from biostar_sync_failures
+      where failed_at >= ? and failed_at < date_add(?, interval 1 day)
+      order by failed_at desc
+    `,
+    [fromKey, toKey],
+  ).catch(() => []);
 
   const coveredDays = (coverageRows ?? []).map((row) => row.day);
+  const uncheckedDays = findUncheckedDays(
+    fromKey,
+    toKey,
+    new Set(coveredDays),
+    failureRows ?? [],
+  );
   const lastSync = lastRows?.[0]?.last_sync ?? undefined;
   const nowMs = wallClockToMs(toSqlDateTime(new Date()));
   // A period still open is cut at the last sync, not "now": if the cron
@@ -4197,8 +4260,55 @@ export async function getDailyOfflineLevels({
   return {
     levels,
     coveredDays,
+    uncheckedDays,
     ...(lastSync ? { lastSyncAt: lastSync } : {}),
   };
+}
+
+/** Weekdays in the range (today only once its window has closed) on which
+ *  no sync succeeded inside 09–17, each with what the failure log says. */
+function findUncheckedDays(
+  fromKey: string,
+  toKey: string,
+  covered: Set<string>,
+  failures: { day: string; at: string; message: string }[],
+): UncheckedDay[] {
+  const todayKey = getTbilisiDateKey();
+  const todayOpen = getTbilisiHour() < OFFLINE_WINDOW_END_HOUR;
+  const failuresByDay = new Map<string, { at: string; message: string }[]>();
+  for (const row of failures) {
+    const list = failuresByDay.get(row.day) ?? [];
+    list.push({ at: row.at, message: row.message });
+    failuresByDay.set(row.day, list);
+  }
+
+  const days: UncheckedDay[] = [];
+  const cursor = new Date(`${fromKey}T00:00:00Z`);
+  const end = new Date(`${toKey}T00:00:00Z`);
+  while (cursor <= end) {
+    const date = cursor.toISOString().slice(0, 10);
+    const weekday = cursor.getUTCDay();
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+    if (
+      weekday === 0 ||
+      weekday === 6 ||
+      covered.has(date) ||
+      date > todayKey ||
+      (date === todayKey && todayOpen)
+    ) {
+      continue;
+    }
+    const logged = failuresByDay.get(date) ?? [];
+    days.push({
+      date,
+      reason: logged.length
+        ? `BioStar sync ვერ შესრულდა (${logged.length} ცდა): ${logged[0].message}`
+        : "შემოწმება არ გაშვებულა — cron არ გამოძახებულა (ლოგში შეცდომა არ არის)",
+      attempts: logged.length,
+      failures: logged.slice(0, UNCHECKED_FAILURES_SHOWN),
+    });
+  }
+  return days;
 }
 
 const DEFAULT_OFFLINE_PERIOD_RETENTION_DAYS = 365;

@@ -8836,6 +8836,38 @@ a.task-card2:hover .task-card2-title {
   cursor: help;
 }
 
+/* status chips pick what the threshold counts */
+.matrix-legend-toggle {
+  min-height: 26px;
+  padding: 2px 9px 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-muted);
+  font: inherit;
+  cursor: pointer;
+  opacity: 0.55;
+  transition:
+    opacity 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.matrix-legend-toggle:hover {
+  opacity: 0.85;
+}
+
+.matrix-legend-toggle.active {
+  border-color: var(--line-strong);
+  background: var(--surface-muted);
+  color: var(--ink);
+  font-weight: 700;
+  opacity: 1;
+}
+
+.matrix-legend-toggle .matrix-cell {
+  cursor: pointer;
+}
+
 .matrix-legend .matrix-cell {
   width: 12px;
   flex: 0 0 12px;
@@ -9064,10 +9096,9 @@ button.matrix-cell:hover {
   box-shadow: inset -2px 0 0 var(--line-strong);
 }
 
-.matrix-cell.no-data {
-  background: transparent;
-  box-shadow: inset 0 0 0 1px var(--panel-row-line);
-  color: var(--line-strong);
+/* outside the threshold window (last N working days): not counted, faded */
+.matrix-cell.out-window {
+  opacity: 0.4;
 }
 
 /* Offline calendar colours (rules: deploy/logic.md). Fixed values, not theme
@@ -9097,6 +9128,21 @@ button.matrix-cell:hover {
 
 .matrix-cell.missed {
   background: #dc2626;
+}
+
+/* no sync that day: counted as missed, a "!" says the status never came */
+.matrix-cell.unchecked {
+  position: relative;
+  background: #b91c1c;
+}
+
+.matrix-cell.unchecked::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  border-top: 7px solid #fde047;
+  border-left: 7px solid transparent;
 }
 
 .matrix-cell.pending {
@@ -11612,6 +11658,57 @@ html.wheel-locked body {
   margin: 0;
   color: var(--muted);
   font-size: 14px;
+}
+
+.day-detail-unchecked {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--tint-red);
+  color: var(--tint-red-ink);
+  font-size: 13px;
+}
+
+.day-detail-unchecked p {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+}
+
+.day-detail-unchecked p span {
+  display: grid;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+
+.day-detail-unchecked ol {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.day-detail-unchecked li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.day-detail-unchecked time {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.day-detail-unchecked code {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.day-detail-unchecked small {
+  opacity: 0.85;
 }
 
 .day-detail-note {

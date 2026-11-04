@@ -21,7 +21,6 @@ import {
 } from "@/lib/device-associations";
 import { withoutDeviceCodes } from "@/lib/display";
 import { getFirstAllowedPath } from "@/lib/navigation";
-import { computeBlackoutStats } from "@/lib/offline-day";
 import {
   getDailyOfflineLevels,
   getDevices,
@@ -137,17 +136,8 @@ export default async function DeviceDetailsPage({
   const deviceMap = new Map(allDevices.map((item) => [item.id, item]));
   const userMap = new Map(users.map((item) => [item.id, item]));
 
-  // Same rows as the monitoring calendar: the 20% "no data" rule counts
-  // every tracked device, then only this device's days go to the page.
+  // Same rows as the monitoring calendar: only this device's days.
   const inOfflineCalendar = !device.deletedAt && !device.isExcluded;
-  const blackouts = computeBlackoutStats(
-    dailyLevels.levels,
-    new Set(
-      allDevices
-        .filter((item) => !item.deletedAt && !item.isExcluded)
-        .map((item) => item.id),
-    ),
-  );
   const deviceLevels = dailyLevels.levels.filter(
     (entry) => entry.deviceId === device.id,
   );
@@ -357,8 +347,7 @@ export default async function DeviceDetailsPage({
           <DeviceOfflineCalendar
             deviceName={device.name}
             levels={deviceLevels}
-            coveredDays={dailyLevels.coveredDays}
-            blackouts={[...blackouts.entries()]}
+            uncheckedDays={dailyLevels.uncheckedDays}
           />
         ) : (
           <p className="muted">

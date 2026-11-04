@@ -28,13 +28,13 @@ import {
 import { recordAudit } from "@/lib/client-audit";
 import { getGardenCode } from "@/lib/device-options";
 import {
-  computeBlackoutStats,
   cellStateFor,
-  noDataNoteFor,
+  lastWorkingDays,
   type CellState,
 } from "@/lib/offline-day";
 import type {
   DailyOfflineEntry,
+  DailyOfflineLevel,
   DailyOfflineReport,
 } from "@/lib/repositories";
 import {
@@ -43,7 +43,8 @@ import {
   formatCellDate,
   formatDate,
   legendItems,
-  problemStates,
+  levelLabels,
+  levelOrder,
   stateLabels,
 } from "@/components/offline-records/offline-day";
 import type {
@@ -90,7 +91,14 @@ type MatrixPreference = {
   sort: MatrixSort;
   /** Show only the devices over the threshold. */
   onlyOver?: boolean;
+  /** Statuses the threshold counts (legend chips). */
+  states?: DailyOfflineLevel[];
 };
+
+/** What the threshold counts until someone picks otherwise. */
+const defaultThresholdStates: DailyOfflineLevel[] = ["missed", "late", "unstable"];
+/** The levels cover 90 calendar days back: about 64 working days. */
+const MAX_THRESHOLD_DAYS = 60;
 
 const matrixSortLabels: Record<MatrixSort, string> = {
   custom: "ჩემი რიგი",
@@ -142,6 +150,9 @@ export function OfflineRecordsDashboard({
   const [matrixSort, setMatrixSort] = useState<MatrixSort>("offline-desc");
   const [matrixOrder, setMatrixOrder] = useState<string[]>([]);
   const [matrixOnlyOver, setMatrixOnlyOver] = useState(false);
+  const [thresholdStates, setThresholdStates] = useState<DailyOfflineLevel[]>(
+    defaultThresholdStates,
+  );
   const dragIndexRef = useRef<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [selectedCell, setSelectedCell] = useState<{
@@ -280,25 +291,10 @@ export function OfflineRecordsDashboard({
     });
     return map;
   }, [dailyLevels]);
-  const coveredDays = useMemo(
-    () => new Set(dailyLevels.coveredDays),
+  /** Days no sync succeeded: missed for every device, with the reason. */
+  const uncheckedDays = useMemo(
+    () => new Map(dailyLevels.uncheckedDays.map((day) => [day.date, day])),
     [dailyLevels],
-  );
-
-  /** Per day: under 20% of ALL added devices online → nobody is graded. */
-  const blackoutStats = useMemo(
-    () => computeBlackoutStats(dailyLevels.levels, activeDeviceIds),
-    [activeDeviceIds, dailyLevels],
-  );
-  const blackoutDays = useMemo(
-    () => new Set(blackoutStats.keys()),
-    [blackoutStats],
-  );
-
-  /** Why a day has no data, with the numbers behind the 20% rule. */
-  const noDataNote = useCallback(
-    (date: string) => noDataNoteFor(blackoutStats.get(date)),
-    [blackoutStats],
   );
 
   const offlineByDay = useMemo(() => {
@@ -317,10 +313,9 @@ export function OfflineRecordsDashboard({
       cellStateFor(
         date,
         levelByDeviceDay.get(`${deviceId}|${date}`),
-        blackoutDays,
-        coveredDays,
+        uncheckedDays,
       ),
-    [blackoutDays, coveredDays, levelByDeviceDay],
+    [levelByDeviceDay, uncheckedDays],
   );
 
   /** One column per calendar day in the chosen range — 30 days, 30 cells —
@@ -360,37 +355,64 @@ export function OfflineRecordsDashboard({
     return days;
   }, [fromDate, offlineByDay, toDate]);
 
-  /** Problem days per device in the range: red, pink or purple. */
-  const problemDayCounts = useMemo(() => {
-    const candidates = new Set<string>();
-    dailyLevels.levels.forEach((entry) => candidates.add(entry.deviceId));
-    offlineCounts.forEach((_, deviceId) => candidates.add(deviceId));
-    const counts = new Map<string, number>();
-    candidates.forEach((deviceId) => {
-      if (!activeDeviceIds.has(deviceId)) {
-        return;
-      }
-      const count = matrixDays.filter((column) =>
-        problemStates.has(getCellState(deviceId, column.date)),
-      ).length;
-      if (count) {
-        counts.set(deviceId, count);
-      }
-    });
-    return counts;
-  }, [activeDeviceIds, dailyLevels, getCellState, matrixDays, offlineCounts]);
+  /** The threshold window: the last N working days back from today.
+   *  Before 17:00 today is still open, so the window starts yesterday. */
+  const thresholdDays = useMemo(() => {
+    // Tbilisi wall clock on both server and browser, so the counts match.
+    const [today, hour] = new Intl.DateTimeFormat("sv-SE", {
+      timeZone: "Asia/Tbilisi",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      hourCycle: "h23",
+    })
+      .format(new Date())
+      .split(" ");
+    const start = new Date(`${today}T00:00:00Z`);
+    if (Number(hour) < 17) {
+      start.setUTCDate(start.getUTCDate() - 1);
+    }
+    return lastWorkingDays(getDateKey(start), threshold);
+  }, [threshold]);
+  const thresholdDaySet = useMemo(
+    () => new Set(thresholdDays),
+    [thresholdDays],
+  );
 
-  /** Threshold: at least this many problem days in the chosen range — the
-   *  same number shown beside each row. */
-  const overThresholdIds = useMemo(() => {
-    const ids = new Set<string>();
-    problemDayCounts.forEach((count, deviceId) => {
-      if (count >= threshold) {
-        ids.add(deviceId);
+  /** Per device: how often the picked statuses hit inside the window, by
+   *  status, plus the newest hit (ties sort the more recent first). */
+  const thresholdHits = useMemo(() => {
+    const picked = new Set<CellState>(thresholdStates);
+    const hits = new Map<
+      string,
+      { count: number; latest: string; byState: Map<CellState, number> }
+    >();
+    devices.forEach((device) => {
+      let count = 0;
+      let latest = "";
+      const byState = new Map<CellState, number>();
+      thresholdDays.forEach((date) => {
+        const state = getCellState(device.id, date);
+        if (!picked.has(state)) {
+          return;
+        }
+        count += 1;
+        latest = latest || date;
+        byState.set(state, (byState.get(state) ?? 0) + 1);
+      });
+      if (count) {
+        hits.set(device.id, { count, latest, byState });
       }
     });
-    return ids;
-  }, [problemDayCounts, threshold]);
+    return hits;
+  }, [devices, getCellState, thresholdDays, thresholdStates]);
+
+  /** Devices the picked statuses hit at least once in the window. */
+  const overThresholdIds = useMemo(
+    () => new Set(thresholdHits.keys()),
+    [thresholdHits],
+  );
 
   /** Rows of the calendar: every device, narrowed by the garden search —
    *  digits match the start of the garden number, anything else the name. */
@@ -410,7 +432,8 @@ export function OfflineRecordsDashboard({
         deviceId: device.id,
         name: device.name,
         status: device.status,
-        count: problemDayCounts.get(device.id) ?? 0,
+        count: thresholdHits.get(device.id)?.count ?? 0,
+        latest: thresholdHits.get(device.id)?.latest ?? "",
       }));
 
     if (matrixSort === "custom" && matrixOrder.length) {
@@ -425,13 +448,13 @@ export function OfflineRecordsDashboard({
     return rows.sort((a, b) => {
       switch (matrixSort) {
         case "offline-asc":
-          return a.count - b.count;
+          return a.count - b.count || a.latest.localeCompare(b.latest);
         case "name-asc":
           return a.name.localeCompare(b.name, "ka");
         case "name-desc":
           return b.name.localeCompare(a.name, "ka");
         default:
-          return b.count - a.count;
+          return b.count - a.count || b.latest.localeCompare(a.latest);
       }
     });
   }, [
@@ -441,7 +464,7 @@ export function OfflineRecordsDashboard({
     matrixQuery,
     matrixSort,
     overThresholdIds,
-    problemDayCounts,
+    thresholdHits,
   ]);
 
   useEffect(() => {
@@ -459,6 +482,12 @@ export function OfflineRecordsDashboard({
       }
       if (typeof stored.onlyOver === "boolean") {
         setMatrixOnlyOver(stored.onlyOver);
+      }
+      const states = (stored.states ?? []).filter((state) =>
+        levelOrder.includes(state),
+      );
+      if (states.length) {
+        setThresholdStates(states);
       }
     } catch {
       // localStorage may be unavailable in restricted contexts.
@@ -484,13 +513,42 @@ export function OfflineRecordsDashboard({
 
   function changeMatrixSort(next: MatrixSort) {
     setMatrixSort(next);
-    persistMatrix({ order: matrixOrder, sort: next, onlyOver: matrixOnlyOver });
+    persistMatrix({
+      order: matrixOrder,
+      sort: next,
+      onlyOver: matrixOnlyOver,
+      states: thresholdStates,
+    });
   }
 
   function toggleOnlyOver() {
     const next = !matrixOnlyOver;
     setMatrixOnlyOver(next);
-    persistMatrix({ order: matrixOrder, sort: matrixSort, onlyOver: next });
+    persistMatrix({
+      order: matrixOrder,
+      sort: matrixSort,
+      onlyOver: next,
+      states: thresholdStates,
+    });
+  }
+
+  /** A legend chip: count this status or not. The last one stays on. */
+  function toggleThresholdState(state: DailyOfflineLevel) {
+    const next = thresholdStates.includes(state)
+      ? thresholdStates.filter((item) => item !== state)
+      : levelOrder.filter(
+          (item) => item === state || thresholdStates.includes(item),
+        );
+    if (!next.length) {
+      return;
+    }
+    setThresholdStates(next);
+    persistMatrix({
+      order: matrixOrder,
+      sort: matrixSort,
+      onlyOver: matrixOnlyOver,
+      states: next,
+    });
   }
 
   /** Dropping a row rewrites the personal order and switches to it. */
@@ -509,7 +567,12 @@ export function OfflineRecordsDashboard({
 
     setMatrixOrder(ids);
     setMatrixSort("custom");
-    persistMatrix({ order: ids, sort: "custom", onlyOver: matrixOnlyOver });
+    persistMatrix({
+      order: ids,
+      sort: "custom",
+      onlyOver: matrixOnlyOver,
+      states: thresholdStates,
+    });
   }
 
   function toggleSelectedDevice(deviceId: string) {
@@ -860,7 +923,7 @@ export function OfflineRecordsDashboard({
         <div className="kpi-cell">
           <span>
             <i className="status-dot offline" />
-            ზღვარს ზემოთ
+            ზღვარში დაფიქსირდა
           </span>
           <div className="kpi-value">
             <strong className="over">{overThresholdIds.size}</strong>
@@ -966,12 +1029,18 @@ export function OfflineRecordsDashboard({
               <input
                 type="number"
                 min={1}
+                max={MAX_THRESHOLD_DAYS}
                 value={threshold}
                 onChange={(event) =>
-                  setThreshold(Math.max(1, Number(event.target.value) || 1))
+                  setThreshold(
+                    Math.min(
+                      MAX_THRESHOLD_DAYS,
+                      Math.max(1, Number(event.target.value) || 1),
+                    ),
+                  )
                 }
               />
-              <span>დღე / {matrixDays.length}-დან</span>
+              <span>ბოლო სამუშაო დღე</span>
             </label>
             <div className="preset-switch">
               <button
@@ -979,18 +1048,41 @@ export function OfflineRecordsDashboard({
                 className={matrixOnlyOver ? "active" : ""}
                 onClick={toggleOnlyOver}
                 aria-pressed={matrixOnlyOver}
-                title="მხოლოდ ის მოწყობილობები, რომლებმაც არჩეულ პერიოდში ზღვარს გადააჭარბა"
+                title={`მხოლოდ ის მოწყობილობები, რომლებთანაც ბოლო ${threshold} სამუშაო დღეში მონიშნული სტატუსი ერთხელ მაინც დაფიქსირდა`}
               >
-                მხოლოდ ზღვარს ზემოთ ({overThresholdIds.size})
+                მხოლოდ დაფიქსირებულები ({overThresholdIds.size})
               </button>
             </div>
-            <span className="matrix-legend">
-              {legendItems.map((item) => (
-                <span key={item.state} className="matrix-legend-item" title={item.hint}>
-                  <i className={`matrix-cell ${item.state}`} />
-                  {stateLabels[item.state]}
-                </span>
-              ))}
+            <span
+              className="matrix-legend"
+              role="group"
+              aria-label="რომელი სტატუსები ითვლება ზღვარში"
+            >
+              {legendItems.map((item) => {
+                const level = levelOrder.find((value) => value === item.state);
+                if (!level) {
+                  return (
+                    <span key={item.state} className="matrix-legend-item" title={item.hint}>
+                      <i className={`matrix-cell ${item.state}`} />
+                      {stateLabels[item.state]}
+                    </span>
+                  );
+                }
+                const active = thresholdStates.includes(level);
+                return (
+                  <button
+                    key={item.state}
+                    type="button"
+                    className={`matrix-legend-item matrix-legend-toggle${active ? " active" : ""}`}
+                    title={`${item.hint} — ${active ? "ითვლება ზღვარში (დააჭირე მოსახსნელად)" : "არ ითვლება (დააჭირე მოსანიშნად)"}`}
+                    aria-pressed={active}
+                    onClick={() => toggleThresholdState(level)}
+                  >
+                    <i className={`matrix-cell ${item.state}`} />
+                    {stateLabels[item.state]}
+                  </button>
+                );
+              })}
             </span>
           </div>
         </header>
@@ -1051,7 +1143,10 @@ export function OfflineRecordsDashboard({
                         </span>
                         <span
                           className={`matrix-total${over ? " over" : ""}`}
-                          title={`${row.count} დღე offline`}
+                          title={describeHits(
+                            threshold,
+                            thresholdHits.get(row.deviceId)?.byState,
+                          )}
                         >
                           {row.count}
                         </span>
@@ -1073,12 +1168,12 @@ export function OfflineRecordsDashboard({
                             <button
                               key={column.date}
                               type="button"
-                              className={`matrix-cell ${state}${column.isMonthStart ? " month-start" : ""}${picked ? " picked" : ""}`}
+                              className={`matrix-cell ${state}${uncheckedDays.has(column.date) ? " unchecked" : ""}${thresholdDaySet.has(column.date) ? "" : " out-window"}${column.isMonthStart ? " month-start" : ""}${picked ? " picked" : ""}`}
                               title={describeDay(
                                 column.date,
                                 state,
                                 graded,
-                                noDataNote(column.date),
+                                uncheckedDays.get(column.date),
                               )}
                               onClick={() =>
                                 setSelectedCell(
@@ -1142,7 +1237,7 @@ export function OfflineRecordsDashboard({
         ) : (
           <p className="matrix-empty">
             {matrixOnlyOver && !matrixQuery.trim()
-              ? "ამ პერიოდში ზღვარს არცერთი მოწყობილობა არ გადაცდენია."
+              ? `ბოლო ${threshold} სამუშაო დღეში მონიშნული სტატუსი არცერთ მოწყობილობას არ დაფიქსირებია.`
               : "მოწყობილობა ვერ მოიძებნა."}
           </p>
         )}
@@ -1382,13 +1477,27 @@ export function OfflineRecordsDashboard({
           graded={levelByDeviceDay.get(
             `${selectedCell.deviceId}|${selectedCell.date}`,
           )}
-          noDataNote={noDataNote(selectedCell.date)}
+          unchecked={uncheckedDays.get(selectedCell.date)}
           onClose={() => setSelectedCell(null)}
         />
       ) : null}
       {confirmationDialog}
     </div>
   );
+}
+
+/** Row number tooltip: "ბოლო 10 სამუშაო დღეში: 4 (გათიშული 3, …)". */
+function describeHits(
+  days: number,
+  byState: Map<CellState, number> | undefined,
+) {
+  const parts = levelOrder
+    .filter((level) => byState?.get(level))
+    .map((level) => `${levelLabels[level]} ${byState?.get(level)}`);
+  const total = parts.length
+    ? [...(byState?.values() ?? [])].reduce((sum, value) => sum + value, 0)
+    : 0;
+  return `ბოლო ${days} სამუშაო დღეში: ${total}${parts.length ? ` (${parts.join(", ")})` : ""}`;
 }
 
 function MonitoringHistoryModal({
