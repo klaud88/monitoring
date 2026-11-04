@@ -65,7 +65,8 @@ export function DeviceOfflineCalendar({
         ...day,
         graded,
         state: cellStateFor(day.date, graded, uncheckedMap),
-        unchecked: uncheckedMap.get(day.date),
+        // Only an ungraded day is "unchecked": drops prove a check ran.
+        unchecked: graded ? undefined : uncheckedMap.get(day.date),
       };
     });
   }, [levelByDay, rangeDays, uncheckedMap]);

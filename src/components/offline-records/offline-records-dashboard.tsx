@@ -1161,6 +1161,10 @@ export function OfflineRecordsDashboard({
                             `${row.deviceId}|${column.date}`,
                           );
                           const state = getCellState(row.deviceId, column.date);
+                          // Only an ungraded day is "unchecked": drops prove a check ran.
+                          const unchecked = graded
+                            ? undefined
+                            : uncheckedDays.get(column.date);
                           const picked =
                             selectedCell?.deviceId === row.deviceId &&
                             selectedCell?.date === column.date;
@@ -1168,12 +1172,12 @@ export function OfflineRecordsDashboard({
                             <button
                               key={column.date}
                               type="button"
-                              className={`matrix-cell ${state}${uncheckedDays.has(column.date) ? " unchecked" : ""}${thresholdDaySet.has(column.date) ? "" : " out-window"}${column.isMonthStart ? " month-start" : ""}${picked ? " picked" : ""}`}
+                              className={`matrix-cell ${state}${unchecked ? " unchecked" : ""}${thresholdDaySet.has(column.date) ? "" : " out-window"}${column.isMonthStart ? " month-start" : ""}${picked ? " picked" : ""}`}
                               title={describeDay(
                                 column.date,
                                 state,
                                 graded,
-                                uncheckedDays.get(column.date),
+                                unchecked,
                               )}
                               onClick={() =>
                                 setSelectedCell(
@@ -1477,7 +1481,11 @@ export function OfflineRecordsDashboard({
           graded={levelByDeviceDay.get(
             `${selectedCell.deviceId}|${selectedCell.date}`,
           )}
-          unchecked={uncheckedDays.get(selectedCell.date)}
+          unchecked={
+            levelByDeviceDay.has(`${selectedCell.deviceId}|${selectedCell.date}`)
+              ? undefined
+              : uncheckedDays.get(selectedCell.date)
+          }
           onClose={() => setSelectedCell(null)}
         />
       ) : null}

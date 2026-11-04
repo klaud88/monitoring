@@ -16,8 +16,8 @@ export function isWeekend(date: string) {
   return day === 0 || day === 6;
 }
 
-/** A device's day: weekend → today still open → no sync that day (missed,
- *  with the logged reason) → graded → otherwise clean. */
+/** A device's day: weekend → today still open → graded from its drops →
+ *  no sign of a check that day (missed, with the logged reason) → clean. */
 export function cellStateFor(
   date: string,
   graded: DailyOfflineEntry | undefined,
@@ -29,10 +29,10 @@ export function cellStateFor(
   if (graded?.pending) {
     return "pending";
   }
-  if (uncheckedDays.has(date)) {
-    return "missed";
+  if (graded) {
+    return graded.level;
   }
-  return graded ? graded.level : "ok";
+  return uncheckedDays.has(date) ? "missed" : "ok";
 }
 
 /** The last `count` working days, newest first, ending today. Today joins

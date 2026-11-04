@@ -4195,10 +4195,26 @@ export async function getDailyOfflineLevels({
   ).catch(() => []);
 
   const coveredDays = (coverageRows ?? []).map((row) => row.day);
+  // A drop that began or ended inside a day's window was seen by a sync, so
+  // that day was checked even without a biostar_sync_runs row (the table is
+  // newer than the periods).
+  const checkedDays = new Set(coveredDays);
+  for (const row of rows ?? []) {
+    for (const edge of [row.offline_at, row.online_at]) {
+      const hour = Number(edge?.slice(11, 13));
+      if (
+        edge &&
+        hour >= OFFLINE_WINDOW_START_HOUR &&
+        hour < OFFLINE_WINDOW_END_HOUR
+      ) {
+        checkedDays.add(edge.slice(0, 10));
+      }
+    }
+  }
   const uncheckedDays = findUncheckedDays(
     fromKey,
     toKey,
-    new Set(coveredDays),
+    checkedDays,
     failureRows ?? [],
   );
   const lastSync = lastRows?.[0]?.last_sync ?? undefined;
@@ -4265,8 +4281,9 @@ export async function getDailyOfflineLevels({
   };
 }
 
-/** Weekdays in the range (today only once its window has closed) on which
- *  no sync succeeded inside 09–17, each with what the failure log says. */
+/** Weekdays in the range (today only once its window has closed) with no
+ *  sign of a check inside 09–17 — no successful sync and no drop opened or
+ *  closed — each with what the failure log says. */
 function findUncheckedDays(
   fromKey: string,
   toKey: string,
