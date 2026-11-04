@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState, type CSSProperties } from "react";
 import {
   Edit3,
@@ -1290,12 +1291,13 @@ export function RegionManager({
                         className={`region-device-row${device.deletedAt ? " deleted" : ""}`}
                       >
                         <div>
-                          <span
+                          <Link
                             className={`garden-device-chip ${device.status}`}
-                            title={deviceStatusTitles[device.status]}
+                            href={`/devices/${device.id}?from=devices`}
+                            title={`${deviceStatusTitles[device.status]} — მოწყობილობის გახსნა`}
                           >
                             {device.name}
-                          </span>
+                          </Link>
                         </div>
                         <div className="device-exclusion-cell">
                           <button

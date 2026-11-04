@@ -27,15 +27,25 @@ import {
 } from "@/components/common/record-state-select";
 import { recordAudit } from "@/lib/client-audit";
 import { getGardenCode } from "@/lib/device-options";
+import {
+  computeBlackoutStats,
+  cellStateFor,
+  noDataNoteFor,
+  type CellState,
+} from "@/lib/offline-day";
 import type {
   DailyOfflineEntry,
-  DailyOfflineLevel,
   DailyOfflineReport,
 } from "@/lib/repositories";
-
-/* Mirrors OFFLINE_WINDOW_* in repositories.ts (a client file can't import it). */
-const OFFLINE_WINDOW_START_HOUR = 9;
-const OFFLINE_WINDOW_END_HOUR = 17;
+import {
+  DayDetailModal,
+  describeDay,
+  formatCellDate,
+  formatDate,
+  legendItems,
+  problemStates,
+  stateLabels,
+} from "@/components/offline-records/offline-day";
 import type {
   Device,
   MonitoredDevice,
@@ -66,49 +76,6 @@ type Props = {
     alerts: boolean;
   };
 };
-
-const levelLabels: Record<DailyOfflineLevel, string> = {
-  missed: "გათიშული",
-  late: "განახლებული",
-  unstable: "არასტაბილური",
-  ok: "სტაბილური",
-};
-
-/* One cell of the device × day calendar (rules: deploy/logic.md). */
-type CellState = DailyOfflineLevel | "pending" | "weekend" | "no-data";
-
-const stateLabels: Record<CellState, string> = {
-  ...levelLabels,
-  pending: "მიმდინარე",
-  weekend: "შაბათ-კვირა",
-  "no-data": "მონაცემი არ არის",
-};
-
-/** Days that count against a device in the calendar rows and threshold. */
-const problemStates = new Set<CellState>(["missed", "late", "unstable"]);
-
-/** A day on which fewer devices than this share got online is the link's
- *  fault (BioStar unreachable), not the gardens': no data for anyone. */
-const BLACKOUT_ONLINE_SHARE = 0.2;
-
-/** Above the calendar: every colour and what it means (deploy/logic.md). */
-const legendItems: { state: CellState; hint: string }[] = [
-  { state: "ok", hint: "მხოლოდ მოკლე (30 წთ-მდე) გათიშვები" },
-  { state: "unstable", hint: "09–17 შორის 3+ ცალკე გათიშვა" },
-  { state: "late", hint: "ერთხელ მაინც 30+ წთ გათიშული, დანარჩენ დროს ონლაინ" },
-  { state: "missed", hint: "09–17 შორის 20 წთ უწყვეტად ონლაინ არ ყოფილა" },
-  { state: "pending", hint: "დღეს: ინფორმაცია გროვდება, სტატუსი 17:00-ზე მიენიჭება" },
-  { state: "weekend", hint: "არ ფასდება" },
-  {
-    state: "no-data",
-    hint: "კავშირი ვერ დამყარდა: ყველა დამატებული მოწყობილობის (არა ერთი ბაღის) 20%-ზე ნაკლები იყო ონლაინ, ან შემოწმება არ მუშაობდა",
-  },
-];
-
-function isWeekend(date: string) {
-  const day = new Date(`${date}T00:00:00Z`).getUTCDay();
-  return day === 0 || day === 6;
-}
 
 type DeviceSortMode = "offline" | "online" | "monitoring" | "az" | "za";
 type MatrixSort =
@@ -314,29 +281,11 @@ export function OfflineRecordsDashboard({
     [dailyLevels],
   );
 
-  /** Per day: how many of ALL added devices (every garden, excluded ones
-   *  aside) got online. Under 20% means the check could not reach them, so
-   *  nobody is graded that day. */
-  const blackoutStats = useMemo(() => {
-    const missedByDay = new Map<string, number>();
-    dailyLevels.levels.forEach((entry) => {
-      if (
-        entry.level === "missed" &&
-        !entry.pending &&
-        activeDeviceIds.has(entry.deviceId)
-      ) {
-        missedByDay.set(entry.date, (missedByDay.get(entry.date) ?? 0) + 1);
-      }
-    });
-    const stats = new Map<string, { online: number; total: number }>();
-    const total = activeDeviceIds.size;
-    missedByDay.forEach((missed, date) => {
-      if (total && (total - missed) / total < BLACKOUT_ONLINE_SHARE) {
-        stats.set(date, { online: total - missed, total });
-      }
-    });
-    return stats;
-  }, [activeDeviceIds, dailyLevels]);
+  /** Per day: under 20% of ALL added devices online → nobody is graded. */
+  const blackoutStats = useMemo(
+    () => computeBlackoutStats(dailyLevels.levels, activeDeviceIds),
+    [activeDeviceIds, dailyLevels],
+  );
   const blackoutDays = useMemo(
     () => new Set(blackoutStats.keys()),
     [blackoutStats],
@@ -344,14 +293,7 @@ export function OfflineRecordsDashboard({
 
   /** Why a day has no data, with the numbers behind the 20% rule. */
   const noDataNote = useCallback(
-    (date: string) => {
-      const stats = blackoutStats.get(date);
-      if (!stats) {
-        return "ამ დღეს შემოწმება არ მუშაობდა";
-      }
-      const share = Math.round((stats.online / stats.total) * 100);
-      return `კავშირი ვერ დამყარდა — ყველა მოწყობილობიდან (${stats.total}) ონლაინ იყო მხოლოდ ${stats.online} (${share}%)`;
-    },
+    (date: string) => noDataNoteFor(blackoutStats.get(date)),
     [blackoutStats],
   );
 
@@ -366,26 +308,14 @@ export function OfflineRecordsDashboard({
     return map;
   }, [filteredSnapshots]);
 
-  /** A device's day: weekend → today still open → link down for nearly
-   *  everyone → graded → checked and clean → no data. Days before the
-   *  5-minute check (only the 09:00 snapshot) are no data too. */
   const getCellState = useCallback(
-    (deviceId: string, date: string): CellState => {
-      const graded = levelByDeviceDay.get(`${deviceId}|${date}`);
-      if (isWeekend(date)) {
-        return "weekend";
-      }
-      if (graded?.pending) {
-        return "pending";
-      }
-      if (blackoutDays.has(date)) {
-        return "no-data";
-      }
-      if (graded) {
-        return graded.level;
-      }
-      return coveredDays.has(date) ? "ok" : "no-data";
-    },
+    (deviceId: string, date: string): CellState =>
+      cellStateFor(
+        date,
+        levelByDeviceDay.get(`${deviceId}|${date}`),
+        blackoutDays,
+        coveredDays,
+      ),
     [blackoutDays, coveredDays, levelByDeviceDay],
   );
 
@@ -1375,187 +1305,6 @@ export function OfflineRecordsDashboard({
   );
 }
 
-const WINDOW_MINUTES =
-  (OFFLINE_WINDOW_END_HOUR - OFFLINE_WINDOW_START_HOUR) * 60;
-
-function clockToWindowMinutes(value: string) {
-  const [hours, minutes] = value.split(":").map(Number);
-  return (hours - OFFLINE_WINDOW_START_HOUR) * 60 + minutes;
-}
-
-/** Click on a calendar cell: that day's drops, each with its length, on a
- *  09:00–17:00 strip. Anything not listed was online. */
-function DayDetailModal({
-  deviceName,
-  date,
-  state,
-  graded,
-  noDataNote,
-  onClose,
-}: {
-  deviceName: string;
-  date: string;
-  state: CellState;
-  graded: DailyOfflineEntry | undefined;
-  /** Why the day has no data (check down, or under 20% of all devices online). */
-  noDataNote: string;
-  onClose: () => void;
-}) {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  const drops = graded?.drops ?? [];
-  const judged = graded?.windowMinutes ?? WINDOW_MINUTES;
-  const offline = graded?.minutes ?? 0;
-  const known = state !== "no-data";
-  const hours = Array.from(
-    { length: OFFLINE_WINDOW_END_HOUR - OFFLINE_WINDOW_START_HOUR + 1 },
-    (_, index) => OFFLINE_WINDOW_START_HOUR + index,
-  ).filter((hour) => hour % 2 === 1);
-
-  return (
-    <div className="day-detail-backdrop" role="presentation" onClick={onClose}>
-      <section
-        className="day-detail-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="day-detail-title"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header>
-          <div>
-            <p className="eyebrow">{formatDate(date)}</p>
-            <h2 id="day-detail-title">{deviceName}</h2>
-            <span className="day-detail-state">
-              <i className={`matrix-cell ${state}`} />
-              {stateLabels[state]}
-            </span>
-          </div>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="დახურვა"
-            onClick={onClose}
-          >
-            <X size={18} />
-          </button>
-        </header>
-
-        {known ? (
-          <>
-            <div className="day-detail-summary">
-              <div>
-                <span>გათიშული</span>
-                <strong className="off">{formatMinutes(offline)}</strong>
-              </div>
-              <div>
-                <span>ონლაინ</span>
-                <strong className="on">{formatMinutes(Math.max(0, judged - offline))}</strong>
-              </div>
-              <div>
-                <span>გათიშვა</span>
-                <strong>{drops.length}</strong>
-              </div>
-            </div>
-
-            <div className="day-detail-strip" aria-hidden="true">
-              <div className="day-detail-bar">
-                {judged < WINDOW_MINUTES ? (
-                  <span
-                    className="day-detail-future"
-                    style={{ left: `${(judged / WINDOW_MINUTES) * 100}%` }}
-                  />
-                ) : null}
-                {drops.map((drop) => {
-                  const start = clockToWindowMinutes(drop.start);
-                  return (
-                    <span
-                      key={drop.start}
-                      className="day-detail-drop"
-                      style={{
-                        left: `${(start / WINDOW_MINUTES) * 100}%`,
-                        width: `${Math.max(0.6, (drop.minutes / WINDOW_MINUTES) * 100)}%`,
-                      }}
-                    />
-                  );
-                })}
-              </div>
-              <div className="day-detail-hours">
-                {hours.map((hour) => (
-                  <span
-                    key={hour}
-                    style={{
-                      left: `${(((hour - OFFLINE_WINDOW_START_HOUR) * 60) / WINDOW_MINUTES) * 100}%`,
-                    }}
-                  >
-                    {String(hour).padStart(2, "0")}:00
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            {drops.length ? (
-              <ol className="day-detail-list">
-                {drops.map((drop, index) => (
-                  <li key={drop.start}>
-                    <span className="day-detail-index">{index + 1}</span>
-                    <span className="day-detail-time">
-                      <WifiOff size={15} />
-                      <strong>
-                        {drop.start} – {drop.end}
-                      </strong>
-                      {drop.fromBefore || drop.ongoing ? (
-                        <em>
-                          {[
-                            drop.fromBefore ? "09:00-მდე დაიწყო" : "",
-                            drop.ongoing
-                              ? judged < WINDOW_MINUTES
-                                ? "ჯერ გათიშულია"
-                                : "17:00-ის მერეც გრძელდებოდა"
-                              : "",
-                          ]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </em>
-                      ) : null}
-                    </span>
-                    <span className="day-detail-length">{formatMinutes(drop.minutes)}</span>
-                  </li>
-                ))}
-              </ol>
-            ) : (
-              <p className="day-detail-empty">
-                <CheckCircle2 size={18} />
-                09:00–17:00 შორის გათიშვა არ ყოფილა.
-              </p>
-            )}
-            <p className="day-detail-note">
-              {state === "weekend"
-                ? "შაბათ-კვირა არ ფასდება. "
-                : state === "pending"
-                  ? "დღე ჯერ არ დასრულებულა: სტატუსი 17:00-ზე მიენიჭება. "
-                  : ""}
-              დანარჩენ დროს 09:00–17:00 შორის მოწყობილობა ონლაინ იყო.
-            </p>
-          </>
-        ) : (
-          <p className="day-detail-empty">
-            <XCircle size={18} />
-            მონაცემი არ არის: {noDataNote}.
-          </p>
-        )}
-      </section>
-    </div>
-  );
-}
-
 function MonitoringHistoryModal({
   deviceName,
   record,
@@ -1695,61 +1444,8 @@ function addDays(value: Date, days: number) {
   return next;
 }
 
-function describeDay(
-  date: string,
-  state: CellState,
-  graded: DailyOfflineEntry | undefined,
-  noDataNote = "კავშირი ვერ დამყარდა",
-) {
-  const day = formatDate(date);
-  // One line per drop: "10:16–17:00 (6სთ 44წთ)".
-  const drops = graded?.drops.length
-    ? "\nგათიშული:\n" +
-      graded.drops
-        .map((drop) => `${drop.start}–${drop.end} (${formatMinutes(drop.minutes)})`)
-        .join("\n")
-    : "";
-
-  switch (state) {
-    case "weekend":
-      return `${day} — შაბათ-კვირა, არ ფასდება${drops}`;
-    case "pending":
-      return `${day} — მიმდინარე: ინფორმაცია გროვდება, სტატუსი 17:00-ზე${drops}`;
-    case "missed":
-      return `${day} — გათიშული: 20 წთ უწყვეტად ონლაინ არ ყოფილა${drops}`;
-    case "late":
-      return `${day} — განახლებული: გაითიშა და ისევ ჩაირთო${drops}`;
-    case "unstable":
-      return `${day} — არასტაბილური: ${graded?.events ?? 0} გათიშვა${drops}`;
-    case "no-data":
-      return `${day} — მონაცემი არ არის: ${noDataNote}`;
-    default:
-      return `${day} — ${levelLabels.ok}${drops}`;
-  }
-}
-
-function formatMinutes(total: number) {
-  const hours = Math.floor(total / 60);
-  const minutes = Math.round(total % 60);
-  if (!hours) {
-    return `${minutes} წთ`;
-  }
-  return minutes ? `${hours}სთ ${minutes}წთ` : `${hours}სთ`;
-}
-
-function formatCellDate(value: string) {
-  const match = value.match(/^\d{4}-(\d{2})-(\d{2})$/);
-  return match ? `${match[2]}.${match[1]}` : value;
-}
-
 function getDateKey(value: Date) {
   return value.toISOString().slice(0, 10);
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat("ka-GE", {
-    dateStyle: "medium",
-  }).format(new Date(`${value}T00:00:00+04:00`));
 }
 
 function formatMonitoringDateTime(value: string) {

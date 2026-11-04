@@ -3945,6 +3945,20 @@ select.garden-region-pill {
   color: var(--tint-amber-ink);
 }
 
+/* the device list's chip opens that device's page */
+a.garden-device-chip {
+  text-decoration: none;
+  cursor: pointer;
+  transition: filter 0.12s ease, box-shadow 0.12s ease;
+}
+
+a.garden-device-chip:hover,
+a.garden-device-chip:focus-visible {
+  filter: brightness(0.95);
+  box-shadow: inset 0 0 0 1px currentColor;
+  text-decoration: underline;
+}
+
 .region-device-row {
   display: grid;
   /* name | map exclusion | actions (tags now live on the garden) */
@@ -11602,4 +11616,49 @@ html.wheel-locked body {
   .day-detail-summary strong {
     font-size: 14px;
   }
+}
+
+/* Device page: that device's row of the monitoring calendar */
+.device-offline-section,
+.device-problems-section {
+  margin-top: 18px;
+}
+
+.device-offline-calendar {
+  display: grid;
+  gap: 12px;
+}
+
+.device-offline-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.device-offline-tools .preset-switch {
+  margin-right: auto;
+}
+
+.device-offline-count {
+  color: var(--ink-muted);
+  font-size: 12.5px;
+}
+
+.device-offline-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.device-offline-days .matrix-cell {
+  width: 38px;
+  flex: 0 0 38px;
+  height: 26px;
+  font-size: 10px;
+}
+
+.device-offline-hint {
+  margin: 0;
+  font-size: 12px;
 }

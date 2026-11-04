@@ -5,9 +5,7 @@ import {
   AlertTriangle,
   CalendarClock,
   CalendarDays,
-  CheckCircle2,
   ChevronLeft,
-  CircleDot,
   Cpu,
   MapPin,
   Wifi,
@@ -15,6 +13,7 @@ import {
 } from "lucide-react";
 import { DeviceAssociations } from "@/components/devices/device-associations";
 import { DeletedDeviceBanner } from "@/components/devices/deleted-device-banner";
+import { DeviceOfflineCalendar } from "@/components/devices/device-offline-calendar";
 import { SESSION_COOKIE, hasPermission, verifySessionToken } from "@/lib/auth";
 import {
   findSiblingDevices,
@@ -22,7 +21,13 @@ import {
 } from "@/lib/device-associations";
 import { withoutDeviceCodes } from "@/lib/display";
 import { getFirstAllowedPath } from "@/lib/navigation";
-import { getDevices, getTasks, getUsers } from "@/lib/repositories";
+import { computeBlackoutStats } from "@/lib/offline-day";
+import {
+  getDailyOfflineLevels,
+  getDevices,
+  getTasks,
+  getUsers,
+} from "@/lib/repositories";
 import { resolveTaskVisibilityScope } from "@/lib/task-visibility";
 import type {
   AppUser,
@@ -64,10 +69,13 @@ const doneLimit = 8;
 
 export default async function DeviceDetailsPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ from?: string }>;
 }) {
   const { id } = await params;
+  const { from } = await searchParams;
   const cookieStore = await cookies();
   const user = await verifySessionToken(cookieStore.get(SESSION_COOKIE)?.value);
   const homePath = getFirstAllowedPath(user);
@@ -76,10 +84,11 @@ export default async function DeviceDetailsPage({
   }
 
   const canDeleteDevice = hasPermission(user, "devices.delete");
-  const [allDevices, tasks, users] = await Promise.all([
+  const [allDevices, tasks, users, dailyLevels] = await Promise.all([
     getDevices({ includeDeleted: true }),
     getTasks(resolveTaskVisibilityScope(user)),
     getUsers(),
+    getDailyOfflineLevels(),
   ]);
   const device = allDevices.find((item) => item.id === id);
 
@@ -93,8 +102,18 @@ export default async function DeviceDetailsPage({
 
   const canEditDevice = hasPermission(user, "devices.edit");
   const canViewTasks = hasPermission(user, "tasks.view");
-  const backHref = canViewTasks ? "/tasks" : homePath;
-  const backLabel = canViewTasks ? "დავალებებზე დაბრუნება" : "უკან დაბრუნება";
+  // Opened from the device list → back goes to the list.
+  const fromDeviceList = from === "devices";
+  const backHref = fromDeviceList
+    ? "/devices/regions"
+    : canViewTasks
+      ? "/tasks"
+      : homePath;
+  const backLabel = fromDeviceList
+    ? "მოწყობილობებზე დაბრუნება"
+    : canViewTasks
+      ? "დავალებებზე დაბრუნება"
+      : "უკან დაბრუნება";
 
   const siblings = findSiblingDevices(device, devices);
   const manualNames = getExtraAssociations(device, siblings);
@@ -117,8 +136,20 @@ export default async function DeviceDetailsPage({
 
   const deviceMap = new Map(allDevices.map((item) => [item.id, item]));
   const userMap = new Map(users.map((item) => [item.id, item]));
-  const offlineEvents = device.statusEvents.filter(
-    (event) => event.status === "offline",
+
+  // Same rows as the monitoring calendar: the 20% "no data" rule counts
+  // every tracked device, then only this device's days go to the page.
+  const inOfflineCalendar = !device.deletedAt && !device.isExcluded;
+  const blackouts = computeBlackoutStats(
+    dailyLevels.levels,
+    new Set(
+      allDevices
+        .filter((item) => !item.deletedAt && !item.isExcluded)
+        .map((item) => item.id),
+    ),
+  );
+  const deviceLevels = dailyLevels.levels.filter(
+    (entry) => entry.deviceId === device.id,
   );
 
   const grouped: Record<TaskStatus, Task[]> = {
@@ -157,8 +188,7 @@ export default async function DeviceDetailsPage({
             </span>
           </div>
           <p className="device-head-sub">
-            ბოლო კონტაქტი {formatDateTime(device.lastSeenAt)} ·{" "}
-            {offlineEvents.length} offline შემთხვევა
+            ბოლო კონტაქტი {formatDateTime(device.lastSeenAt)}
           </p>
         </div>
 
@@ -260,91 +290,83 @@ export default async function DeviceDetailsPage({
         </div>
       </section>
 
-      <section className="content-grid two">
-        <div className="surface">
-          <div className="section-title">
-            <h2>პრობლემების ისტორია</h2>
-            <AlertTriangle size={20} />
-          </div>
-          <div className="timeline">
-            {device.problems.length ? (
-              device.problems.map((problem) => {
-                const displayTitle = withoutDeviceCodes(problem.title, [
-                  device.code,
-                ]);
-                const displayDescription = withoutDeviceCodes(
-                  problem.description,
-                  [device.code],
-                );
+      <section className="surface device-problems-section">
+        <div className="section-title">
+          <h2>პრობლემების ისტორია</h2>
+          <AlertTriangle size={20} />
+        </div>
+        <div className="timeline">
+          {device.problems.length ? (
+            device.problems.map((problem) => {
+              const displayTitle = withoutDeviceCodes(problem.title, [
+                device.code,
+              ]);
+              const displayDescription = withoutDeviceCodes(
+                problem.description,
+                [device.code],
+              );
 
-                return (
-                  <article
-                    key={problem.id}
-                    className={`timeline-item ${problem.status}`}
-                  >
-                    <span className="timeline-dot" />
-                    <div>
-                      <div className="timeline-head">
-                        <h3>{displayTitle}</h3>
-                        <span className={`status-pill ${problem.status}`}>
-                          {problemLabels[problem.status]}
-                        </span>
-                      </div>
-                      <p>{displayDescription}</p>
-                      <dl className="inline-meta">
-                        <div>
-                          <dt>დაფიქსირდა</dt>
-                          <dd>{formatDateTime(problem.reportedAt)}</dd>
-                        </div>
-                        {problem.plannedAt ? (
-                          <div>
-                            <dt>იგეგმება</dt>
-                            <dd>{formatDateTime(problem.plannedAt)}</dd>
-                          </div>
-                        ) : null}
-                        {problem.resolvedAt ? (
-                          <div>
-                            <dt>მოგვარდა</dt>
-                            <dd>{formatDateTime(problem.resolvedAt)}</dd>
-                          </div>
-                        ) : null}
-                      </dl>
+              return (
+                <article
+                  key={problem.id}
+                  className={`timeline-item ${problem.status}`}
+                >
+                  <span className="timeline-dot" />
+                  <div>
+                    <div className="timeline-head">
+                      <h3>{displayTitle}</h3>
+                      <span className={`status-pill ${problem.status}`}>
+                        {problemLabels[problem.status]}
+                      </span>
                     </div>
-                  </article>
-                );
-              })
-            ) : (
-              <p className="muted">პრობლემები არ ფიქსირდება.</p>
-            )}
-          </div>
+                    <p>{displayDescription}</p>
+                    <dl className="inline-meta">
+                      <div>
+                        <dt>დაფიქსირდა</dt>
+                        <dd>{formatDateTime(problem.reportedAt)}</dd>
+                      </div>
+                      {problem.plannedAt ? (
+                        <div>
+                          <dt>იგეგმება</dt>
+                          <dd>{formatDateTime(problem.plannedAt)}</dd>
+                        </div>
+                      ) : null}
+                      {problem.resolvedAt ? (
+                        <div>
+                          <dt>მოგვარდა</dt>
+                          <dd>{formatDateTime(problem.resolvedAt)}</dd>
+                        </div>
+                      ) : null}
+                    </dl>
+                  </div>
+                </article>
+              );
+            })
+          ) : (
+            <p className="muted">პრობლემები არ ფიქსირდება.</p>
+          )}
         </div>
+      </section>
 
-        <div className="surface">
-          <div className="section-title">
-            <h2>Offline მოვლენები</h2>
-            <CalendarClock size={20} />
-          </div>
-          <div className="event-list">
-            {offlineEvents.length ? (
-              offlineEvents.map((event) => (
-                <div key={event.id} className="event-row">
-                  {event.durationMinutes && event.durationMinutes > 90 ? (
-                    <AlertTriangle size={17} />
-                  ) : (
-                    <CircleDot size={17} />
-                  )}
-                  <span>{formatDateTime(event.happenedAt)}</span>
-                  <strong>{event.durationMinutes ?? 0} წთ</strong>
-                </div>
-              ))
-            ) : (
-              <div className="empty-state">
-                <CheckCircle2 size={22} />
-                <span>ბოლო პერიოდში offline არ დაფიქსირებულა.</span>
-              </div>
-            )}
-          </div>
+      <section className="surface device-offline-section">
+        <div className="section-title">
+          <h2>Offline მოვლენები</h2>
+          <CalendarClock size={20} />
         </div>
+        {inOfflineCalendar ? (
+          <DeviceOfflineCalendar
+            deviceName={device.name}
+            levels={deviceLevels}
+            coveredDays={dailyLevels.coveredDays}
+            blackouts={[...blackouts.entries()]}
+          />
+        ) : (
+          <p className="muted">
+            {device.deletedAt
+              ? "მოწყობილობა წაშლილია — მონიტორინგის კალენდარში არ ჩანს."
+              : "მოწყობილობა Offline აღრიცხვიდან გამორიცხულია — მონიტორინგის კალენდარში არ ჩანს."}
+          </p>
+        )}
       </section>
     </div>
   );
