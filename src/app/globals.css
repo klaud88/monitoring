@@ -8888,7 +8888,7 @@ a.task-card2:hover .task-card2-title {
 .matrix-scroll {
   overflow: auto;
   scrollbar-width: thin;
-  --matrix-left-w: 340px;
+  --matrix-left-w: 250px;
   --matrix-right-w: 84px;
 }
 
@@ -11729,8 +11729,13 @@ html.wheel-locked body {
 }
 
 @media (max-width: 760px) {
+  /* clear the fixed phone header (~56px) */
   .day-detail-backdrop {
-    padding-top: 16px;
+    padding-top: 72px;
+  }
+
+  .day-detail-modal {
+    max-height: calc(100dvh - 88px);
   }
 
   .day-detail-summary strong {
